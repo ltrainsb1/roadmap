@@ -1,0 +1,40 @@
+import type { Db, Filter } from 'mongodb';
+import type {
+  InviteDoc,
+  ResetTokenDoc,
+  SessionDoc,
+  TenantDoc,
+  UserDoc,
+  WebauthnChallengeDoc,
+} from './types.ts';
+
+/** The only pre-auth data access: lookups by secret hash or email, before a tenant is known. */
+export function unscoped(db: Db) {
+  const users = db.collection<UserDoc>('users');
+  const sessions = db.collection<SessionDoc>('sessions');
+  const invites = db.collection<InviteDoc>('invites');
+  const resets = db.collection<ResetTokenDoc>('resetTokens');
+  const challenges = db.collection<WebauthnChallengeDoc>('webauthnChallenges');
+  const tenants = db.collection<TenantDoc>('tenants');
+
+  return {
+    findUserByEmail: (email: string): Promise<UserDoc | null> => users.findOne({ email }),
+    findSessionByTokenHash: (h: string): Promise<SessionDoc | null> =>
+      sessions.findOne({ tokenHash: h }),
+    findInviteByTokenHash: (h: string): Promise<InviteDoc | null> =>
+      invites.findOne({ tokenHash: h }),
+    findResetByTokenHash: (h: string): Promise<ResetTokenDoc | null> =>
+      resets.findOne({ tokenHash: h }),
+    async insertChallenge(c: WebauthnChallengeDoc): Promise<void> {
+      await challenges.insertOne(c);
+    },
+    takeChallenge: (id: string): Promise<WebauthnChallengeDoc | null> =>
+      challenges.findOneAndDelete({ _id: id }),
+    // The passkeys field is added by a later task, so it is not on UserDoc yet.
+    findUserByCredentialId: (id: string): Promise<UserDoc | null> =>
+      users.findOne({ 'passkeys.credentialId': id } as Filter<UserDoc>),
+    async insertTenant(t: TenantDoc): Promise<void> {
+      await tenants.insertOne(t);
+    },
+  };
+}

@@ -59,6 +59,8 @@ export interface RoadmapDoc {
   archived: boolean;
   /** Bumped by every blocked-by change so concurrent changes in one roadmap conflict and run one after the other. */
   dependencyRevision?: number;
+  /** Bumped by every member removal and every assignment of members, so the two conflict and run one after the other. */
+  membershipRevision?: number;
   createdAt: Date;
 }
 

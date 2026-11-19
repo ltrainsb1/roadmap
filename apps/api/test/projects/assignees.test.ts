@@ -168,6 +168,26 @@ describe('membership cleanup', () => {
   });
 });
 
+describe('assignment racing a removal', () => {
+  test('Review focus 3: an assignment racing a removal never leaves a removed member assigned', async () => {
+    for (let round = 0; round < 8; round++) {
+      const w = await world();
+      const a = await w.item();
+      const [assigned, removed] = await Promise.all([
+        w.assign('A', a._id, [w.ids.C1]),
+        w.send('O', 'DELETE', `/api/roadmaps/${w.roadmap._id}/members/${w.ids.C1}`),
+      ]);
+      expect(removed.statusCode).toBe(204);
+      expect([200, 422]).toContain(assigned.statusCode);
+      if (assigned.statusCode === 422) expect(assigned.json()).toEqual({ error: 'not_a_member' });
+      expect((await w.stored(a._id))!.assigneeIds).not.toContain(w.ids.C1);
+      const roadmap = await t.db.collection('roadmaps').findOne({ _id: w.roadmap._id as never });
+      expect(roadmap).not.toBeNull();
+      expect(JSON.stringify(assigned.json())).not.toMatch(/Revision/);
+    }
+  });
+});
+
 describe('Tenant isolation', () => {
   test('Tenant isolation: another tenant gets 404', async () => {
     const w = await world();

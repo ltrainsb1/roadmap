@@ -129,6 +129,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
         if (before.role === 'owner') throw new HttpError(409, 'owner_immutable');
         const done = await s.collection('memberships').deleteOne({ _id: before._id, role: before.role });
         if (done.deleted === 0) throw new HttpError(409, 'conflict');
+        // Serialises this removal against an assignment of members: both write this document, so one retries.
+        await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { membershipRevision: 1 } });
         // Not an edit by a user, so no version bump and no per-item audit event; member.remove below covers it.
         await s.collection('projects').updateMany({ roadmapId, assigneeIds: userId }, { $pull: { assigneeIds: userId } });
         await audit.record(s, {

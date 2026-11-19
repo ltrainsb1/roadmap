@@ -37,6 +37,8 @@ export function registerAssignRoutes(app: FastifyInstance, deps: AssignRouteDeps
           const members = await s.collection('memberships').find({ roadmapId, userId: { $in: wanted } });
           if (members.length !== wanted.length) throw new HttpError(422, 'not_a_member');
         }
+        // Serialises this assignment against a member removal: both write this document, so one retries.
+        if (wanted.length > 0) await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { membershipRevision: 1 } });
         const same = wanted.length === current.assigneeIds.length && wanted.every((id) => current.assigneeIds.includes(id));
         if (same) return toProjectDto(current);
 

@@ -15,6 +15,8 @@ import { registerPasskeyRoutes } from './auth/passkey-routes.ts';
 import type { PasskeyVerifiers } from './auth/passkeys.ts';
 import { registerResetRoutes } from './auth/reset-routes.ts';
 import { registerAuthRoutes } from './auth/routes.ts';
+import { registerInviteRoutes } from './invites/routes.ts';
+import { registerRoadmapRoutes } from './roadmaps/routes.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { authPlugin } from './policy/hook.ts';
 
@@ -92,11 +94,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     ...(deps.webauthn ? { webauthn: deps.webauthn } : {}),
   });
 
+  const mailer = deps.mailer ?? createMailer(deps.config);
+  const now = deps.now ?? (() => new Date());
+
   registerResetRoutes(app, {
     db: deps.db,
     config: deps.config,
-    mailer: deps.mailer ?? createMailer(deps.config),
-    now: deps.now ?? (() => new Date()),
+    mailer,
+    now,
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+  });
+
+  registerRoadmapRoutes(app);
+
+  registerInviteRoutes(app, {
+    db: deps.db,
+    config: deps.config,
+    mailer,
+    now,
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   });
 

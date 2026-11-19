@@ -106,10 +106,16 @@ export const authPlugin = fp(
         .findOne({ roadmapId, userId: req.actor.userId });
       if (!membership) throw new HttpError(404, 'not_found');
       req.actor.role = membership.role;
-      const ctx = auth.ctx ? await auth.ctx(req) : undefined;
-      if (!can({ role: membership.role, action: auth.action, ...(ctx ? { ctx } : {}) })) {
-        throw new HttpError(403, 'forbidden');
-      }
+      // A route with ctx is judged in preHandler, where the body has been parsed and validated.
+      if (auth.ctx) return;
+      if (!can({ role: membership.role, action: auth.action })) throw new HttpError(403, 'forbidden');
+    });
+
+    app.addHook('preHandler', async (req) => {
+      const auth = req.routeOptions.config.auth;
+      if (auth?.level !== 'full' || !auth.action || !auth.ctx || !req.actor?.role) return;
+      const ctx = await auth.ctx(req);
+      if (!can({ role: req.actor.role, action: auth.action, ctx })) throw new HttpError(403, 'forbidden');
     });
   },
   { name: 'auth' },

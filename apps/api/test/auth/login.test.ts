@@ -260,7 +260,7 @@ describe('GET /api/me (FR-1)', () => {
     const rA = await t.seed.roadmap(tenantId, other._id, 'Alpha');
     await t.seed.member(tenantId, rA._id, u._id, 'contributor');
     const rX = await t.seed.roadmap(tenantId, u._id, 'Archived');
-    await s.collection('roadmaps').updateOne({ _id: rX._id }, { $set: { archivedAt: new Date() } });
+    await s.collection('roadmaps').updateOne({ _id: rX._id }, { $set: { archived: true } });
     await t.seed.roadmap(tenantId, other._id, 'Not mine');
     const { cookie, csrf } = await signInAs(t.app, t.db, u._id);
     const res = await t.app.inject({ url: '/api/me', headers: { cookie } });

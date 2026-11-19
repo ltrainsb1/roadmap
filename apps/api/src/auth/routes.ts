@@ -15,6 +15,7 @@ import type { UserDoc } from '../db/types.ts';
 import { unscoped } from '../db/unscoped.ts';
 import type { AuthConfig } from '../policy/hook.ts';
 import { HttpError } from '../errors.ts';
+import { listMemberships } from '../roadmaps/routes.ts';
 import { decryptSecret, encryptSecret } from './crypto.ts';
 import { assertNotLocked, isLocked, recordFailure, recordSuccess } from './lockout.ts';
 import { hashPassword, verifyPassword } from './passwords.ts';
@@ -277,18 +278,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const actor = req.actor!;
       const user = await actor.db.collection('users').findOne({ _id: actor.userId });
       if (!user) throw new HttpError(401, 'unauthenticated');
-      const memberships = await actor.db.collection('memberships').find({ userId: actor.userId });
-      const roadmaps = await actor.db
-        .collection('roadmaps')
-        .find({ _id: { $in: memberships.map((m) => m.roadmapId) } });
-      const live = new Map(roadmaps.filter((rm) => !rm.archivedAt).map((rm) => [rm._id, rm.name]));
       return {
         user: { id: user._id, email: user.email, name: user.name, timezone: user.timezone, ...factorsOf(user) },
         csrfToken: actor.csrfToken,
-        memberships: memberships
-          .filter((m) => live.has(m.roadmapId))
-          .map((m) => ({ roadmapId: m.roadmapId, roadmapName: live.get(m.roadmapId)!, role: m.role }))
-          .sort((a, b) => a.roadmapName.localeCompare(b.roadmapName)),
+        memberships: await listMemberships(actor.db, actor.userId),
       };
     },
   );

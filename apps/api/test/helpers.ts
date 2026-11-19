@@ -132,17 +132,20 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
       const r = await s.collection('roadmaps').insertOne({
         _id: uuidv7(),
         name,
+        description: '',
+        ownerId,
+        archived: false,
         createdAt: new Date(),
       });
       await s
         .collection('memberships')
-        .insertOne({ _id: uuidv7(), roadmapId: r._id, userId: ownerId, role: 'owner' });
+        .insertOne({ _id: uuidv7(), roadmapId: r._id, userId: ownerId, role: 'owner', createdAt: new Date() });
       return r;
     },
     member: (tenantId, roadmapId, userId, role) =>
       scoped(db, tenantId)
         .collection('memberships')
-        .insertOne({ _id: uuidv7(), roadmapId, userId, role }),
+        .insertOne({ _id: uuidv7(), roadmapId, userId, role, createdAt: new Date() }),
   };
 
   return {

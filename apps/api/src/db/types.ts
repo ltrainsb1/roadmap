@@ -46,14 +46,17 @@ export interface MembershipDoc {
   roadmapId: string;
   userId: string;
   role: Role;
+  createdAt: Date;
 }
 
 export interface RoadmapDoc {
   _id: string;
   tenantId: string;
   name: string;
-  /** Set when a roadmap is archived; archived roadmaps drop out of /api/me. */
-  archivedAt?: Date | null;
+  description: string;
+  ownerId: string;
+  /** Archived roadmaps drop out of /api/me and /api/roadmaps. */
+  archived: boolean;
   createdAt: Date;
 }
 
@@ -77,9 +80,15 @@ export interface SessionDoc {
 export interface InviteDoc {
   _id: string;
   tenantId: string;
+  roadmapId: string;
   email: string;
+  role: 'admin' | 'contributor';
   tokenHash: string;
+  invitedBy: string;
   expiresAt: Date;
+  /** Set by the atomic claim in accept; a claimed invite never works again unless the claim is released. */
+  acceptedAt: Date | null;
+  revokedAt: Date | null;
 }
 
 export interface ResetTokenDoc {

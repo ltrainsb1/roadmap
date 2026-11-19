@@ -124,7 +124,7 @@ describe('scoped', () => {
     const a = scoped(db, 'A').collection('users');
     await expect(a.updateMany({}, { $set: { tenantId: 'B' } })).rejects.toThrow(/tenantId/);
     await expect(a.updateMany({}, { $set: { tenantId: 'A' } })).rejects.toThrow(/tenantId/);
-    await expect(a.updateMany({}, { $rename: { name: 'tenantId' } } as never)).rejects.toThrow(/tenantId/);
+    await expect(a.updateMany({}, { $rename: { name: 'tenantId' } })).rejects.toThrow(/tenantId/);
     await expect(a.updateMany({}, { name: 'x' })).rejects.toThrow(/operators/);
     await expect(a.updateMany({ tenantId: 'B' }, { $set: { name: 'x' } })).rejects.toThrow(/tenantId/);
     expect(await a.findOne({ _id: 'u1' })).toMatchObject({ name: 'N', tenantId: 'A' });

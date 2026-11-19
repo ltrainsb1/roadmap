@@ -129,6 +129,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
         if (before.role === 'owner') throw new HttpError(409, 'owner_immutable');
         const done = await s.collection('memberships').deleteOne({ _id: before._id, role: before.role });
         if (done.deleted === 0) throw new HttpError(409, 'conflict');
+        // Not an edit by a user, so no version bump and no per-item audit event; member.remove below covers it.
+        await s.collection('projects').updateMany({ roadmapId, assigneeIds: userId }, { $pull: { assigneeIds: userId } });
         await audit.record(s, {
           action: 'member.remove',
           actor: { type: 'user', userId: actor.userId },
@@ -233,7 +235,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
       if (!roadmap) throw new HttpError(404, 'not_found');
       if (req.body.confirmName !== roadmap.name) throw new HttpError(422, 'confirm_mismatch');
       await actor.db.withTransaction(async (s) => {
-        // Later plans extend this with projects and the other data that hangs off a roadmap.
+        // Later plans extend this with the other data that hangs off a roadmap.
+        await s.collection('projects').deleteMany({ roadmapId });
         await s.collection('invites').deleteMany({ roadmapId });
         await s.collection('memberships').deleteMany({ roadmapId });
         await s.collection('roadmaps').deleteOne({ _id: roadmapId });

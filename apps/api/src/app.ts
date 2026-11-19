@@ -21,6 +21,7 @@ import { registerAuthRoutes } from './auth/routes.ts';
 import { registerInviteRoutes } from './invites/routes.ts';
 import { registerAuditRoutes } from './audit/routes.ts';
 import { registerMemberRoutes } from './members/routes.ts';
+import { registerAssignRoutes } from './projects/assign-routes.ts';
 import { registerProjectRoutes } from './projects/routes.ts';
 import { registerRoadmapRoutes } from './roadmaps/routes.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
@@ -135,6 +136,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerMemberRoutes(app, { now });
   registerAuditRoutes(app);
   registerProjectRoutes(app, { now, maxItems: deps.maxProjectItems ?? LIMITS.itemsPerRoadmap });
+
+  registerAssignRoutes(app, { now });
 
   app.get('/api/openapi.json', { config: { auth: { level: 'public' } } }, () => app.swagger());
 

@@ -554,3 +554,224 @@ test("a status change from the row does not hide another session's edit", async 
   await expect(panelOf(page, 'Alpha').getByLabel('Description', { exact: true })).toHaveValue('Theirs');
   await expect(panelOf(page, 'Alpha').getByLabel('Status', { exact: true })).toHaveValue('done');
 });
+
+interface Member {
+  userId: string;
+  name: string;
+  email: string;
+}
+const membersOf = async (call: Awaited<ReturnType<typeof apiAs>>, roadmapId: string) =>
+  (await call<{ members: Member[] }>('GET', `/api/roadmaps/${roadmapId}/members`)).members;
+
+test('FR-1.6: an Admin assigns two members and the row lists both names', async ({ page, browser }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const owner = await createSignedInUser(page, 'boss');
+  const id = await createRoadmap(page, 'Assign plan');
+  const second = await inviteAndJoin(page, browser, testInfo, 'Assign plan', 'pal', 'Contributor');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Build it');
+  await page.goto(projectUrl(id, itemId));
+
+  const panel = panelOf(page, 'Build it');
+  const group = panel.getByRole('group', { name: 'Assignees' });
+  await expect(group.getByRole('checkbox')).toHaveCount(2);
+  // The box ticks once the server has saved it.
+  await group.getByLabel(owner.name, { exact: true }).click();
+  await expect(group.getByLabel(owner.name, { exact: true })).toBeChecked();
+  await group.getByLabel(second.name, { exact: true }).click();
+  await expect(group.getByLabel(second.name, { exact: true })).toBeChecked();
+  await expect(projectRow(page, 'Build it')).toContainText(owner.name);
+  await expect(projectRow(page, 'Build it')).toContainText(second.name);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await page.reload();
+  const again = panelOf(page, 'Build it').getByRole('group', { name: 'Assignees' });
+  await expect(again.getByLabel(owner.name, { exact: true })).toBeChecked();
+  await expect(again.getByLabel(second.name, { exact: true })).toBeChecked();
+
+  await again.getByLabel(owner.name, { exact: true }).click();
+  await expect(projectRow(page, 'Build it')).not.toContainText(owner.name);
+  await expect(projectRow(page, 'Build it')).toContainText(second.name);
+  await second.context.close();
+});
+
+test('FR-1.4: an Admin adds a tag, a link and a milestone, saves, and a reload shows them', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'lister');
+  const id = await createRoadmap(page, 'List plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Ship it');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Ship it');
+
+  // The three validation messages.
+  await panel.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(panel.getByText('Enter a tag.', { exact: true })).toBeVisible();
+  await panel.getByLabel('Address', { exact: true }).fill('ftp://example.com');
+  await panel.getByRole('button', { name: 'Add link', exact: true }).click();
+  await expect(panel.getByText('Enter an address that starts with http:// or https://.', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Add milestone', exact: true }).click();
+  await expect(panel.getByText('Enter a name and a date.', { exact: true })).toBeVisible();
+
+  await panel.getByLabel('Add a tag', { exact: true }).fill('Urgent');
+  await panel.getByLabel('Add a tag', { exact: true }).press('Enter');
+  await expect(panel.getByText('Enter a tag.', { exact: true })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Remove tag urgent' })).toBeVisible();
+  await panel.getByLabel('Add a tag', { exact: true }).fill('later');
+  await panel.getByRole('button', { name: 'Add', exact: true }).click();
+  await panel.getByRole('button', { name: 'Remove tag later' }).click();
+  await expect(panel.getByRole('button', { name: 'Remove tag later' })).toHaveCount(0);
+
+  await panel.getByLabel('Label', { exact: true }).fill('Brief');
+  await panel.getByLabel('Address', { exact: true }).fill('https://example.com/brief');
+  await panel.getByRole('button', { name: 'Add link', exact: true }).click();
+  await expect(panel.getByRole('link', { name: 'Brief' })).toHaveAttribute('href', 'https://example.com/brief');
+  await expect(panel.getByText('Enter an address that starts with http:// or https://.', { exact: true })).toHaveCount(0);
+
+  await panel.getByLabel('Name', { exact: true }).fill('Beta');
+  await panel.getByLabel('Date', { exact: true }).fill('2027-05-01');
+  await panel.getByRole('button', { name: 'Add milestone', exact: true }).click();
+  await expect(panel.getByText('Beta')).toBeVisible();
+
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('status')).toHaveText('Saved.');
+
+  await page.reload();
+  const again = panelOf(page, 'Ship it');
+  await expect(again.getByRole('button', { name: 'Remove tag urgent' })).toBeVisible();
+  await expect(again.getByRole('link', { name: 'Brief' })).toBeVisible();
+  await expect(again.getByText('Beta')).toBeVisible();
+
+  // Kept entries keep their ids: removing the link and saving leaves the milestone as it was.
+  const before = await call<{ items: { id: string; milestones: { id: string }[] }[] }>('GET', `/api/roadmaps/${id}/projects`);
+  const milestoneId = before.items.find((i) => i.id === itemId)!.milestones[0]!.id;
+  await again.getByRole('button', { name: 'Remove link Brief' }).click();
+  await again.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(again.getByRole('status')).toHaveText('Saved.');
+  const after = await call<{ items: { id: string; milestones: { id: string }[]; links: unknown[] }[] }>('GET', `/api/roadmaps/${id}/projects`);
+  const stored = after.items.find((i) => i.id === itemId)!;
+  expect(stored.links).toEqual([]);
+  expect(stored.milestones[0]!.id).toBe(milestoneId);
+});
+
+test('FR-1.4: an Admin marks an item blocked by another, and the select does not offer the item itself, its parent or its children', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'blocker');
+  const id = await createRoadmap(page, 'Block plan');
+  const call = await apiAs(page);
+  const parent = await seedProject(call, id, 'Parent item');
+  const middle = await seedProject(call, id, 'Middle item', parent);
+  await seedProject(call, id, 'Child item', middle);
+  const other = await seedProject(call, id, 'Other item');
+  await page.goto(projectUrl(id, middle));
+  const panel = panelOf(page, 'Middle item');
+  const select = panel.getByLabel('Add an item this is blocked by', { exact: true });
+
+  await expect(select.locator('option')).toHaveCount(2);
+  const offered = (await select.locator('option').allInnerTexts()).map((t) => t.trim());
+  expect(offered).toContain('Other item');
+  for (const left of ['Middle item', 'Parent item', 'Child item']) expect(offered).not.toContain(left);
+
+  await select.selectOption(other);
+  await expect(panel.getByRole('button', { name: 'Remove Other item' })).toBeVisible();
+  await expect(select.locator('option')).toHaveCount(1);
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('status')).toHaveText('Saved.');
+
+  // The other item cannot now be blocked by this one: that would be a cycle.
+  await page.goto(projectUrl(id, other));
+  const otherOptions = panelOf(page, 'Other item').getByLabel('Add an item this is blocked by', { exact: true }).locator('option');
+  await expect(otherOptions.first()).toBeAttached();
+  expect((await otherOptions.allInnerTexts()).map((t) => t.trim())).not.toContain('Middle item');
+
+  await page.goto(projectUrl(id, middle));
+  await expect(panelOf(page, 'Middle item').getByRole('button', { name: 'Remove Other item' })).toBeVisible();
+  await panelOf(page, 'Middle item').getByRole('button', { name: 'Remove Other item' }).click();
+  await panelOf(page, 'Middle item').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panelOf(page, 'Middle item').getByRole('status')).toHaveText('Saved.');
+  await page.reload();
+  await expect(panelOf(page, 'Middle item').getByRole('button', { name: /^Remove / })).toHaveCount(0);
+});
+
+test('an item that starts before its blocker ends shows "Starts before {blocker} ends."', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'early');
+  const id = await createRoadmap(page, 'Early plan');
+  const call = await apiAs(page);
+  const blocker = await seedProject(call, id, 'Foundations');
+  const item = await seedProject(call, id, 'Walls');
+  await call('PATCH', `/api/roadmaps/${id}/projects/${blocker}`, { version: 1, startDate: '2027-01-01', endDate: '2027-06-01' });
+  await call('PATCH', `/api/roadmaps/${id}/projects/${item}`, { version: 1, startDate: '2027-05-01', endDate: '2027-07-01', blockedBy: [blocker] });
+  await page.goto(projectUrl(id, item));
+  await expect(panelOf(page, 'Walls').getByText('Starts before Foundations ends.', { exact: true })).toBeVisible();
+  await expect(projectRow(page, 'Walls').getByRole('img', { name: 'Has warnings' })).toBeVisible();
+});
+
+test('a Contributor sees assignees and the priority label read-only', async ({ page, browser }, testInfo) => {
+  await createSignedInUser(page, 'chief3');
+  const id = await createRoadmap(page, 'Read plan');
+  const guest = await inviteAndJoin(page, browser, testInfo, 'Read plan', 'helper3', 'Contributor');
+  const call = await apiAs(page);
+  const mine = await seedProject(call, id, 'Mine');
+  const helper = (await membersOf(call, id)).find((m) => m.email === guest.email)!;
+  await call('PUT', `/api/roadmaps/${id}/projects/${mine}/assignees`, { userIds: [helper.userId] });
+  await call('PUT', `/api/roadmaps/${id}/projects/${mine}/priority-label`, { label: 'P2' });
+
+  const p = guest.page;
+  await p.setViewportSize({ width: 1280, height: 800 });
+  await p.goto(projectUrl(id, mine));
+  const panel = panelOf(p, 'Mine');
+  // Assigned, so the text fields are editable; assignees and the label still are not.
+  await expect(panel.getByLabel('Title', { exact: true })).toBeEditable();
+  await expect(panel.getByRole('checkbox')).toHaveCount(0);
+  await expect(panel.getByRole('group', { name: 'Assignees' })).toContainText(helper.name);
+  await expect(panel.getByLabel('Priority label', { exact: true })).toBeDisabled();
+  await expect(panel.getByLabel('Priority label', { exact: true })).toHaveValue('P2');
+  await expectNoA11yViolations(p);
+  await guest.context.close();
+});
+
+test('with unsaved text in the panel, changing assignees and the priority label keeps the text, and Save succeeds and everything persists', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const owner = await createSignedInUser(page, 'mixer');
+  const id = await createRoadmap(page, 'Mix plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Alpha');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Alpha');
+  await panel.getByLabel('Title', { exact: true }).fill('Alpha, renamed');
+
+  await panel.getByRole('group', { name: 'Assignees' }).getByLabel(owner.name, { exact: true }).click();
+  await expect(projectRow(page, 'Alpha')).toContainText(owner.name);
+  await panel.getByLabel('Priority label', { exact: true }).selectOption('P3');
+  await expect(projectRow(page, 'Alpha')).toContainText('1 · P3');
+  await expect(panel.getByLabel('Title', { exact: true })).toHaveValue('Alpha, renamed');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panelOf(page, 'Alpha, renamed').getByRole('status')).toHaveText('Saved.');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await page.reload();
+  const again = panelOf(page, 'Alpha, renamed');
+  await expect(again.getByRole('group', { name: 'Assignees' }).getByLabel(owner.name, { exact: true })).toBeChecked();
+  await expect(again.getByLabel('Priority label', { exact: true })).toHaveValue('P3');
+});
+
+test('tags, links, milestones and blocked by count as unsaved edits and are asked about before leaving', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'guard2');
+  const id = await createRoadmap(page, 'Guard2 plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Alpha');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Alpha');
+  await panel.getByLabel('Add a tag', { exact: true }).fill('x');
+  await panel.getByRole('button', { name: 'Add', exact: true }).click();
+  await panel.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Discard your unsaved changes to Alpha?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Keep editing' }).click();
+  await panel.getByRole('button', { name: 'Remove tag x' }).click();
+  await panel.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page).toHaveURL(`/r/${id}/projects`);
+});

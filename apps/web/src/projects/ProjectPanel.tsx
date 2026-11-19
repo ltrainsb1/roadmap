@@ -1,9 +1,11 @@
 import {
   can,
   LIMITS,
+  PRIORITY_LABELS,
   PROJECT_STATUSES,
   projectWarnings,
   updateProjectRequestSchema,
+  type PriorityLabel,
   type Project,
   type ProjectStatus,
   type Role,
@@ -18,8 +20,9 @@ import { SelectField } from '../ui/SelectField.tsx';
 import { useFocusFirstError } from '../ui/useFocusFirstError.ts';
 import { isAssigned, useUpdateProject } from './useProjects.ts';
 import { levelName, statusName, warningText } from './names.ts';
+import { PanelLists, type ListValues, type MemberName } from './PanelLists.tsx';
 
-interface FormValues {
+interface FormValues extends ListValues {
   title: string;
   description: string;
   status: ProjectStatus;
@@ -33,7 +36,22 @@ const valuesOf = (item: Project): FormValues => ({
   status: item.status,
   startDate: item.startDate ?? '',
   endDate: item.endDate ?? '',
+  tags: item.tags,
+  links: item.links,
+  milestones: item.milestones,
+  blockedBy: item.blockedBy,
 });
+
+/** A change this browser saved through a route of its own (the row's status pill, assignees, the priority label). */
+export interface OwnChange {
+  id: string;
+  /** The item's version after the change. */
+  version: number;
+  /** Set only by a status change, whose new value the form takes; the others show their value straight from the list. */
+  status?: ProjectStatus;
+  /** Counts up with every change, so the panel notices each one. */
+  n: number;
+}
 
 interface PanelProps {
   roadmapId: string;
@@ -48,8 +66,14 @@ interface PanelProps {
   onClose: () => void;
   /** Refetches the list and gives back the fresh item, or undefined if it is gone. */
   onReload: () => Promise<Project | undefined>;
-  /** The newest save of this item made from the row's status pill, if any; the form adopts it so Save does not conflict with it. */
-  ownStatusChange: { id: string; version: number; status: ProjectStatus; n: number } | undefined;
+  /** The roadmap's members, to assign. */
+  members: readonly MemberName[];
+  /** The newest save of this item made outside the form, if any; the form adopts its version so Save does not conflict with it. */
+  ownChange: OwnChange | undefined;
+  /** Ticks or unticks one member; saves at once and the page shows any error. */
+  onToggleAssignee: (itemId: string, userId: string, assigned: boolean) => void;
+  /** Sets the priority label; saves at once and the page shows any error. */
+  onSetPriorityLabel: (itemId: string, label: PriorityLabel | null) => void;
   /** Tells the page whether the form has changes that are not saved. */
   onDirtyChange: (dirty: boolean) => void;
 }
@@ -59,7 +83,7 @@ interface PanelProps {
  * opens (the page keys it by item id) and is not touched by later refetches, so nothing typed is lost. Save
  * sends the version the form was started from, so a change made by someone else is a conflict, never overwritten.
  */
-export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onClose, onReload, ownStatusChange, onDirtyChange }: PanelProps) {
+export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onClose, onReload, members, ownChange, onToggleAssignee, onSetPriorityLabel, onDirtyChange }: PanelProps) {
   const update = useUpdateProject(roadmapId);
   const [values, setValues] = useState(() => valuesOf(item));
   // What the form was last started or saved from, to tell whether anything is unsaved.
@@ -81,25 +105,28 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
   // Opening the panel (or a different item) moves focus into it.
   useEffect(() => heading.current?.focus(), []);
 
-  const dirty = (Object.keys(values) as (keyof FormValues)[]).some((k) => values[k] !== base[k]);
+  const dirty = JSON.stringify(values) !== JSON.stringify(base);
   useEffect(() => {
     onDirtyChange(dirty);
     return () => onDirtyChange(false);
   }, [dirty, onDirtyChange]);
 
-  // This browser's own change from the row pill: take its version and status, and keep everything else typed.
-  // Changes made elsewhere are deliberately not adopted, so Save still reports them as a conflict.
-  const adopted = useRef(ownStatusChange?.n);
+  // This browser's own change made outside the form: take its version, and its status if it set one, and keep
+  // everything else typed. Changes made elsewhere are deliberately not adopted, so Save still reports them as a conflict.
+  const adopted = useRef(ownChange?.n);
   useEffect(() => {
-    if (!ownStatusChange || ownStatusChange.n === adopted.current) return;
-    adopted.current = ownStatusChange.n;
-    if (ownStatusChange.id !== item.id) return;
+    if (!ownChange || ownChange.n === adopted.current) return;
+    adopted.current = ownChange.n;
+    if (ownChange.id !== item.id) return;
     // Only when nothing else landed in between: otherwise the form would save against a version it never saw.
-    if (ownStatusChange.version !== version + 1) return;
-    setVersion(ownStatusChange.version);
-    setValues((v) => ({ ...v, status: ownStatusChange.status }));
-    setBase((b) => ({ ...b, status: ownStatusChange.status }));
-  }, [ownStatusChange, item.id, version]);
+    if (ownChange.version !== version + 1) return;
+    setVersion(ownChange.version);
+    const { status } = ownChange;
+    if (status) {
+      setValues((v) => ({ ...v, status }));
+      setBase((b) => ({ ...b, status }));
+    }
+  }, [ownChange, item.id, version]);
 
   // After a reload the Reload button is gone, so focus goes to the first field.
   useEffect(() => {
@@ -129,6 +156,11 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
       status: values.status,
       startDate: values.startDate || null,
       endDate: values.endDate || null,
+      tags: values.tags,
+      // Kept entries go back with their ids, new ones without.
+      links: values.links.map(({ id: linkId, label, url }) => ({ ...(linkId && { id: linkId }), label, url })),
+      milestones: values.milestones.map(({ id: milestoneId, name, date }) => ({ ...(milestoneId && { id: milestoneId }), name, date })),
+      blockedBy: values.blockedBy,
     };
     const checked = updateProjectRequestSchema.safeParse(body);
     if (!checked.success) {
@@ -178,6 +210,8 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
   };
 
   const id = (name: string) => `panel-${item.id}-${name}`;
+  const canSetPriority = can({ role, action: 'project.setPriority' });
+  const canAssign = can({ role, action: 'project.assign' });
 
   return (
     <section className="project-panel" aria-labelledby={headingId} onKeyDown={onKeyDown}>
@@ -269,6 +303,31 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
           readOnly={!editable}
           error={fieldErrors.endDate}
           onChange={(e) => change({ endDate: e.target.value })}
+        />
+        <SelectField
+          id={id('label')}
+          label="Priority label"
+          value={item.priorityLabel ?? ''}
+          disabled={!canSetPriority}
+          onChange={(e) => onSetPriorityLabel(item.id, (e.target.value || null) as PriorityLabel | null)}
+        >
+          <option value="">None</option>
+          {PRIORITY_LABELS.map((label) => (
+            <option key={label} value={label}>
+              {label}
+            </option>
+          ))}
+        </SelectField>
+        <PanelLists
+          idPrefix={`panel-${item.id}`}
+          item={item}
+          byId={byId}
+          members={members}
+          values={values}
+          onChange={change}
+          editable={editable}
+          canAssign={canAssign}
+          onToggleAssignee={(userId, assigned) => onToggleAssignee(item.id, userId, assigned)}
         />
         <div className="panel-actions">
           {editable && (

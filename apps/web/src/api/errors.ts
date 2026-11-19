@@ -44,6 +44,12 @@ export function errorMessage(code: string, ctx: ErrorContext = {}): string {
       return "A sub-task can't have items under it.";
     case 'parent_archived':
       return 'Unarchive the item above this one first.';
+    case 'dependency_cycle':
+      return 'These items would end up blocked by each other.';
+    case 'order_stale':
+      return 'The list changed while you were reordering. Try again.';
+    case 'unknown_item':
+      return 'That item no longer exists. Reload and try again.';
     case 'too_many_items':
       return 'This roadmap has reached 2,000 items.';
     case 'confirm_mismatch':

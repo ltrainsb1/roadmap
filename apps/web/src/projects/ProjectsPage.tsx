@@ -1,4 +1,4 @@
-import { can, type Project, type ProjectList, type ProjectStatus } from '@roadmap/shared';
+import { can, type PriorityLabel, type Project, type ProjectList, type ProjectStatus } from '@roadmap/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -17,8 +17,20 @@ import {
   useCollapsed,
   type AddTarget,
 } from './ProjectTree.tsx';
-import { ProjectPanel } from './ProjectPanel.tsx';
-import { isAssigned, PROJECTS_KEY, useCreateProject, useProjects, useUpdateProject } from './useProjects.ts';
+import { ProjectPanel, type OwnChange } from './ProjectPanel.tsx';
+import {
+  isAssigned,
+  PROJECTS_KEY,
+  useArchive,
+  useCreateProject,
+  useDeleteProject,
+  useProjects,
+  useReorder,
+  useSetAssignees,
+  useSetPriorityLabel,
+  useUnarchive,
+  useUpdateProject,
+} from './useProjects.ts';
 
 export function ProjectsPage() {
   const { roadmapId, role } = useRoadmap();
@@ -29,21 +41,40 @@ export function ProjectsPage() {
   const members = useMembers(roadmapId);
   const create = useCreateProject(roadmapId);
   const update = useUpdateProject(roadmapId);
+  const setAssignees = useSetAssignees(roadmapId);
+  const setPriorityLabel = useSetPriorityLabel(roadmapId);
+  const reorder = useReorder(roadmapId);
+  const archive = useArchive(roadmapId);
+  const unarchive = useUnarchive(roadmapId);
+  const deleteItem = useDeleteProject(roadmapId);
   const queryClient = useQueryClient();
   const { collapsed, toggle, expand } = useCollapsed(roadmapId);
   const [adding, setAdding] = useState<AddTarget | null>(null);
-  const [statusError, setStatusError] = useState<string | undefined>();
-  // The latest save from a row's status pill, which the open panel adopts so its own Save does not conflict with it.
-  const [ownStatusChange, setOwnStatusChange] = useState<{ id: string; version: number; status: ProjectStatus; n: number }>();
+  // The message for the last failed action from a row or from a panel control that saves on change.
+  const [actionError, setActionError] = useState<string | undefined>();
+  // What the last archive or unarchive did, in a live region.
+  const [notice, setNotice] = useState('');
+  // The item the Delete dialog is open for, and why the last attempt failed.
+  const [deleting, setDeleting] = useState<Project | null>(null);
+  const [deleteError, setDeleteError] = useState<string | undefined>();
+  // Counts up when focus should go to the page heading, because the item that held it is gone.
+  const [headingFocus, setHeadingFocus] = useState(0);
+  // The latest save made outside the panel's form (status pill, assignees, priority label), which the open panel
+  // adopts so its own Save does not conflict with it.
+  const [ownChange, setOwnChange] = useState<OwnChange>();
   // Whether the open panel has unsaved edits, and what to do once the person agrees to discard them.
   const dirty = useRef(false);
   const onDirtyChange = useCallback((value: boolean) => void (dirty.current = value), []);
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
-  // Status changes run one after another, each starting from the newest saved version of its item.
+  // Saves made outside the panel's form run one after another, each starting from the newest saved state of its item.
   const statusQueue = useRef<Promise<void>>(Promise.resolve());
   const heading = useRef<HTMLHeadingElement>(null);
   // Set when the panel is closed on purpose: once the list is back in view, focus returns to that item's title.
   const returnFocusTo = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (headingFocus > 0) heading.current?.focus();
+  }, [headingFocus]);
 
   const shown = useMemo(() => projects.items.filter((i) => !i.archived), [projects.items]);
   const memberNames = useMemo(() => new Map((members.data?.members ?? []).map((m) => [m.userId, m.name])), [members.data]);
@@ -88,22 +119,99 @@ export function ProjectsPage() {
     returnFocusTo.current = null;
   }, [hasPanel]);
 
-  const changeStatus = (item: Project, status: ProjectStatus) => {
+  /**
+   * Runs one of this browser's own saves for an item after the ones before it, from the item as the list last
+   * saw it, and tells the open panel about it. `save` gives back nothing when there is nothing to change.
+   */
+  const runOwnChange = (itemId: string, save: (current: Project) => Promise<Project> | undefined, status = false) => {
     statusQueue.current = statusQueue.current.then(async () => {
-      const list = queryClient.getQueryData<ProjectList>(PROJECTS_KEY(roadmapId));
-      const current = list?.items.find((i) => i.id === item.id) ?? item;
-      if (status === current.status) return;
+      const current = queryClient.getQueryData<ProjectList>(PROJECTS_KEY(roadmapId))?.items.find((i) => i.id === itemId);
+      if (!current) return;
       try {
-        const saved = await update.mutateAsync({ projectId: item.id, body: { version: current.version, status } });
-        setStatusError(undefined);
-        setOwnStatusChange((last) => ({ id: saved.id, version: saved.version, status: saved.status, n: (last?.n ?? 0) + 1 }));
+        const saved = await save(current);
+        if (!saved) return;
+        setActionError(undefined);
+        setOwnChange((last) => ({ id: saved.id, version: saved.version, ...(status && { status: saved.status }), n: (last?.n ?? 0) + 1 }));
       } catch (err) {
-        setStatusError(messageFor(err));
+        setActionError(messageFor(err));
         // Someone else changed it first: the list shows what they saved.
         if (errorCode(err) === 'conflict') await projects.refetch();
       }
     });
   };
+
+  const changeStatus = (item: Project, status: ProjectStatus) =>
+    runOwnChange(
+      item.id,
+      (current) => (status === current.status ? undefined : update.mutateAsync({ projectId: item.id, body: { version: current.version, status } })),
+      true,
+    );
+
+  const toggleAssignee = (itemId: string, userId: string, assigned: boolean) =>
+    runOwnChange(itemId, (current) => {
+      const ids = current.assigneeIds.filter((id) => id !== userId);
+      if (assigned) ids.push(userId);
+      return ids.length === current.assigneeIds.length && ids.every((id) => current.assigneeIds.includes(id))
+        ? undefined
+        : setAssignees.mutateAsync({ projectId: itemId, userIds: ids });
+    });
+
+  const changePriorityLabel = (itemId: string, label: PriorityLabel | null) =>
+    runOwnChange(itemId, (current) => (current.priorityLabel === label ? undefined : setPriorityLabel.mutateAsync({ projectId: itemId, label })));
+
+  const reorderItems = (parentId: string | null, orderedIds: string[]) => {
+    setNotice('');
+    setActionError(undefined);
+    reorder.mutate({ parentId, orderedIds }, { onError: (err) => setActionError(messageFor(err)) });
+  };
+
+  /** Whether the open panel is for `item` or something under it, so it goes when `item` does. */
+  const panelIsUnder = (item: Project) => selected !== undefined && (selected.id === item.id || selected.path.includes(item.id));
+  /** Runs `action` now, or after the person agrees to discard unsaved edits in the panel `item` takes with it. */
+  const unlessDirtyUnder = (item: Project, action: () => void) => (panelIsUnder(item) ? unlessDirty(action) : action());
+  const leavePanelOf = (item: Project) => {
+    if (panelIsUnder(item)) void navigate(listPath);
+    setHeadingFocus((n) => n + 1);
+  };
+
+  const archiveItem = (item: Project) =>
+    unlessDirtyUnder(item, () => {
+      setActionError(undefined);
+      archive.mutate(item.id, {
+        onSuccess: () => {
+          setNotice(`Archived ${item.title}.`);
+          leavePanelOf(item);
+        },
+        onError: (err) => setActionError(messageFor(err)),
+      });
+    });
+
+  const unarchiveItem = (item: Project) => {
+    setActionError(undefined);
+    unarchive.mutate(item.id, {
+      onSuccess: () => setNotice(`Unarchived ${item.title}.`),
+      onError: (err) => setActionError(messageFor(err)),
+    });
+  };
+
+  const askDelete = (item: Project) =>
+    unlessDirtyUnder(item, () => {
+      setDeleteError(undefined);
+      setDeleting(item);
+    });
+  const confirmDelete = () => {
+    const item = deleting;
+    if (!item) return;
+    deleteItem.mutate(item.id, {
+      onSuccess: () => {
+        setDeleting(null);
+        setNotice('');
+        leavePanelOf(item);
+      },
+      onError: (err) => setDeleteError(messageFor(err)),
+    });
+  };
+  const underDeleting = deleting ? projects.items.filter((i) => i.path.includes(deleting.id)).length : 0;
 
   const reloadItem = async (): Promise<Project | undefined> => {
     const fresh = await projects.refetch({ throwOnError: true });
@@ -134,7 +242,10 @@ export function ProjectsPage() {
 
       {!hasList && projects.isError && <Alert>{messageFor(projects.error)}</Alert>}
       {!hasList && projects.isPending && <p role="status">Loading</p>}
-      {statusError && <Alert>{statusError}</Alert>}
+      {actionError && <Alert>{actionError}</Alert>}
+      <div role="status" aria-live="polite" className="notice">
+        {notice}
+      </div>
       {refreshFailed && (
         <Alert>
           <p>Couldn't refresh the list. Try again.</p>
@@ -158,6 +269,10 @@ export function ProjectsPage() {
                 memberNames={memberNames}
                 onChangeStatus={changeStatus}
                 onOpen={openItem}
+                onReorder={reorderItems}
+                onArchive={archiveItem}
+                onUnarchive={unarchiveItem}
+                onDelete={askDelete}
                 selectedId={selected?.id}
                 collapsed={collapsed}
                 onToggle={toggle}
@@ -183,7 +298,10 @@ export function ProjectsPage() {
               listPath={listPath}
               onClose={closePanel}
               onReload={reloadItem}
-              ownStatusChange={ownStatusChange}
+              members={members.data?.members ?? []}
+              ownChange={ownChange}
+              onToggleAssignee={toggleAssignee}
+              onSetPriorityLabel={changePriorityLabel}
               onDirtyChange={onDirtyChange}
             />
           )}
@@ -197,6 +315,16 @@ export function ProjectsPage() {
           )}
         </div>
       )}
+      <ConfirmDialog
+        open={deleting !== null}
+        title={`Delete ${deleting?.title ?? 'this item'}?`}
+        confirmLabel="Delete"
+        error={deleteError}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleting(null)}
+      >
+        <p>{underDeleting > 0 ? `This also deletes the ${underDeleting} ${underDeleting === 1 ? 'item' : 'items'} under it. This can't be undone.` : "This can't be undone."}</p>
+      </ConfirmDialog>
       <ConfirmDialog
         open={pendingDiscard !== null}
         title={`Discard your unsaved changes to ${selected?.title ?? 'this item'}?`}

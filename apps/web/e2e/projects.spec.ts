@@ -60,41 +60,37 @@ test('FR-1.2: an Owner adds a project, a sub-project, a task and a sub-task in p
   await expect(page.getByText('Press Enter to save')).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // A Sub-task's menu holds only "Open".
+  // A Sub-task's menu has no add item.
   const menuButton = page.getByRole('button', { name: 'Actions for Delta' });
   await menuButton.click();
   await expect(menuButton).toHaveAttribute('aria-haspopup', 'menu');
   await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.getByRole('menuitem')).toHaveText(['Open']);
+  await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Move up', 'Move down', 'Archive', 'Delete']);
   await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(menuButton).toBeFocused();
 
-  // A two-item menu: ArrowDown on the closed button opens it, and the arrows, End and Home move between items.
+  // ArrowDown on the closed button opens the menu; the arrows, End and Home move between items and wrap round.
   const gamma = page.getByRole('button', { name: 'Actions for Gamma' });
   await gamma.focus();
   await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Add sub-task', 'Move up', 'Move down', 'Archive', 'Delete']);
   await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.getByRole('menuitem', { name: 'Add sub-task' })).toBeFocused();
-  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowUp');
   await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
   await page.keyboard.press('ArrowUp');
-  await expect(page.getByRole('menuitem', { name: 'Add sub-task' })).toBeFocused();
-  await page.keyboard.press('ArrowUp');
+  await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
   await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
   await page.keyboard.press('End');
-  await expect(page.getByRole('menuitem', { name: 'Add sub-task' })).toBeFocused();
+  await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeFocused();
   await page.keyboard.press('Home');
   await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(gamma).toBeFocused();
-
-  // A project's menu offers Open, then the add item for its level.
-  await page.getByRole('button', { name: 'Actions for Gamma' }).click();
-  await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Add sub-task']);
-  await page.keyboard.press('Escape');
 
   // Choosing "Open" shows the panel placeholder for that item.
   await page.getByRole('button', { name: 'Actions for Beta' }).click();
@@ -325,8 +321,8 @@ test('a Contributor sees the add item only on items they are assigned to or that
     await p.keyboard.press('Escape');
     return names;
   };
-  expect(await items('Mine')).toEqual(['Open', 'Add sub-project']);
-  expect(await items('Under mine')).toEqual(['Open', 'Add task']);
+  expect(await items('Mine')).toEqual(['Open', 'Add sub-project', 'Archive', 'Delete']);
+  expect(await items('Under mine')).toEqual(['Open', 'Add task', 'Archive', 'Delete']);
   expect(await items('Theirs')).toEqual(['Open']);
   expect(await items('Under theirs')).toEqual(['Open']);
   await guest.context.close();

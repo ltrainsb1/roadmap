@@ -5,6 +5,8 @@ export interface MenuItem {
   onSelect: () => void;
   /** When set, the entry is a radio item and this says whether it is the current choice. */
   checked?: boolean;
+  /** The entry stays in the list and keeps focus but does nothing, such as "Move up" on the first item. */
+  disabled?: boolean;
 }
 
 interface MenuProps {
@@ -106,9 +108,11 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
               type="button"
               role={item.checked === undefined ? 'menuitem' : 'menuitemradio'}
               aria-checked={item.checked}
+              aria-disabled={item.disabled || undefined}
               tabIndex={-1}
               className="menu-item"
               onClick={() => {
+                if (item.disabled) return;
                 closeAndFocusButton();
                 item.onSelect();
               }}

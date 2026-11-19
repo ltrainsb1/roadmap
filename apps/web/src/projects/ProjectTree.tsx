@@ -1,5 +1,20 @@
 import { buildTree, can, PROJECT_STATUSES, projectWarnings, type Project, type ProjectStatus, type Role, type TreeNode } from '@roadmap/shared';
-import { Fragment, useCallback, useState, type ReactNode } from 'react';
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type Announcements,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragStartEvent,
+  type KeyboardCoordinateGetter,
+} from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { Fragment, useCallback, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
 import { AddItemRow } from './AddItemRow.tsx';
@@ -49,6 +64,75 @@ export function useCollapsed(roadmapId: string) {
   return { collapsed, toggle, expand };
 }
 
+const TOP_GROUP = 'top';
+
+/** The siblings an item is sorted among: a drop is only ever valid inside its own group. */
+const groupOf = (entry: { data: { current?: { sortable?: { containerId?: unknown } } } } | null | undefined) =>
+  entry?.data.current?.sortable?.containerId;
+
+const sameGroupOnly: CollisionDetection = (args) => {
+  const group = groupOf(args.active);
+  return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((c) => groupOf(c) === group) });
+};
+
+/** Keyboard moves look only at rows of the group the picked-up row belongs to. */
+const sameGroupKeyboard: KeyboardCoordinateGetter = (event, args) => {
+  const { context } = args;
+  const group = groupOf(context.active);
+  const containers = context.droppableContainers;
+  return sortableKeyboardCoordinates(event, {
+    ...args,
+    context: {
+      ...context,
+      droppableContainers: {
+        get: (id: string | number) => containers.get(id),
+        getEnabled: () => containers.getEnabled().filter((c) => groupOf(c) === group),
+      } as typeof containers,
+    },
+  });
+};
+
+const dragHandleIcon = (
+  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+    <circle cx="5.5" cy="4" r="1.25" fill="currentColor" />
+    <circle cx="10.5" cy="4" r="1.25" fill="currentColor" />
+    <circle cx="5.5" cy="8" r="1.25" fill="currentColor" />
+    <circle cx="10.5" cy="8" r="1.25" fill="currentColor" />
+    <circle cx="5.5" cy="12" r="1.25" fill="currentColor" />
+    <circle cx="10.5" cy="12" r="1.25" fill="currentColor" />
+  </svg>
+);
+
+interface SortableRowProps {
+  id: string;
+  title: string;
+  className: string;
+  /** Whether this row can be dragged: the person may set priority. */
+  draggable: boolean;
+  /** Gets the drag handle, or null when the row cannot be dragged, to put in the row's last cell. */
+  children: (handle: ReactNode) => ReactNode;
+}
+
+/** A table row that can be picked up by its handle. The handle is the only part that starts a drag. */
+function SortableRow({ id, title, className, draggable, children }: SortableRowProps) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !draggable });
+  const handle = draggable ? (
+    <button ref={setActivatorNodeRef} type="button" className="icon-btn drag-handle" aria-label={`Reorder ${title}`} {...attributes} {...listeners}>
+      {dragHandleIcon}
+    </button>
+  ) : null;
+  return (
+    <tr
+      ref={setNodeRef}
+      className={isDragging ? `${className} dragging` : className}
+      // Set through the DOM's style API by React, which the page's style policy allows.
+      style={{ transform: transform ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)` : undefined, transition }}
+    >
+      {children(handle)}
+    </tr>
+  );
+}
+
 function WarningIcon({ texts }: { texts: string[] }) {
   return (
     <span className="warning" title={texts.join(' ')}>
@@ -89,17 +173,76 @@ interface TreeProps {
   onChangeStatus: (item: Project, status: ProjectStatus) => void;
   /** Opens an item's panel; the page may ask about unsaved edits first. */
   onOpen: (itemId: string) => void;
+  /** Saves the order of the non-archived items under `parentId` (null for the top level); the page shows any error. */
+  onReorder: (parentId: string | null, orderedIds: string[]) => void;
+  /** The page asks about unsaved edits, then archives, unarchives or asks to delete. */
+  onArchive: (item: Project) => void;
+  onUnarchive: (item: Project) => void;
+  onDelete: (item: Project) => void;
 }
 
 export function ProjectTree(props: TreeProps) {
-  const { roadmapId, role, myId, items, byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus, onOpen } = props;
+  const { roadmapId, role, myId, items, byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus, onOpen, onReorder, onArchive, onUnarchive, onDelete } = props;
   const tree = buildTree(items);
+  const canReorder = can({ role, action: 'project.setPriority' });
+  // The row being dragged shows without its children, so it moves as one line.
+  const [dragging, setDragging] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sameGroupKeyboard }),
+  );
 
-  const menuItems = (item: Project): MenuItem[] => {
+  const titleOf = (id: string | number) => byId.get(String(id))?.title ?? 'item';
+  const placeOf = (entry: { data: { current?: { sortable?: { index: number; items: unknown[] } } } } | null) => {
+    const sortable = entry?.data.current?.sortable;
+    return sortable ? { n: sortable.index + 1, total: sortable.items.length } : null;
+  };
+  // The first "over" comes with the pick-up and is the row's own place; it would replace "Picked up".
+  const moved = useRef(false);
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => {
+      moved.current = false;
+      return `Picked up ${titleOf(active.id)}.`;
+    },
+    onDragOver: ({ active, over }) => {
+      if (over && over.id !== active.id) moved.current = true;
+      if (!moved.current) return undefined;
+      const place = placeOf(over);
+      return place ? `Moved ${titleOf(active.id)} to position ${place.n} of ${place.total}.` : undefined;
+    },
+    onDragEnd: ({ active, over }) => {
+      const place = placeOf(over);
+      return place ? `Dropped ${titleOf(active.id)} at position ${place.n} of ${place.total}.` : undefined;
+    },
+    onDragCancel: () => 'Reordering cancelled.',
+  };
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    setDragging(null);
+    const from = active.data.current?.sortable as { containerId: string; index: number; items: string[] } | undefined;
+    const to = over?.data.current?.sortable as { containerId: string; index: number } | undefined;
+    if (!from || !to || from.containerId !== to.containerId || from.index === to.index) return;
+    onReorder(from.containerId === TOP_GROUP ? null : from.containerId, arrayMove(from.items, from.index, to.index));
+  };
+
+  const menuItems = (item: Project, group: TreeNode[]): MenuItem[] => {
     const entries: MenuItem[] = [{ label: 'Open', onSelect: () => onOpen(item.id) }];
     const add = addChildLabel(item.depth);
-    if (add && can({ role, action: 'project.create', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
+    if (!item.archived && add && can({ role, action: 'project.create', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
       entries.push({ label: add, onSelect: () => onStartAdd(item.id) });
+    }
+    if (!item.archived && canReorder) {
+      const ids = group.filter((n) => !n.item.archived).map((n) => n.item.id);
+      const at = ids.indexOf(item.id);
+      const move = (by: number) => () => onReorder(item.parentId, arrayMove(ids, at, at + by));
+      entries.push({ label: 'Move up', onSelect: move(-1), disabled: at <= 0 }, { label: 'Move down', onSelect: move(1), disabled: at >= ids.length - 1 });
+    }
+    if (can({ role, action: 'project.delete', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
+      entries.push(
+        item.archived ? { label: 'Unarchive', onSelect: () => onUnarchive(item) } : { label: 'Archive', onSelect: () => onArchive(item) },
+        { label: 'Delete', onSelect: () => onDelete(item) },
+      );
     }
     return entries;
   };
@@ -109,14 +252,28 @@ export function ProjectTree(props: TreeProps) {
       <AddItemRow key={`add-${parentId ?? 'top'}`} depth={depth} onAdd={(title) => onAdd(parentId, title)} onCancel={onCancelAdd} />
     );
 
-  const renderNode = ({ item, children, position }: TreeNode): ReactNode => {
+  /** One sibling group: rows can be reordered among themselves and nowhere else. */
+  const renderGroup = (parentId: string | null, nodes: TreeNode[]): ReactNode => (
+    <SortableContext id={parentId ?? TOP_GROUP} items={nodes.filter((n) => !n.item.archived).map((n) => n.item.id)} strategy={verticalListSortingStrategy}>
+      {nodes.map((node) => renderNode(node, nodes))}
+    </SortableContext>
+  );
+
+  const renderNode = ({ item, children, position }: TreeNode, group: TreeNode[]): ReactNode => {
     const hasChildren = children.length > 0;
-    const open = !collapsed.has(item.id);
+    const open = !collapsed.has(item.id) && dragging !== item.id;
     const warnings = projectWarnings(item, byId).map((w) => warningText(w, byId));
     const names = item.assigneeIds.map((id) => memberNames.get(id)).filter((n): n is string => n !== undefined);
     return (
       <Fragment key={item.id}>
-        <tr className={`depth-${item.depth}${item.id === selectedId ? ' selected' : ''}`}>
+        <SortableRow
+          id={item.id}
+          title={item.title}
+          draggable={canReorder && !item.archived}
+          className={`depth-${item.depth}${item.id === selectedId ? ' selected' : ''}`}
+        >
+          {(handle) => (
+            <>
           <th scope="row" className="name-cell">
             <div className="name">
               {hasChildren ? (
@@ -161,10 +318,15 @@ export function ProjectTree(props: TreeProps) {
           <td className="wide-cell">{formatDates(item.startDate, item.endDate)}</td>
           <td className="wide-cell">{item.priorityLabel ? `${position} · ${item.priorityLabel}` : position}</td>
           <td className="actions-cell">
-            <Menu label={`Actions for ${item.title}`} buttonId={actionsButtonId(item.id)} items={menuItems(item)} />
+            <div className="row-actions">
+              {handle}
+              <Menu label={`Actions for ${item.title}`} buttonId={actionsButtonId(item.id)} items={menuItems(item, group)} />
+            </div>
           </td>
-        </tr>
-        {open && children.map(renderNode)}
+            </>
+          )}
+        </SortableRow>
+        {open && children.length > 0 && renderGroup(item.id, children)}
         {addRow(item.id, item.depth + 1)}
       </Fragment>
     );
@@ -190,10 +352,24 @@ export function ProjectTree(props: TreeProps) {
           </th>
         </tr>
       </thead>
-      <tbody>
-        {tree.map(renderNode)}
-        {addRow(null, 1)}
-      </tbody>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={sameGroupOnly}
+        accessibility={{
+          announcements,
+          screenReaderInstructions: {
+            draggable: 'To reorder, press Space. Move with the arrow keys, then press Space to drop. Press Escape to cancel.',
+          },
+        }}
+        onDragStart={({ active }: DragStartEvent) => setDragging(String(active.id))}
+        onDragEnd={onDragEnd}
+        onDragCancel={() => setDragging(null)}
+      >
+        <tbody>
+          {renderGroup(null, tree)}
+          {addRow(null, 1)}
+        </tbody>
+      </DndContext>
     </table>
   );
 }

@@ -22,8 +22,8 @@ function apiEnv(mongoUri: string, outbox: string): Record<string, string> {
     MAIL_OUTBOX_FILE: outbox,
     MAIL_FROM: 'no-reply@localhost',
     HIBP_ENABLED: 'false',
-    // One IP runs the whole suite; the production limit of 10 a minute would trip it.
-    AUTH_RATE_LIMIT_PER_MIN: '1000',
+    // One IP runs the whole suite; the production limit of 10 a minute would trip it, and so would 1000 once many specs create accounts.
+    AUTH_RATE_LIMIT_PER_MIN: '10000',
   };
 }
 

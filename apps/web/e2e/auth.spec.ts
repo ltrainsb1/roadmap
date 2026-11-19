@@ -1,97 +1,26 @@
-import { randomBytes } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import {
   addVirtualAuthenticator,
   bootstrapUser,
+  createEnrolledUser,
+  enrollTotp,
   expectNoA11yViolations,
+  field,
+  PASSWORD,
+  pathOf,
   readLastMail,
+  setPassword,
+  signIn,
+  signInWithTotp,
   totpFor,
+  uniqueEmail,
+  useCspGuard,
 } from './helpers.ts';
 
-const PASSWORD = 'correct horse battery staple';
 const NEW_PASSWORD = 'another long passphrase 42';
 const BAD_CODE = "That code didn't work. Try the next one your app shows.";
 
-// The built app is served with the strict policy (no inline script or style); any violation fails the test.
-const cspViolations = new WeakMap<Page, string[]>();
-test.beforeEach(({ page }) => {
-  const seen: string[] = [];
-  cspViolations.set(page, seen);
-  page.on('console', (m) => {
-    if (m.text().includes('Content Security Policy')) seen.push(m.text());
-  });
-});
-test.afterEach(({ page }) => {
-  expect(cspViolations.get(page)).toEqual([]);
-});
-
-const uniqueEmail = (label: string) => `${label}-${randomBytes(4).toString('hex')}@example.com`;
-const pathOf = (url: string) => new URL(url).pathname;
-const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
-
-async function setPassword(page: Page, setupUrl: string, password = PASSWORD) {
-  await page.goto(pathOf(setupUrl));
-  await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
-  await field(page, 'New password').fill(password);
-  await page.getByRole('button', { name: 'Save password' }).click();
-  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible();
-}
-
-async function signIn(page: Page, email: string, password = PASSWORD) {
-  await page.goto('/login');
-  await field(page, 'Email').fill(email);
-  await field(page, 'Password').fill(password);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-}
-
-async function enrollTotp(page: Page, opts: { axe?: boolean } = {}) {
-  await expect(page).toHaveURL(/\/setup\/totp/);
-  await expect(page.getByRole('heading', { name: 'Set up your authenticator app' })).toBeVisible();
-  await expect(page.getByText("Can't scan? Enter this key:")).toBeVisible();
-  const secret = (await page.getByTestId('totp-secret').innerText()).trim();
-  if (opts.axe) await expectNoA11yViolations(page);
-  await field(page, '6-digit code').fill(totpFor(secret));
-  await page.getByRole('button', { name: 'Turn on' }).click();
-  await expect(page.getByRole('heading', { name: 'Save your recovery codes' })).toBeVisible();
-  await expect(page.getByText('Each code works once. You need one if you lose your phone.')).toBeVisible();
-  const recoveryCodes = await page.getByTestId('recovery-codes').getByRole('listitem').allInnerTexts();
-  expect(recoveryCodes).toHaveLength(10);
-  if (opts.axe) {
-    await expectNoA11yViolations(page);
-    const [download] = await Promise.all([
-      page.waitForEvent('download'),
-      page.getByRole('button', { name: 'Download codes' }).click(),
-    ]);
-    expect(download.suggestedFilename()).toBe('roadmap-recovery-codes.txt');
-  }
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page.getByRole('alert')).toHaveText('Tick the box to confirm you saved your codes.');
-  await page.getByLabel('I saved these codes').check();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page).toHaveURL('/');
-  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
-  return { secret, recoveryCodes };
-}
-
-/** A user with a password and an authenticator app, signed out. */
-async function createEnrolledUser(page: Page, label: string) {
-  const email = uniqueEmail(label);
-  const { setupUrl } = await bootstrapUser(email, `${label} user`);
-  await setPassword(page, setupUrl);
-  await signIn(page, email);
-  const { secret, recoveryCodes } = await enrollTotp(page);
-  await page.context().clearCookies();
-  return { email, secret, recoveryCodes };
-}
-
-async function signInWithTotp(page: Page, email: string, secret: string) {
-  await signIn(page, email);
-  await expect(page).toHaveURL(/\/login\/mfa/);
-  await expect(page.getByRole('heading', { name: 'Enter your 6-digit code' })).toBeVisible();
-  // Enrollment used this step already; the server accepts the next one.
-  await field(page, 'Code from your authenticator app').fill(totpFor(secret, 1));
-  await page.getByRole('button', { name: 'Verify' }).click();
-}
+useCspGuard();
 
 test('Auth: bootstrap owner sets password, enrolls TOTP, saves recovery codes, lands on roadmap picker', async ({ page }) => {
   const email = uniqueEmail('owner');
@@ -209,18 +138,21 @@ test('Auth: a used reset link shows the expired message with a way to get a new 
   await expect(page.getByRole('heading', { name: 'Reset your password' })).toBeVisible();
 });
 
-test.fixme('Auth: add a passkey in settings, sign out, sign in passwordless with it', async ({ page, browserName }) => {
-  // Needs Task 13's settings page. Chromium only: the virtual authenticator is a CDP feature.
+test('Auth: add a passkey in settings, sign out, sign in passwordless with it', async ({ page, browserName }) => {
+  // Chromium only: the virtual authenticator is a CDP feature. Nothing is stubbed: the credential the API stores must verify in a real ceremony.
   test.skip(browserName !== 'chromium');
   await addVirtualAuthenticator(page);
   const { email, secret } = await createEnrolledUser(page, 'passkey');
   await signInWithTotp(page, email, secret);
+  await expect(page).toHaveURL('/');
   await page.goto('/settings/security');
   await page.getByRole('button', { name: 'Add a passkey' }).click();
-  await page.context().clearCookies();
-  await page.goto('/login');
+  await expect(page.getByRole('list', { name: 'Passkeys' }).getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible();
   await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
   await expect(page).toHaveURL('/');
+  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
 });
 
 test('Auth: the passkey button explains a passkey that did not work', async ({ page }) => {
@@ -320,7 +252,8 @@ test('Auth: an invited person with an account signs in, then joins', async ({ pa
   await page.getByRole('button', { name: 'Verify' }).click();
   await expect(page).toHaveURL(secondInvite);
   await page.getByRole('button', { name: 'Sign in to join' }).click();
-  await expect(page).toHaveURL('/');
+  await expect(page).toHaveURL(/\/r\/[^/]+\/members$/);
+  await expect(page.getByRole('heading', { name: 'Members', level: 1 })).toBeVisible();
 });
 
 test('Auth: an unknown invite link shows the expired message', async ({ page }) => {

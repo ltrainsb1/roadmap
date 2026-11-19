@@ -30,6 +30,22 @@ export function errorMessage(code: string, ctx: ErrorContext = {}): string {
       return 'This invite has expired or was replaced. Ask the person who invited you for a new one.';
     case 'already_member':
       return ctx.email ? `${ctx.email} is already a member.` : 'That person is already a member.';
+    case 'owner_immutable':
+      return "The owner can't be changed here. Transfer ownership instead.";
+    case 'conflict':
+      return 'Someone else changed this at the same time. Reload and try again.';
+    case 'already_owner':
+      return 'You already own this roadmap.';
+    case 'not_a_member':
+      return "That person isn't a member of this roadmap.";
+    case 'confirm_mismatch':
+      return "The name doesn't match.";
+    case 'last_factor':
+      return "You can't remove your only passkey. Set up your authenticator app first.";
+    case 'password_too_short':
+      return 'Use at least 12 characters.';
+    case 'csrf':
+      return 'Your session changed. Reload the page and try again.';
     case 'unauthenticated':
     case 'sign_in_required':
       return 'Your sign-in has expired. Sign in again.';

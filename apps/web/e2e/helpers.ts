@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -69,4 +70,184 @@ export async function expectNoA11yViolations(page: Page): Promise<void> {
     nodes: v.nodes.map((n) => n.target.join(' ')),
   }));
   expect(summary, `axe violations on ${page.url()}`).toEqual([]);
+}
+
+export const PASSWORD = 'correct horse battery staple';
+
+export const uniqueEmail = (label: string) => `${label}-${randomBytes(4).toString('hex')}@example.com`;
+export const pathOf = (url: string) => new URL(url).pathname;
+export const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
+
+// The built app is served with the strict policy (no inline script or style); any violation fails the test.
+const cspViolations: string[] = [];
+export function watchCsp(page: Page): void {
+  page.on('console', (m) => {
+    if (m.text().includes('Content Security Policy')) cspViolations.push(m.text());
+  });
+}
+/** Call once at the top of a spec file: every page the test opens is watched, and a violation fails the test. */
+export function useCspGuard(): void {
+  test.beforeEach(({ page }) => {
+    cspViolations.length = 0;
+    watchCsp(page);
+  });
+  test.afterEach(() => {
+    expect(cspViolations).toEqual([]);
+  });
+}
+
+export async function setPassword(page: Page, setupUrl: string, password = PASSWORD) {
+  await page.goto(pathOf(setupUrl));
+  await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
+  await field(page, 'New password').fill(password);
+  await page.getByRole('button', { name: 'Save password' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible();
+}
+
+export async function signIn(page: Page, email: string, password = PASSWORD) {
+  await page.goto('/login');
+  await field(page, 'Email').fill(email);
+  await field(page, 'Password').fill(password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+}
+
+export async function enrollTotp(page: Page, opts: { axe?: boolean } = {}) {
+  await expect(page).toHaveURL(/\/setup\/totp/);
+  await expect(page.getByRole('heading', { name: 'Set up your authenticator app' })).toBeVisible();
+  await expect(page.getByText("Can't scan? Enter this key:")).toBeVisible();
+  const secret = (await page.getByTestId('totp-secret').innerText()).trim();
+  if (opts.axe) await expectNoA11yViolations(page);
+  await field(page, '6-digit code').fill(totpFor(secret));
+  await page.getByRole('button', { name: 'Turn on' }).click();
+  await expect(page.getByRole('heading', { name: 'Save your recovery codes' })).toBeVisible();
+  await expect(page.getByText('Each code works once. You need one if you lose your phone.')).toBeVisible();
+  const recoveryCodes = await page.getByTestId('recovery-codes').getByRole('listitem').allInnerTexts();
+  expect(recoveryCodes).toHaveLength(10);
+  if (opts.axe) {
+    await expectNoA11yViolations(page);
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'Download codes' }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe('roadmap-recovery-codes.txt');
+  }
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Tick the box to confirm you saved your codes.');
+  await page.getByLabel('I saved these codes').check();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
+  return { secret, recoveryCodes };
+}
+
+export interface TestUser {
+  email: string;
+  name: string;
+  secret: string;
+  recoveryCodes: string[];
+}
+
+/** A user with a password and an authenticator app, signed out. */
+export async function createEnrolledUser(page: Page, label: string): Promise<TestUser> {
+  const email = uniqueEmail(label);
+  const name = `${label} user`;
+  const { setupUrl } = await bootstrapUser(email, name);
+  await setPassword(page, setupUrl);
+  await signIn(page, email);
+  const { secret, recoveryCodes } = await enrollTotp(page);
+  await page.context().clearCookies();
+  return { email, name, secret, recoveryCodes };
+}
+
+export async function signInWithTotp(page: Page, email: string, secret: string) {
+  await signIn(page, email);
+  await expect(page).toHaveURL(/\/login\/mfa/);
+  await expect(page.getByRole('heading', { name: 'Enter your 6-digit code' })).toBeVisible();
+  // Enrollment used this step already; the server accepts the next one.
+  await field(page, 'Code from your authenticator app').fill(totpFor(secret, 1));
+  await page.getByRole('button', { name: 'Verify' }).click();
+}
+
+/** Signs in with a recovery code, which leaves the authenticator code free for a later prompt. */
+export async function signInWithRecoveryCode(page: Page, email: string, code: string) {
+  await signIn(page, email);
+  await page.getByRole('button', { name: 'Use a recovery code' }).click();
+  await field(page, 'Recovery code').fill(code);
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page).toHaveURL('/');
+}
+
+/** An owner with an authenticator app, signed in on `page` and looking at the roadmap list. */
+export async function createSignedInUser(page: Page, label: string): Promise<TestUser> {
+  const user = await createEnrolledUser(page, label);
+  await signInWithTotp(page, user.email, user.secret);
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
+  return user;
+}
+
+/** Creates a roadmap from the picker; returns its id once the page has moved into it. */
+export async function createRoadmap(page: Page, name: string): Promise<string> {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New roadmap' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New roadmap' });
+  await dialog.getByLabel('Name', { exact: true }).fill(name);
+  await dialog.getByRole('button', { name: 'Create roadmap' }).click();
+  await expect(page).toHaveURL(/\/r\/[^/]+\/members$/);
+  await expect(page.getByRole('heading', { name: 'Members', level: 1 })).toBeVisible();
+  return /\/r\/([^/]+)\//.exec(page.url())![1]!;
+}
+
+/** Sends an invite from the Members screen. */
+export async function sendInvite(page: Page, email: string, role: 'Admin' | 'Contributor') {
+  await field(page, 'Email').fill(email);
+  await page.getByLabel('Role', { exact: true }).selectOption({ label: role });
+  await page.getByRole('button', { name: 'Send invite' }).click();
+  await expect(page.getByText(`Invite sent to ${email}.`)).toBeVisible();
+}
+
+export async function inviteLinkFor(email: string, roadmapName: string): Promise<string> {
+  await expect.poll(async () => (await readLastMail(email)).subject).toContain(roadmapName);
+  const link = /https?:\/\/\S+\/invite\/\S+/.exec((await readLastMail(email)).text)?.[0];
+  expect(link).toBeTruthy();
+  return pathOf(link!);
+}
+
+export interface Joined extends TestUser {
+  context: BrowserContext;
+  page: Page;
+}
+
+/** A second browser context in which a newcomer opens an invite link, creates an account and enrolls. */
+export async function joinViaInvite(browser: Browser, info: TestInfo, invitePath: string, name: string, email: string): Promise<Joined> {
+  const use = info.project.use;
+  const context = await browser.newContext({
+    ...(use.baseURL && { baseURL: use.baseURL }),
+    ...(use.viewport && { viewport: use.viewport }),
+    ...(use.isMobile !== undefined && { isMobile: use.isMobile }),
+    ...(use.hasTouch !== undefined && { hasTouch: use.hasTouch }),
+  });
+  const page = await context.newPage();
+  watchCsp(page);
+  await page.goto(invitePath);
+  await field(page, 'Name').fill(name);
+  await field(page, 'Password').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Create account' }).click();
+  const { secret, recoveryCodes } = await enrollTotp(page);
+  return { email, name, secret, recoveryCodes, context, page };
+}
+
+/** Invites `email` from the owner's Members screen and has them join in a new context. */
+export async function inviteAndJoin(
+  owner: Page,
+  browser: Browser,
+  info: TestInfo,
+  roadmapName: string,
+  label: string,
+  role: 'Admin' | 'Contributor',
+): Promise<Joined> {
+  const email = uniqueEmail(label);
+  await sendInvite(owner, email, role);
+  const path = await inviteLinkFor(email, roadmapName);
+  return joinViaInvite(browser, info, path, `${label} user`, email);
 }

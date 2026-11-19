@@ -11,20 +11,12 @@ import { formText } from '../ui/formText.ts';
 import { Layout } from '../ui/Layout.tsx';
 import { useFocusFirstError, type FormErrors } from '../ui/useFocusFirstError.ts';
 import { useNext } from './next.ts';
+import { RecoveryCodes } from './RecoveryCodes.tsx';
 import { ME_KEY } from './useMe.ts';
 
 interface Pending {
   secret: string;
   qr: string;
-}
-
-function downloadCodes(codes: string[]): void {
-  const url = URL.createObjectURL(new Blob([`${codes.join('\n')}\n`], { type: 'text/plain' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'roadmap-recovery-codes.txt';
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 export function EnrollTotpPage() {
@@ -71,11 +63,7 @@ export function EnrollTotpPage() {
     }
   };
 
-  const onContinue = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!new FormData(e.currentTarget).get('saved')) {
-      return setErrors({ form: 'Tick the box to confirm you saved your codes.', fields: {} });
-    }
+  const onContinue = async () => {
     await queryClient.invalidateQueries({ queryKey: ME_KEY });
     void navigate(next);
   };
@@ -84,25 +72,7 @@ export function EnrollTotpPage() {
     return (
       <Layout>
         <h1>Save your recovery codes</h1>
-        <p>Each code works once. You need one if you lose your phone.</p>
-        {errors?.form && <Alert>{errors.form}</Alert>}
-        <ul className="codes" data-testid="recovery-codes">
-          {recoveryCodes.map((c) => (
-            <li key={c}>{c}</li>
-          ))}
-        </ul>
-        <Button className="btn-block" onClick={() => downloadCodes(recoveryCodes)}>
-          Download codes
-        </Button>
-        <form ref={form} onSubmit={(e) => void onContinue(e)} noValidate>
-          <div className="check">
-            <input id="saved" name="saved" type="checkbox" />
-            <label htmlFor="saved">I saved these codes</label>
-          </div>
-          <Button type="submit" variant="primary" className="btn-block">
-            Continue
-          </Button>
-        </form>
+        <RecoveryCodes codes={recoveryCodes} submitLabel="Continue" onDone={onContinue} />
       </Layout>
     );
   }

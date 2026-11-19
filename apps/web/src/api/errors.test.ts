@@ -9,6 +9,14 @@ describe('error messages', () => {
     ['password_breached', 'This password has appeared in a data breach. Choose a different one.'],
     ['token_invalid', 'This link has expired or was already used.'],
     ['invite_invalid', 'This invite has expired or was replaced. Ask the person who invited you for a new one.'],
+    ['owner_immutable', "The owner can't be changed here. Transfer ownership instead."],
+    ['conflict', 'Someone else changed this at the same time. Reload and try again.'],
+    ['already_owner', 'You already own this roadmap.'],
+    ['not_a_member', "That person isn't a member of this roadmap."],
+    ['confirm_mismatch', "The name doesn't match."],
+    ['last_factor', "You can't remove your only passkey. Set up your authenticator app first."],
+    ['password_too_short', 'Use at least 12 characters.'],
+    ['csrf', 'Your session changed. Reload the page and try again.'],
     ['something_new', 'Something went wrong. Try again.'],
   ])('%s', (code, text) => {
     expect(errorMessage(code)).toBe(text);

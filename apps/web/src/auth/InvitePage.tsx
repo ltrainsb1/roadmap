@@ -10,10 +10,9 @@ import { Field } from '../ui/Field.tsx';
 import { formText } from '../ui/formText.ts';
 import { Layout } from '../ui/Layout.tsx';
 import { useFocusFirstError, type FormErrors } from '../ui/useFocusFirstError.ts';
+import { roleName } from '../roles.ts';
 import { PASSWORD_LENGTH_ERROR, passwordLengthError } from './passwordRules.ts';
 import { ME_KEY } from './useMe.ts';
-
-const ROLE_NAMES = { admin: 'Admin', contributor: 'Contributor' } as const;
 
 export function InvitePage() {
   const { token = '' } = useParams();
@@ -32,8 +31,8 @@ export function InvitePage() {
     const path = `/api/invites/${encodeURIComponent(token)}/accept`;
     const res = await api<AcceptInviteResponse>(path, { method: 'POST', ...(body ? { body } : {}) });
     await queryClient.invalidateQueries({ queryKey: ME_KEY });
-    // Until the roadmap screens exist, both paths end at the roadmap list.
-    void navigate(res.next === 'enroll' ? '/setup/totp' : '/');
+    // A new account enrolls first and then lands on the roadmap list; an existing one goes straight in.
+    void navigate(res.next === 'enroll' ? '/setup/totp' : `/r/${encodeURIComponent(res.roadmapId)}/members`);
   };
 
   const onCreate = async (e: FormEvent<HTMLFormElement>) => {
@@ -87,7 +86,7 @@ export function InvitePage() {
     <Layout>
       <h1>Join {roadmapName}</h1>
       <p>
-        You were invited as {ROLE_NAMES[role]} with {email}.
+        You were invited as {roleName(role)} with {email}.
       </p>
       {errors?.form && <Alert>{errors.form}</Alert>}
       {accountExists ? (

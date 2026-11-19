@@ -1,0 +1,165 @@
+import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
+import { useQueryClient } from '@tanstack/react-query';
+import { useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../api/client.ts';
+import { messageFor } from '../api/errors.ts';
+import { passkeyErrorMessage } from '../auth/passkey.ts';
+import { RecoveryCodes } from '../auth/RecoveryCodes.tsx';
+import { signOut } from '../auth/signOut.ts';
+import { ME_KEY, useMe } from '../auth/useMe.ts';
+import { Alert } from '../ui/Alert.tsx';
+import { Button } from '../ui/Button.tsx';
+import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
+import { Field } from '../ui/Field.tsx';
+import { formText } from '../ui/formText.ts';
+import { Layout } from '../ui/Layout.tsx';
+
+type Passkey = { id: string; name: string; createdAt: string };
+
+const dateOf = (iso: string) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(iso));
+
+export function SecurityPage() {
+  const me = useMe();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [passkeyError, setPasskeyError] = useState<string | undefined>();
+  const [removing, setRemoving] = useState<Passkey | null>(null);
+  const [removeError, setRemoveError] = useState<string | undefined>();
+  const [codeError, setCodeError] = useState<string | undefined>();
+  const [newCodes, setNewCodes] = useState<string[] | null>(null);
+  const [sessionError, setSessionError] = useState<string | undefined>();
+  const codeForm = useRef<HTMLFormElement>(null);
+
+  const passkeys = me.data?.user.passkeys ?? [];
+  const refreshMe = () => queryClient.invalidateQueries({ queryKey: ME_KEY });
+
+  const addPasskey = async () => {
+    setPasskeyError(undefined);
+    try {
+      const optionsJSON = await api<PublicKeyCredentialCreationOptionsJSON>('/api/auth/passkeys/register/options', {
+        method: 'POST',
+      });
+      const response = await startRegistration({ optionsJSON });
+      const name = `Passkey ${passkeys.length + 1}`;
+      await api('/api/auth/passkeys/register/verify', { body: { response, name } });
+      await refreshMe();
+    } catch (err) {
+      setPasskeyError(passkeyErrorMessage(err));
+    }
+  };
+
+  const removePasskey = async () => {
+    if (!removing) return;
+    try {
+      await api(`/api/auth/passkeys/${encodeURIComponent(removing.id)}`, { method: 'DELETE' });
+      setRemoving(null);
+      setRemoveError(undefined);
+      await refreshMe();
+    } catch (err) {
+      setRemoveError(messageFor(err));
+    }
+  };
+
+  const makeCodes = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const code = formText(new FormData(e.currentTarget), 'code').trim();
+    if (!code) return setCodeError('Enter the 6-digit code from your app.');
+    try {
+      const res = await api<{ recoveryCodes: string[] }>('/api/auth/recovery-codes', { body: { code } });
+      setCodeError(undefined);
+      setNewCodes(res.recoveryCodes);
+    } catch (err) {
+      setCodeError(messageFor(err));
+    }
+  };
+
+  const signOutEverywhere = async () => {
+    try {
+      await signOut(queryClient, true);
+      void navigate('/login');
+    } catch (err) {
+      setSessionError(messageFor(err));
+    }
+  };
+
+  return (
+    <Layout width="wide" signedIn>
+      <h1>Security</h1>
+
+      <section aria-labelledby="passkeys-heading">
+        <h2 id="passkeys-heading">Passkeys</h2>
+        {passkeyError && <Alert>{passkeyError}</Alert>}
+        {passkeys.length === 0 ? (
+          <p>You have no passkeys yet.</p>
+        ) : (
+          <ul className="passkey-list" aria-label="Passkeys">
+            {passkeys.map((p) => (
+              <li key={p.id}>
+                <span>
+                  {p.name}, added {dateOf(p.createdAt)}
+                </span>
+                <Button aria-label={`Remove passkey ${p.name}`} onClick={() => setRemoving(p)}>
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Button onClick={() => void addPasskey()}>Add a passkey</Button>
+      </section>
+
+      <section aria-labelledby="codes-heading">
+        <h2 id="codes-heading">Recovery codes</h2>
+        {newCodes ? (
+          <>
+            <h3>Save your recovery codes</h3>
+            <RecoveryCodes
+              codes={newCodes}
+              submitLabel="Done"
+              onDone={() => {
+                setNewCodes(null);
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <p>Your old codes stop working.</p>
+            <form ref={codeForm} onSubmit={(e) => void makeCodes(e)} noValidate>
+              <Field
+                id="code"
+                name="code"
+                label="6-digit code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                error={codeError}
+              />
+              <Button type="submit">Make new codes</Button>
+            </form>
+          </>
+        )}
+      </section>
+
+      <section aria-labelledby="sessions-heading">
+        <h2 id="sessions-heading">Sessions</h2>
+        {sessionError && <Alert>{sessionError}</Alert>}
+        <p>This signs you out on every device, including this one.</p>
+        <Button onClick={() => void signOutEverywhere()}>Sign out everywhere</Button>
+      </section>
+
+      <ConfirmDialog
+        open={removing !== null}
+        title="Remove passkey"
+        confirmLabel="Remove"
+        error={removeError}
+        onConfirm={() => void removePasskey()}
+        onClose={() => {
+          setRemoving(null);
+          setRemoveError(undefined);
+        }}
+      >
+        <p>Remove {removing?.name}? You can't sign in with it afterwards.</p>
+      </ConfirmDialog>
+    </Layout>
+  );
+}

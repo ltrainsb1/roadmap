@@ -9,7 +9,11 @@ import { LoginPage } from './auth/LoginPage.tsx';
 import { MfaPage } from './auth/MfaPage.tsx';
 import { RequireAuth } from './auth/RequireAuth.tsx';
 import { ResetPage } from './auth/ResetPage.tsx';
-import { Layout } from './ui/Layout.tsx';
+import { AuditPage } from './audit/AuditPage.tsx';
+import { MembersPage } from './members/MembersPage.tsx';
+import { PickerPage } from './roadmaps/PickerPage.tsx';
+import { RoadmapIndex, RoadmapLayout } from './roadmaps/RoadmapLayout.tsx';
+import { SecurityPage } from './settings/SecurityPage.tsx';
 
 const queryClient = new QueryClient();
 
@@ -25,15 +29,6 @@ function SignInRedirect() {
     return () => setUnauthorizedHandler(null);
   }, [navigate, location.pathname, location.search]);
   return null;
-}
-
-/** Placeholder until the roadmap list is built. */
-function Roadmaps() {
-  return (
-    <Layout width="wide">
-      <h1>Roadmaps</h1>
-    </Layout>
-  );
 }
 
 export function App() {
@@ -52,7 +47,27 @@ export function App() {
             path="/"
             element={
               <RequireAuth>
-                <Roadmaps />
+                <PickerPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/r/:roadmapId"
+            element={
+              <RequireAuth>
+                <RoadmapLayout />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<RoadmapIndex />} />
+            <Route path="members" element={<MembersPage />} />
+            <Route path="audit" element={<AuditPage />} />
+          </Route>
+          <Route
+            path="/settings/security"
+            element={
+              <RequireAuth>
+                <SecurityPage />
               </RequireAuth>
             }
           />

@@ -11,13 +11,12 @@ let client: MongoClient;
 let db: Db;
 
 beforeAll(async () => {
-  mongo = await startMongo();
+  mongo = startMongo();
   ({ client, db } = await connectDb(mongo.uri, 'scoped_test'));
 }, 120_000);
 
 afterAll(async () => {
   await client?.close();
-  await mongo?.stop();
 });
 
 beforeEach(async () => {

@@ -12,13 +12,12 @@ let db: Db;
 const audit = createAuditLog();
 
 beforeAll(async () => {
-  mongo = await startMongo();
+  mongo = startMongo();
   ({ client, db } = await connectDb(mongo.uri, 'audit_test'));
 }, 120_000);
 
 afterAll(async () => {
   await client?.close();
-  await mongo?.stop();
 });
 
 beforeEach(async () => {

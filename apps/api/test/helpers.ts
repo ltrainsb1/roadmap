@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Role } from '@roadmap/shared';
 import type { FastifyInstance } from 'fastify';
-import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { v7 as uuidv7 } from 'uuid';
-import { afterAll } from 'vitest';
+import { inject } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { loadConfig, type Config } from '../src/config.ts';
 import { connectDb, type Db } from '../src/db/client.ts';
@@ -14,23 +13,11 @@ import { unscoped } from '../src/db/unscoped.ts';
 
 export interface TestMongo {
   uri: string;
-  stop(): Promise<void>;
 }
 
-/** In-process replica set (supports transactions). Default for unit tests; needs no Docker. */
-export async function memoryMongo(): Promise<TestMongo> {
-  const rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
-  return { uri: rs.getUri(), stop: async () => void (await rs.stop()) };
-}
-
-/** Testcontainers mongo:8.0 replica set when TEST_MONGO=container, otherwise memoryMongo(). */
-export async function startMongo(): Promise<TestMongo> {
-  if (process.env.TEST_MONGO !== 'container') return memoryMongo();
-  const { MongoDBContainer } = await import('@testcontainers/mongodb');
-  const container = await new MongoDBContainer('mongo:8.0').start();
-  // Replica-set containers advertise an internal hostname; connect directly to the mapped port.
-  const uri = `mongodb://${container.getHost()}:${container.getMappedPort(27017)}/?directConnection=true`;
-  return { uri, stop: async () => void (await container.stop()) };
+/** The MongoDB that global-setup started for this run (container or in-process); shared by every test file. */
+export function startMongo(): TestMongo {
+  return { uri: inject('mongoUri') };
 }
 
 export interface Seeder {
@@ -72,17 +59,8 @@ const TEST_ENV = {
   HIBP_ENABLED: 'false',
 };
 
-// One Mongo per test file (modules are isolated per file), stopped when that file's tests finish.
-let sharedMongo: Promise<TestMongo> | undefined;
-afterAll(async () => {
-  const m = sharedMongo;
-  sharedMongo = undefined;
-  await (await m)?.stop();
-}, 60_000);
-
 export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
-  sharedMongo ??= startMongo();
-  const mongo = await sharedMongo;
+  const mongo = startMongo();
   const dbName = `test_${randomUUID().replaceAll('-', '')}`;
   const config: Config = loadConfig({ ...TEST_ENV, MONGO_URI: mongo.uri, MONGO_DB: dbName });
   const { client, db } = await connectDb(mongo.uri, dbName);

@@ -58,44 +58,68 @@ async function waitFor(url: string, child: ChildProcess, name: string): Promise<
   throw new Error(`${name} did not become ready at ${url}`);
 }
 
-function start(name: string, cmd: string, args: string[], env: Record<string, string>): ChildProcess {
-  const child = spawn(cmd, args, { cwd: repoRoot, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+function start(name: string, cmd: string, args: string[], env: Record<string, string>, cwd = repoRoot): ChildProcess {
+  const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout?.on('data', (d: Buffer) => process.stdout.write(`[${name}] ${d.toString()}`));
   child.stderr?.on('data', (d: Buffer) => process.stderr.write(`[${name}] ${d.toString()}`));
   return child;
 }
 
-export default async function globalSetup(): Promise<() => Promise<void>> {
-  const mongo = await startMongo();
-  const dir = mkdtempSync(path.join(tmpdir(), 'roadmap-e2e-'));
-  const env = apiEnv(mongo.uri, path.join(dir, 'outbox.jsonl'));
-  process.env.E2E_API_ENV = JSON.stringify(env);
-  process.env.E2E_MAIL_OUTBOX = env.MAIL_OUTBOX_FILE;
+/** SIGTERM, then SIGKILL if the process has not exited after `graceMs`; resolves once it is gone. */
+async function stopChild(child: ChildProcess, graceMs = 5_000): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+  child.kill('SIGTERM');
+  const timer = setTimeout(() => child.kill('SIGKILL'), graceMs);
+  await exited;
+  clearTimeout(timer);
+}
 
+export default async function globalSetup(): Promise<() => Promise<void>> {
+  // Builds first: a broken build then starts nothing that needs cleaning up.
   execFileSync('pnpm', ['--filter', '@roadmap/api', 'build'], { cwd: repoRoot, stdio: 'inherit' });
   execFileSync('pnpm', ['--filter', '@roadmap/web', 'build'], { cwd: repoRoot, stdio: 'inherit' });
 
   const children: ChildProcess[] = [];
+  const cleanups: (() => Promise<void>)[] = [];
+  // Every step runs even when an earlier one throws; the first failure is rethrown afterwards.
   const stopAll = async () => {
-    for (const c of children) c.kill('SIGTERM');
-    await mongo.stop();
-    rmSync(dir, { recursive: true, force: true });
+    const failures: unknown[] = [];
+    for (const step of [...children.map((c) => () => stopChild(c)), ...cleanups]) {
+      try {
+        await step();
+      } catch (err) {
+        failures.push(err);
+      }
+    }
+    if (failures.length > 0) throw failures[0];
   };
+
   try {
+    const mongo = await startMongo();
+    cleanups.push(mongo.stop);
+    const dir = mkdtempSync(path.join(tmpdir(), 'roadmap-e2e-'));
+    cleanups.push(() => Promise.resolve(rmSync(dir, { recursive: true, force: true })));
+    const env = apiEnv(mongo.uri, path.join(dir, 'outbox.jsonl'));
+    process.env.E2E_API_ENV = JSON.stringify(env);
+    process.env.E2E_MAIL_OUTBOX = env.MAIL_OUTBOX_FILE;
+
     const api = start('api', 'node', ['apps/api/dist/server.js'], env);
     children.push(api);
+    // The vite binary directly: killing a pnpm wrapper can leave the server it started holding the port.
     const web = start(
       'web',
-      'pnpm',
-      ['--filter', '@roadmap/web', 'exec', 'vite', 'preview', '--port', String(WEB_PORT), '--strictPort'],
+      path.join(repoRoot, 'apps/web/node_modules/.bin/vite'),
+      ['preview', '--port', String(WEB_PORT), '--strictPort'],
       { API_ORIGIN: `http://127.0.0.1:${API_PORT}` },
+      path.join(repoRoot, 'apps/web'),
     );
     children.push(web);
     await waitFor(`http://127.0.0.1:${API_PORT}/api/health`, api, 'api');
     // Through the preview server, so the /api proxy is checked too.
     await waitFor(`http://localhost:${WEB_PORT}/api/health`, web, 'web');
   } catch (err) {
-    await stopAll();
+    await stopAll().catch(() => undefined);
     throw err;
   }
   return stopAll;

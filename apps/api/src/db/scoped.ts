@@ -76,6 +76,10 @@ function assertUpdateSafe(update: unknown, tenantId: string): void {
     if (body !== null && typeof body === 'object' && 'tenantId' in body) {
       throw new Error(`${op} must not modify tenantId`);
     }
+    // $rename keys are source fields and values are targets; either side being tenantId moves the tenant.
+    if (op === '$rename' && Object.values(body as Record<string, unknown>).includes('tenantId')) {
+      throw new Error('$rename must not modify tenantId');
+    }
   }
   assertNoForeignTenant(update, tenantId, 'update');
 }

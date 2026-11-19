@@ -56,6 +56,17 @@ describe('scoped', () => {
     expect(still?.name).toBe('N');
   });
 
+  test('Tenant isolation: $rename onto or away from tenantId is rejected', async () => {
+    await scoped(db, 'A').collection('users').insertOne(user('u1', 'a@x.com'));
+    const a = scoped(db, 'A').collection('users');
+    for (const rename of [{ name: 'tenantId' }, { tenantId: 'x' }]) {
+      const update = { $rename: rename } as never;
+      await expect(a.updateOne({ _id: 'u1' }, update)).rejects.toThrow(/tenantId/);
+      await expect(a.findOneAndUpdate({ _id: 'u1' }, update)).rejects.toThrow(/tenantId/);
+    }
+    expect(await a.findOne({ _id: 'u1' })).toMatchObject({ tenantId: 'A' });
+  });
+
   test('update, findOneAndUpdate and delete work inside the tenant', async () => {
     const a = scoped(db, 'A').collection('users');
     await a.insertOne(user('u1', 'a@x.com'));

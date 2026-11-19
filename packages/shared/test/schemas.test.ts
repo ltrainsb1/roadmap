@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { emailSchema, loginRequestSchema, meResponseSchema, passwordSchema } from '../src/index.ts';
+import { acceptInviteRequestSchema, emailSchema, loginRequestSchema, meResponseSchema, passwordSchema } from '../src/index.ts';
 
 describe('shared auth schemas', () => {
   test('email is trimmed and lower-cased before validation', () => {
@@ -33,5 +33,19 @@ describe('shared auth schemas', () => {
       memberships: [{ roadmapId: 'r', roadmapName: 'R', role: 'owner' }],
     };
     expect(meResponseSchema.parse(me)).toEqual(me);
+  });
+});
+
+describe('acceptInviteRequestSchema time zone', () => {
+  const base = { name: 'Nina', password: 'correct horse battery staple' };
+
+  test('accepts a known IANA time zone and a missing one', () => {
+    expect(acceptInviteRequestSchema.safeParse({ ...base, timezone: 'Europe/Berlin' }).success).toBe(true);
+    expect(acceptInviteRequestSchema.safeParse(base).success).toBe(true);
+  });
+
+  test('rejects an unknown time zone', () => {
+    const result = acceptInviteRequestSchema.safeParse({ ...base, timezone: 'Mars/Olympus' });
+    expect(result.success).toBe(false);
   });
 });

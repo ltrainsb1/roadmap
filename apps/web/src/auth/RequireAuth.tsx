@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { GENERIC_ERROR } from '../api/errors.ts';
 import { Layout } from '../ui/Layout.tsx';
 import { useMe } from './useMe.ts';
 
@@ -13,7 +14,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return (
       <Layout>
         <h1>Roadmaps</h1>
-        <p role="alert">Something went wrong. Try again.</p>
+        <p role="alert">{GENERIC_ERROR}</p>
       </Layout>
     );
   }

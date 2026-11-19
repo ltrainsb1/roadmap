@@ -98,25 +98,27 @@ export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 const linkInputSchema = linkSchema.extend({ id: z.string().optional() });
 const milestoneInputSchema = milestoneSchema.extend({ id: z.string().optional() });
 
-export const updateProjectRequestSchema = z
-  .object({
-    version: z.number().int().positive(),
-    title: z.string().trim().min(1).max(LIMITS.title).optional(),
-    description: z.string().max(LIMITS.description).optional(),
-    status: z.enum(PROJECT_STATUSES).optional(),
-    startDate: calendarDateSchema.nullable().optional(),
-    endDate: calendarDateSchema.nullable().optional(),
-    milestones: z.array(milestoneInputSchema).max(LIMITS.milestones).optional(),
-    tags: z.array(tagSchema).max(LIMITS.tags).transform(unique).optional(),
-    links: z.array(linkInputSchema).max(LIMITS.links).optional(),
-    blockedBy: z.array(z.string().min(1)).max(LIMITS.blockedBy).transform(unique).optional(),
-  })
-  .superRefine((value, ctx) => {
-    const { startDate, endDate } = value;
-    if (startDate && endDate && endDate < startDate) {
-      ctx.addIssue({ code: 'custom', path: ['endDate'], message: 'date_order' });
-    }
-  });
+/** The edit body without the date-order check; the API checks order against the merged dates and answers 422. */
+export const updateProjectBodySchema = z.object({
+  version: z.number().int().positive(),
+  title: z.string().trim().min(1).max(LIMITS.title).optional(),
+  description: z.string().max(LIMITS.description).optional(),
+  status: z.enum(PROJECT_STATUSES).optional(),
+  startDate: calendarDateSchema.nullable().optional(),
+  endDate: calendarDateSchema.nullable().optional(),
+  milestones: z.array(milestoneInputSchema).max(LIMITS.milestones).optional(),
+  tags: z.array(tagSchema).max(LIMITS.tags).transform(unique).optional(),
+  links: z.array(linkInputSchema).max(LIMITS.links).optional(),
+  blockedBy: z.array(z.string().min(1)).max(LIMITS.blockedBy).transform(unique).optional(),
+});
+
+/** The edit body with the date-order check, for form validation in the browser. */
+export const updateProjectRequestSchema = updateProjectBodySchema.superRefine((value, ctx) => {
+  const { startDate, endDate } = value;
+  if (startDate && endDate && endDate < startDate) {
+    ctx.addIssue({ code: 'custom', path: ['endDate'], message: 'date_order' });
+  }
+});
 export type UpdateProjectRequest = z.infer<typeof updateProjectRequestSchema>;
 
 export const setAssigneesRequestSchema = z.object({ userIds: z.array(z.string()).max(50) });

@@ -115,6 +115,16 @@ describe('Permissions (project.create)', () => {
     expect((await w.call('C', 'POST', { parentId: child._id, title: 'x' })).statusCode).toBe(201);
   });
 
+  test('a Contributor assigned in roadmap A and a Contributor in roadmap B cannot create under an item in B', async () => {
+    const w = await world();
+    await t.seed.project(w.tenantId, w.roadmap._id, { assigneeIds: [w.ids.C] });
+    const roadmapB = await t.seed.roadmap(w.tenantId, w.ids.O, 'B');
+    await t.seed.member(w.tenantId, roadmapB._id, w.ids.C, 'contributor');
+    const inB = await t.seed.project(w.tenantId, roadmapB._id);
+    const res = await w.call('C', 'POST', { parentId: inB._id, title: 'x' }, roadmapB._id);
+    expect(res.statusCode).toBe(403);
+  });
+
   test('a user who is not a member gets 404', async () => {
     const w = await world();
     const stranger = (await t.seed.user(w.tenantId))._id;

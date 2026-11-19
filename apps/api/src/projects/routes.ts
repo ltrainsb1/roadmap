@@ -2,6 +2,8 @@ import {
   MAX_DEPTH,
   createProjectRequestSchema,
   projectListSchema,
+  projectSchema,
+  updateProjectBodySchema,
 } from '@roadmap/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -10,7 +12,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { createAuditLog } from '../audit/audit.ts';
 import type { ProjectDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
-import { loadProject, parentAssignedCtx, toProjectDto } from './access.ts';
+import { assignedCtx, loadProject, parentAssignedCtx, toProjectDto } from './access.ts';
 
 export interface ProjectRouteDeps {
   now: () => Date;
@@ -18,6 +20,18 @@ export interface ProjectRouteDeps {
 }
 
 const roadmapParams = z.object({ roadmapId: z.string().min(1).max(100) });
+const projectParams = roadmapParams.extend({ projectId: z.string().min(1).max(100) });
+
+/** Keeps the stored id of an entry the item already has; anything else is new and gets a fresh id. */
+function withIds<T extends { id?: string | undefined }>(entries: T[], stored: Array<{ id: string }>): Array<T & { id: string }> {
+  const known = new Set(stored.map((e) => e.id));
+  return entries.map((e) => ({ ...e, id: e.id !== undefined && known.has(e.id) ? e.id : uuidv7() }));
+}
+
+const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+const EDITABLE_FIELDS = ['title', 'description', 'status', 'startDate', 'endDate', 'milestones', 'tags', 'links'] as const;
+type EditableField = (typeof EDITABLE_FIELDS)[number];
 
 export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDeps): void {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -94,6 +108,63 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
     async (req) => {
       const docs = await req.actor!.db.collection('projects').find({ roadmapId: req.params.roadmapId });
       return { items: docs.map(toProjectDto) };
+    },
+  );
+
+  r.patch(
+    '/api/roadmaps/:roadmapId/projects/:projectId',
+    {
+      config: { auth: { level: 'full', action: 'project.edit', ctx: assignedCtx } },
+      schema: { params: projectParams, body: updateProjectBodySchema, response: { 200: projectSchema } },
+    },
+    async (req) => {
+      const actor = req.actor!;
+      const { roadmapId, projectId } = req.params;
+      const { version, blockedBy, ...fields } = req.body;
+      if (blockedBy !== undefined) throw new HttpError(422, 'not_supported');
+      return actor.db.withTransaction(async (s) => {
+        const projects = s.collection('projects');
+        const current = await loadProject(s, roadmapId, projectId);
+        if (current.version !== version) throw new HttpError(409, 'conflict');
+
+        const wanted = {
+          ...fields,
+          ...(fields.links !== undefined ? { links: withIds(fields.links, current.links) } : {}),
+          ...(fields.milestones !== undefined
+            ? { milestones: withIds(fields.milestones, current.milestones) }
+            : {}),
+        };
+        const changes: Partial<Pick<ProjectDoc, EditableField>> = {};
+        for (const key of EDITABLE_FIELDS) {
+          const value = wanted[key];
+          if (value !== undefined && !sameValue(value, current[key])) Object.assign(changes, { [key]: value });
+        }
+        const changed = Object.keys(changes) as EditableField[];
+        if (changed.length === 0) return toProjectDto(current);
+
+        const startDate = changes.startDate !== undefined ? changes.startDate : current.startDate;
+        const endDate = changes.endDate !== undefined ? changes.endDate : current.endDate;
+        if (startDate && endDate && endDate < startDate) throw new HttpError(422, 'date_order');
+
+        const updated = await projects.findOneAndUpdate(
+          { _id: projectId, roadmapId, version },
+          { $set: { ...changes, updatedAt: deps.now() }, $inc: { version: 1 } },
+        );
+        if (!updated) throw new HttpError(409, 'conflict');
+
+        const pick = (doc: Pick<ProjectDoc, EditableField>) =>
+          Object.fromEntries(changed.map((k) => [k, doc[k]]));
+        await audit.record(s, {
+          action: 'project.update',
+          actor: { type: 'user', userId: actor.userId },
+          roadmapId,
+          target: { type: 'project', id: projectId },
+          before: { title: current.title, ...pick(current) },
+          after: { title: updated.title, ...pick(updated) },
+          ip: req.ip,
+        });
+        return toProjectDto(updated);
+      });
     },
   );
 }

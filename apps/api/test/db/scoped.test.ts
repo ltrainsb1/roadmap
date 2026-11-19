@@ -108,6 +108,28 @@ describe('scoped', () => {
     expect(await scoped(db, 'A').collection('users').findOne({ _id: 'u1' })).toMatchObject({ name: 'N', tenantId: 'A' });
   });
 
+  test('Tenant isolation: updateMany changes every match in its own tenant and none in another', async () => {
+    await scoped(db, 'A').collection('users').insertOne(user('u1', 'a@x.com'));
+    await scoped(db, 'A').collection('users').insertOne(user('u2', 'b@x.com'));
+    const b = scoped(db, 'B').collection('users');
+    expect((await b.updateMany({}, { $set: { name: 'Hacked' } })).matched).toBe(0);
+    const a = scoped(db, 'A').collection('users');
+    expect((await a.updateMany({}, { $set: { name: 'Both' } })).matched).toBe(2);
+    expect((await a.find({})).map((u) => u.name)).toEqual(['Both', 'Both']);
+    expect((await a.updateMany({ _id: 'none' }, { $set: { name: 'x' } })).matched).toBe(0);
+  });
+
+  test('Tenant isolation: updateMany rejects an update that touches tenantId or is not operators', async () => {
+    await scoped(db, 'A').collection('users').insertOne(user('u1', 'a@x.com'));
+    const a = scoped(db, 'A').collection('users');
+    await expect(a.updateMany({}, { $set: { tenantId: 'B' } })).rejects.toThrow(/tenantId/);
+    await expect(a.updateMany({}, { $set: { tenantId: 'A' } })).rejects.toThrow(/tenantId/);
+    await expect(a.updateMany({}, { $rename: { name: 'tenantId' } } as never)).rejects.toThrow(/tenantId/);
+    await expect(a.updateMany({}, { name: 'x' })).rejects.toThrow(/operators/);
+    await expect(a.updateMany({ tenantId: 'B' }, { $set: { name: 'x' } })).rejects.toThrow(/tenantId/);
+    expect(await a.findOne({ _id: 'u1' })).toMatchObject({ name: 'N', tenantId: 'A' });
+  });
+
   test('audit collection exposes no update or delete', async () => {
     const audit = scoped(db, 'A').audit;
     expect('updateOne' in audit).toBe(false);

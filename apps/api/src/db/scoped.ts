@@ -35,6 +35,7 @@ export interface ScopedCollection<T extends { tenantId: string }> {
   find(filter: Filter<T>, opts?: { sort?: Sort; limit?: number }): Promise<T[]>;
   insertOne(doc: Omit<T, 'tenantId'>): Promise<T>;
   updateOne(filter: Filter<T>, update: UpdateFilter<T>): Promise<{ matched: number }>;
+  updateMany(filter: Filter<T>, update: UpdateFilter<T>): Promise<{ matched: number }>;
   findOneAndUpdate(filter: Filter<T>, update: UpdateFilter<T>): Promise<T | null>;
   deleteOne(filter: Filter<T>): Promise<{ deleted: number }>;
   deleteMany(filter: Filter<T>): Promise<{ deleted: number }>;
@@ -117,6 +118,11 @@ function makeScoped(db: Db, tenantId: string, session?: ClientSession): ScopedDb
       async updateOne(filter, update) {
         assertUpdateSafe(update, tenantId);
         const r = await col.updateOne(scopeFilter(filter, tenantId), update, opts);
+        return { matched: r.matchedCount };
+      },
+      async updateMany(filter, update) {
+        assertUpdateSafe(update, tenantId);
+        const r = await col.updateMany(scopeFilter(filter, tenantId), update, opts);
         return { matched: r.matchedCount };
       },
       async findOneAndUpdate(filter, update) {

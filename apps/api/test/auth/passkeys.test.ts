@@ -301,6 +301,16 @@ describe('removing a passkey (FR-1)', () => {
     expect((await userDoc(u._id)).passkeys).toHaveLength(1);
   });
 
+  test('two concurrent deletes with TOTP and two passkeys: both 204 and no passkeys field is left', async () => {
+    const u = await newUser({ totp: true });
+    const a = await givePasskey(u._id);
+    const b = await givePasskey(u._id);
+    const sess = await signInAs(t.app, t.db, u._id);
+    const [r1, r2] = await Promise.all([del(a.id, sess), del(b.id, sess)]);
+    expect([r1.statusCode, r2.statusCode]).toEqual([204, 204]);
+    expect(await t.db.collection('users').findOne({ _id: u._id as never, passkeys: { $exists: true } })).toBeNull();
+  });
+
   test('without TOTP, one of two passkeys can go', async () => {
     const u = await newUser();
     const a = await givePasskey(u._id);

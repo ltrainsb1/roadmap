@@ -139,6 +139,8 @@ export function registerPasskeyRoutes(app: FastifyInstance, deps: PasskeyRouteDe
           ? new HttpError(409, 'last_factor')
           : new HttpError(404, 'not_found');
       }
+      // Two concurrent deletes can each $pull one entry and leave `[]`, which collides in the sparse unique index.
+      await actor.db.collection('users').updateOne({ _id: user._id, passkeys: { $size: 0 } }, { $unset: { passkeys: '' } });
       await audit.record(actor.db, {
         action: 'auth.passkey.removed',
         actor: { type: 'user', userId: actor.userId },

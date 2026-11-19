@@ -775,3 +775,48 @@ test('tags, links, milestones and blocked by count as unsaved edits and are aske
   await panel.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page).toHaveURL(`/r/${id}/projects`);
 });
+
+test('the "blocked by" choices are indented by level with non-breaking spaces, which a select keeps', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'indent');
+  const id = await createRoadmap(page, 'Indent plan');
+  const call = await apiAs(page);
+  const top = await seedProject(call, id, 'Top item');
+  const mid = await seedProject(call, id, 'Mid item', top);
+  await seedProject(call, id, 'Deep item', mid);
+  const lone = await seedProject(call, id, 'Lone item');
+  await page.goto(projectUrl(id, lone));
+  const options = panelOf(page, 'Lone item').getByLabel('Add an item this is blocked by', { exact: true }).locator('option');
+  await expect(options).toHaveCount(4);
+  // The raw text, not trimmed: two non-breaking spaces a level.
+  expect(await options.allTextContents()).toEqual(['Choose an item', 'Top item', '\u00a0\u00a0Mid item', '\u00a0\u00a0\u00a0\u00a0Deep item']);
+});
+
+test('removing a tag keeps focus in the tag list: the next remove button, else the previous, else the add field; a full list hands focus to its last tag', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'focuser');
+  const id = await createRoadmap(page, 'Focus plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Alpha');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Alpha');
+  const tag = panel.getByLabel('Add a tag', { exact: true });
+  for (const t of ['a', 'b', 'c']) {
+    await tag.fill(t);
+    await tag.press('Enter');
+  }
+  await panel.getByRole('button', { name: 'Remove tag b' }).click();
+  await expect(panel.getByRole('button', { name: 'Remove tag c' })).toBeFocused();
+  await panel.getByRole('button', { name: 'Remove tag c' }).click();
+  await expect(panel.getByRole('button', { name: 'Remove tag a' })).toBeFocused();
+  await panel.getByRole('button', { name: 'Remove tag a' }).click();
+  await expect(tag).toBeFocused();
+
+  // At ten tags the field goes away; focus must not fall to the page.
+  for (let n = 1; n <= 10; n++) {
+    await tag.fill(`t${n}`);
+    await tag.press('Enter');
+  }
+  await expect(tag).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Remove tag t10' })).toBeFocused();
+});

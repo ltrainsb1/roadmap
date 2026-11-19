@@ -12,6 +12,18 @@ import {
 
 useCspGuard();
 
+/**
+ * Presses `key` until the screen-reader live region says `text`. dnd-kit starts listening for the arrow keys a
+ * moment after the pick-up, so an early press is lost; a press that did land is never repeated because the
+ * announcement then appears. The caller checks the final order, which would show a double move.
+ */
+async function pressUntilAnnounced(page: Page, key: string, text: string) {
+  await expect(async () => {
+    await page.keyboard.press(key);
+    await expect(page.getByText(text, { exact: true })).toBeAttached({ timeout: 400 });
+  }).toPass({ timeout: 10_000 });
+}
+
 type Call = Awaited<ReturnType<typeof apiAs>>;
 interface Row {
   id: string;
@@ -66,10 +78,7 @@ test('FR-1.3: an Admin reorders with the keyboard on the drag handle', async ({ 
   await handle.focus();
   await page.keyboard.press('Space');
   await expect(page.getByText('Picked up One.', { exact: true })).toBeAttached();
-  // dnd-kit starts listening for the arrow keys a moment after the pick-up.
-  await page.waitForTimeout(200);
-  await page.keyboard.press('ArrowDown');
-  await expect(page.getByText('Moved One to position 2 of 3.', { exact: true })).toBeAttached();
+  await pressUntilAnnounced(page, 'ArrowDown', 'Moved One to position 2 of 3.');
   await expectNoA11yViolations(page);
   await page.keyboard.press('Space');
   await expect(page.getByText('Dropped One at position 2 of 3.', { exact: true })).toBeAttached();
@@ -82,11 +91,12 @@ test('FR-1.3: an Admin reorders with the keyboard on the drag handle', async ({ 
   // Escape puts the row back.
   await page.getByRole('button', { name: 'Reorder Two' }).focus();
   await page.keyboard.press('Space');
-  await page.waitForTimeout(200);
-  await page.keyboard.press('ArrowDown');
+  await pressUntilAnnounced(page, 'ArrowDown', 'Moved Two to position 2 of 3.');
   await page.keyboard.press('Escape');
   await expect(page.getByText('Reordering cancelled.', { exact: true })).toBeAttached();
-  expect(await titles(page)).toEqual(['Two', 'One', 'Three']);
+  await expect.poll(() => titles(page)).toEqual(['Two', 'One', 'Three']);
+  await page.reload();
+  await expect.poll(() => titles(page)).toEqual(['Two', 'One', 'Three']);
 });
 
 test('FR-1.3: an Admin drags a row with the mouse', async ({ page, isMobile }) => {
@@ -242,26 +252,40 @@ test('FR-1.3: a sub-project moves only among its own siblings, and a dragged pro
   await seedProject(call, id, 'Opening', season);
   await seedProject(call, id, 'Closing', season);
   await seedProject(call, id, 'Other');
+  await seedProject(call, id, 'Third');
   await page.reload();
-  await expect(projectRow(page, 'Other')).toBeVisible();
+  await expect(projectRow(page, 'Third')).toBeVisible();
 
-  // Down from the last sub-project stays inside Season: Other is not a place it can land.
+  // Every announcement the live region makes, to see where the keyboard ever took the row.
+  await page.evaluate(() => {
+    const said: string[] = [];
+    (window as unknown as { said: string[] }).said = said;
+    new MutationObserver(() => {
+      for (const el of document.querySelectorAll('[role=status]')) if (el.textContent) said.push(el.textContent);
+    }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  const heard = () => page.evaluate(() => [...new Set((window as unknown as { said: string[] }).said)]);
+
+  // Down from the last sub-project stays inside Season (two items): Other and Third (a group of three) are not places it can land.
   await page.getByRole('button', { name: 'Reorder Closing' }).focus();
   await page.keyboard.press('Space');
-  await page.waitForTimeout(200);
+  await expect(page.getByText('Picked up Closing.', { exact: true })).toBeAttached();
+  await pressUntilAnnounced(page, 'ArrowUp', 'Moved Closing to position 1 of 2.');
+  await pressUntilAnnounced(page, 'ArrowDown', 'Moved Closing to position 2 of 2.');
+  await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Space');
-  await page.waitForTimeout(300);
-  expect(await titles(page)).toEqual(['Season', 'Opening', 'Closing', 'Other']);
+  await expect(page.getByText('Dropped Closing at position 2 of 2.', { exact: true })).toBeAttached();
+  expect((await heard()).filter((t) => /of 3\.$/.test(t))).toEqual([]);
+  expect(await titles(page)).toEqual(['Season', 'Opening', 'Closing', 'Other', 'Third']);
   expect((await list(call, id)).filter((i) => i.parentId === season).length).toBe(2);
 
   // Season goes below Other with Opening and Closing following it.
   await page.getByRole('button', { name: 'Reorder Season' }).focus();
   await page.keyboard.press('Space');
-  await page.waitForTimeout(200);
   await expect(projectRow(page, 'Opening')).toHaveCount(0);
-  await page.keyboard.press('ArrowDown');
-  await expect(page.getByText('Moved Season to position 2 of 2.', { exact: true })).toBeAttached();
+  await pressUntilAnnounced(page, 'ArrowDown', 'Moved Season to position 2 of 3.');
   await page.keyboard.press('Space');
-  await expect.poll(() => titles(page)).toEqual(['Other', 'Season', 'Opening', 'Closing']);
+  await expect(page.getByText('Dropped Season at position 2 of 3.', { exact: true })).toBeAttached();
+  await expect.poll(() => titles(page)).toEqual(['Other', 'Season', 'Opening', 'Closing', 'Third']);
 });

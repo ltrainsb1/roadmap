@@ -1,8 +1,9 @@
 import { buildTree, LIMITS, linkSchema, milestoneSchema, tagSchema, wouldCycle, type Project, type TreeNode } from '@roadmap/shared';
-import { useId, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
 import { SelectField } from '../ui/SelectField.tsx';
+import { focusRemaining } from './focusAfterRemove.ts';
 import { formatDay } from './names.ts';
 
 /** A link in the form; `id` is set once it is saved, and a new one has none. */
@@ -50,9 +51,9 @@ const REMOVE_ICON = (
   </svg>
 );
 
-function RemoveButton({ label, onRemove }: { label: string; onRemove: () => void }) {
+function RemoveButton({ label, list, onRemove }: { label: string; list: string; onRemove: () => void }) {
   return (
-    <button type="button" className="icon-btn" aria-label={label} onClick={onRemove}>
+    <button type="button" className="icon-btn" data-list={list} aria-label={label} onClick={onRemove}>
       {REMOVE_ICON}
     </button>
   );
@@ -93,13 +94,33 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
   const [milestone, setMilestone] = useState({ name: '', date: '' });
   const [milestoneError, setMilestoneError] = useState<string | undefined>();
   const blockedId = useId();
+  const root = useRef<HTMLDivElement>(null);
+  // Where focus goes once the list has re-rendered, because the control that held it is gone or hidden.
+  const refocus = useRef<{ list: string; index: number; fallbackId: string } | null>(null);
+  useEffect(() => {
+    const target = refocus.current;
+    refocus.current = null;
+    if (target && root.current) focusRemaining(root.current, target.list, target.index, target.fallbackId);
+  }, [values]);
+  /** Removes entry `index` of `list` and keeps focus in that list. */
+  const removeFrom = (list: string, index: number, fallbackId: string, patch: Partial<ListValues>) => {
+    refocus.current = { list, index, fallbackId };
+    onChange(patch);
+  };
+  /** After adding, a full list hides its add controls; focus goes to the last entry's remove button. */
+  const afterAdd = (list: string, count: number, max: number, fallbackId: string) => {
+    if (count >= max) refocus.current = { list, index: count - 1, fallbackId };
+  };
 
   const addTag = () => {
     const parsed = tagSchema.safeParse(tag);
     if (!parsed.success) return setTagError('Enter a tag.');
     setTagError(undefined);
     setTag('');
-    if (!values.tags.includes(parsed.data)) onChange({ tags: [...values.tags, parsed.data] });
+    if (!values.tags.includes(parsed.data)) {
+      afterAdd('tags', values.tags.length + 1, LIMITS.tags, id('tag'));
+      onChange({ tags: [...values.tags, parsed.data] });
+    }
   };
 
   const addLink = () => {
@@ -107,6 +128,7 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
     if (!parsed.success) return setLinkError('Enter an address that starts with http:// or https://.');
     setLinkError(undefined);
     setLink({ label: '', url: '' });
+    afterAdd('links', values.links.length + 1, LIMITS.links, id('link-label'));
     onChange({ links: [...values.links, parsed.data] });
   };
 
@@ -115,6 +137,7 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
     if (!parsed.success) return setMilestoneError('Enter a name and a date.');
     setMilestoneError(undefined);
     setMilestone({ name: '', date: '' });
+    afterAdd('milestones', values.milestones.length + 1, LIMITS.milestones, id('milestone-name'));
     onChange({ milestones: [...values.milestones, parsed.data] });
   };
 
@@ -129,7 +152,7 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
   const assigned = item.assigneeIds.map((userId) => members.find((m) => m.userId === userId)?.name).filter((n): n is string => n !== undefined);
 
   return (
-    <>
+    <div ref={root}>
       <Group legend="Assignees">
         {canAssign ? (
           members.map((m) => (
@@ -154,7 +177,7 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
             {values.tags.map((t) => (
               <li key={t}>
                 <span className="pill">{t}</span>
-                {editable && <RemoveButton label={`Remove tag ${t}`} onRemove={() => onChange({ tags: values.tags.filter((x) => x !== t) })} />}
+                {editable && <RemoveButton label={`Remove tag ${t}`} list="tags" onRemove={() => removeFrom('tags', values.tags.indexOf(t), id('tag'), { tags: values.tags.filter((x) => x !== t) })} />}
               </li>
             ))}
           </ul>
@@ -187,7 +210,7 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
                 <a href={l.url} target="_blank" rel="noopener noreferrer">
                   {l.label || l.url}
                 </a>
-                {editable && <RemoveButton label={`Remove link ${l.label || l.url}`} onRemove={() => onChange({ links: values.links.filter((_, i) => i !== index) })} />}
+                {editable && <RemoveButton label={`Remove link ${l.label || l.url}`} list="links" onRemove={() => removeFrom('links', index, id('link-label'), { links: values.links.filter((_, i) => i !== index) })} />}
               </li>
             ))}
           </ul>
@@ -229,7 +252,7 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
                 <span>
                   {m.name} ({formatDay(m.date)})
                 </span>
-                {editable && <RemoveButton label={`Remove milestone ${m.name}`} onRemove={() => onChange({ milestones: values.milestones.filter((_, i) => i !== index) })} />}
+                {editable && <RemoveButton label={`Remove milestone ${m.name}`} list="milestones" onRemove={() => removeFrom('milestones', index, id('milestone-name'), { milestones: values.milestones.filter((_, i) => i !== index) })} />}
               </li>
             ))}
           </ul>
@@ -265,7 +288,7 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
       <Group legend="Blocked by">
         {values.blockedBy.length > 0 && (
           <ul className="entry-list">
-            {values.blockedBy.map((blockerId) => {
+            {values.blockedBy.map((blockerId, index) => {
               const blocker = byId.get(blockerId);
               return (
                 <li key={blockerId}>
@@ -276,7 +299,8 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
                   {editable && (
                     <RemoveButton
                       label={`Remove ${blocker?.title ?? 'Deleted item'}`}
-                      onRemove={() => onChange({ blockedBy: values.blockedBy.filter((x) => x !== blockerId) })}
+                      list="blocked"
+                      onRemove={() => removeFrom('blocked', index, blockedId, { blockedBy: values.blockedBy.filter((x) => x !== blockerId) })}
                     />
                   )}
                 </li>
@@ -289,7 +313,11 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
             id={blockedId}
             label="Add an item this is blocked by"
             value=""
-            onChange={(e) => e.target.value && onChange({ blockedBy: [...values.blockedBy, e.target.value] })}
+            onChange={(e) => {
+              if (!e.target.value) return;
+              afterAdd('blocked', values.blockedBy.length + 1, LIMITS.blockedBy, blockedId);
+              onChange({ blockedBy: [...values.blockedBy, e.target.value] });
+            }}
           >
             <option value="">Choose an item</option>
             {choices.map((c) => (
@@ -301,6 +329,6 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
           </SelectField>
         )}
       </Group>
-    </>
+    </div>
   );
 }

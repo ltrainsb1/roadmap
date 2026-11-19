@@ -32,6 +32,7 @@ export function MembersPage() {
   const [message, setMessage] = useState<Message | null>(null);
   const [emailError, setEmailError] = useState<string | undefined>();
   const [removing, setRemoving] = useState<Member | null>(null);
+  const [revoking, setRevoking] = useState<MembersResponse['invites'][number] | null>(null);
   const [dialogError, setDialogError] = useState<string | undefined>();
   const [transferring, setTransferring] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -49,6 +50,7 @@ export function MembersPage() {
 
   const closeDialogs = () => {
     setRemoving(null);
+    setRevoking(null);
     setTransferring(false);
     setDeleting(false);
     setDialogError(undefined);
@@ -77,13 +79,15 @@ export function MembersPage() {
     }
   };
 
-  const revoke = async (inviteId: string) => {
-    setMessage(null);
+  const revoke = async () => {
+    if (!revoking) return;
     try {
-      await api(`${base}/invites/${encodeURIComponent(inviteId)}`, { method: 'DELETE' });
+      await api(`${base}/invites/${encodeURIComponent(revoking.id)}`, { method: 'DELETE' });
+      closeDialogs();
       await refresh();
     } catch (err) {
-      fail(err);
+      setDialogError(messageFor(err));
+      void refresh();
     }
   };
 
@@ -188,7 +192,7 @@ export function MembersPage() {
                   </td>
                   <td className="row-actions">
                     {removable && (
-                      <Button aria-label={`Remove ${m.name}`} onClick={() => setRemoving(m)}>
+                      <Button variant="danger" aria-label={`Remove ${m.name}`} onClick={() => setRemoving(m)}>
                         Remove
                       </Button>
                     )}
@@ -210,7 +214,7 @@ export function MembersPage() {
                   {i.email}, {roleName(i.role)}
                 </span>
                 {can({ role, action: 'member.invite', ctx: { newRole: i.role } }) && (
-                  <Button aria-label={`Revoke invite for ${i.email}`} onClick={() => void revoke(i.id)}>
+                  <Button variant="danger" aria-label={`Revoke invite for ${i.email}`} onClick={() => setRevoking(i)}>
                     Revoke
                   </Button>
                 )}
@@ -268,6 +272,17 @@ export function MembersPage() {
       </ConfirmDialog>
 
       <ConfirmDialog
+        open={revoking !== null}
+        title="Revoke invite"
+        confirmLabel="Revoke"
+        error={dialogError}
+        onConfirm={() => void revoke()}
+        onClose={closeDialogs}
+      >
+        <p>Revoke the invite for {revoking?.email}? The link stops working.</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
         open={transferring}
         title="Transfer ownership"
         confirmLabel="Transfer ownership"
@@ -280,7 +295,7 @@ export function MembersPage() {
           <p>Invite someone first. Only a member can become the owner.</p>
         ) : (
           <>
-            <p>Choose who becomes the owner. You will become an admin.</p>
+            <p>Choose who becomes the owner. You will become an Admin.</p>
             <SelectField id="new-owner" ref={newOwner} label="New owner">
               {others.map((m) => (
                 <option key={m.userId} value={m.userId}>

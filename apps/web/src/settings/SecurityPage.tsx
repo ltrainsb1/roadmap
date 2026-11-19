@@ -29,6 +29,7 @@ export function SecurityPage() {
   const [codeError, setCodeError] = useState<string | undefined>();
   const [newCodes, setNewCodes] = useState<string[] | null>(null);
   const [sessionError, setSessionError] = useState<string | undefined>();
+  const [signingOut, setSigningOut] = useState(false);
   const codeForm = useRef<HTMLFormElement>(null);
 
   const passkeys = me.data?.user.passkeys ?? [];
@@ -64,7 +65,7 @@ export function SecurityPage() {
   const makeCodes = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const code = formText(new FormData(e.currentTarget), 'code').trim();
-    if (!code) return setCodeError('Enter the 6-digit code from your app.');
+    if (!code) return setCodeError('Enter the 6-digit code from your authenticator app.');
     try {
       const res = await api<{ recoveryCodes: string[] }>('/api/auth/recovery-codes', { body: { code } });
       setCodeError(undefined);
@@ -99,7 +100,7 @@ export function SecurityPage() {
                 <span>
                   {p.name}, added {dateOf(p.createdAt)}
                 </span>
-                <Button aria-label={`Remove passkey ${p.name}`} onClick={() => setRemoving(p)}>
+                <Button variant="danger" aria-label={`Remove passkey ${p.name}`} onClick={() => setRemoving(p)}>
                   Remove
                 </Button>
               </li>
@@ -142,10 +143,24 @@ export function SecurityPage() {
 
       <section aria-labelledby="sessions-heading">
         <h2 id="sessions-heading">Sessions</h2>
-        {sessionError && <Alert>{sessionError}</Alert>}
-        <p>This signs you out on every device, including this one.</p>
-        <Button onClick={() => void signOutEverywhere()}>Sign out everywhere</Button>
+        <Button variant="danger" onClick={() => setSigningOut(true)}>
+          Sign out everywhere
+        </Button>
       </section>
+
+      <ConfirmDialog
+        open={signingOut}
+        title="Sign out everywhere"
+        confirmLabel="Sign out everywhere"
+        error={sessionError}
+        onConfirm={() => void signOutEverywhere()}
+        onClose={() => {
+          setSigningOut(false);
+          setSessionError(undefined);
+        }}
+      >
+        <p>Sign out everywhere? This signs you out on every device, including this one.</p>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={removing !== null}

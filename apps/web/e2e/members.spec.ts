@@ -8,6 +8,7 @@ import {
   joinViaInvite,
   sendInvite,
   uniqueEmail,
+  expectNoA11yViolations,
   useCspGuard,
 } from './helpers.ts';
 
@@ -65,7 +66,7 @@ test('Contributor sees no invite form, no role selects, no audit tab', async ({ 
 
   // Typing the address still shows a plain message, not the log.
   await p.goto(`/r/${id}/audit`);
-  await expect(p.getByRole('alert')).toHaveText('Only owners and admins can see the audit log.');
+  await expect(p.getByRole('alert')).toHaveText('Only Owners and Admins can see the audit log.');
   await guest.context.close();
 });
 
@@ -138,6 +139,7 @@ test('Owner changes a role and removes a member; the confirm dialog returns focu
   await expect(page.getByLabel('Role for crew user')).toHaveValue('admin');
 
   const remove = page.getByRole('button', { name: 'Remove crew user' });
+  await expect(remove).toHaveClass(/btn-danger/);
   await remove.click();
   const dialog = page.getByRole('dialog', { name: 'Remove member' });
   await expect(dialog.getByText('Remove crew user from Crew plan? They lose access right away.')).toBeVisible();
@@ -156,11 +158,26 @@ test('Owner changes a role and removes a member; the confirm dialog returns focu
   await crew.context.close();
 });
 
-test('Owner revokes a pending invite', async ({ page }) => {
+test('Owner revokes a pending invite after confirming', async ({ page }) => {
   await createSignedInUser(page, 'revoker');
   await createRoadmap(page, 'Revoke plan');
   const guest = uniqueEmail('late');
   await sendInvite(page, guest, 'Admin');
-  await page.getByRole('button', { name: `Revoke invite for ${guest}` }).click();
+
+  const revoke = page.getByRole('button', { name: `Revoke invite for ${guest}` });
+  await expect(revoke).toHaveClass(/btn-danger/);
+  await revoke.click();
+  const dialog = page.getByRole('dialog', { name: 'Revoke invite' });
+  await expect(dialog.getByText(`Revoke the invite for ${guest}? The link stops working.`)).toBeVisible();
+  await expectNoA11yViolations(page);
+
+  // Cancel leaves the invite in place and returns focus to the button.
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(revoke).toBeFocused();
+  await expect(page.getByRole('list', { name: 'Pending invites' })).toBeVisible();
+
+  await revoke.click();
+  await dialog.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Pending invites' })).toHaveCount(0);
 });

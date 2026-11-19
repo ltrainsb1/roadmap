@@ -60,7 +60,7 @@ export function AuditPage() {
     return (
       <>
         <h1>Audit log</h1>
-        <Alert>Only owners and admins can see the audit log.</Alert>
+        <Alert>Only Owners and Admins can see the audit log.</Alert>
       </>
     );
   }

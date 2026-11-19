@@ -29,7 +29,26 @@ test('Sign out of all sessions logs out a second browser context', async ({ page
 
   await page.getByRole('link', { name: 'Security' }).click();
   await expect(page.getByRole('heading', { name: 'Security', level: 1 })).toBeVisible();
-  await page.getByRole('button', { name: 'Sign out everywhere' }).click();
+  const everywhere = page.getByRole('button', { name: 'Sign out everywhere' });
+  await expect(everywhere).toHaveClass(/btn-danger/);
+  await everywhere.click();
+  const dialog = page.getByRole('dialog', { name: 'Sign out everywhere' });
+  await expect(
+    dialog.getByText('Sign out everywhere? This signs you out on every device, including this one.'),
+  ).toBeVisible();
+  await expectNoA11yViolations(page);
+
+  // Cancel keeps both browsers signed in.
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(everywhere).toBeFocused();
+  await otherPage.reload();
+  await expect(otherPage.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Security', level: 1 })).toBeVisible();
+
+  await everywhere.click();
+  await dialog.getByRole('button', { name: 'Sign out everywhere' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible();
 
   await otherPage.reload();
@@ -53,7 +72,7 @@ test('Security: new recovery codes need the authenticator code, show once, and r
   await expect(page.getByText('Your old codes stop working.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Make new codes' }).click();
-  await expect(page.getByText('Enter the 6-digit code from your app.')).toBeVisible();
+  await expect(page.getByText('Enter the 6-digit code from your authenticator app.')).toBeVisible();
   await field(page, '6-digit code').fill('000000');
   await page.getByRole('button', { name: 'Make new codes' }).click();
   await expect(page.getByText("That code didn't work. Try the next one your app shows.")).toBeVisible();
@@ -97,8 +116,10 @@ test('Security: add and remove a passkey', async ({ page, browserName }) => {
   await expect(list.getByRole('listitem')).toHaveCount(1);
 
   const remove = list.getByRole('button', { name: /^Remove passkey/ });
+  await expect(remove).toHaveClass(/btn-danger/);
   await remove.click();
   const dialog = page.getByRole('dialog', { name: 'Remove passkey' });
+  await expectNoA11yViolations(page);
   await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(page.getByText('You have no passkeys yet.')).toBeVisible();
 });

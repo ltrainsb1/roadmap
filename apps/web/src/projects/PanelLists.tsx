@@ -322,7 +322,7 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
             <option value="">Choose an item</option>
             {choices.map((c) => (
               <option key={c.id} value={c.id}>
-                {'  '.repeat(c.depth - 1)}
+                {'\u00a0\u00a0'.repeat(c.depth - 1)}
                 {c.title}
               </option>
             ))}

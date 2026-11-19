@@ -19,6 +19,8 @@ export async function ensureIndexes(db: Db): Promise<void> {
     ),
     db.collection('memberships').createIndex({ tenantId: 1, userId: 1 }),
     db.collection('roadmaps').createIndex({ tenantId: 1, createdAt: -1 }),
+    db.collection('projects').createIndex({ tenantId: 1, roadmapId: 1, parentId: 1, rank: 1 }),
+    db.collection('projects').createIndex({ tenantId: 1, roadmapId: 1, path: 1 }),
     db.collection('sessions').createIndex({ tenantId: 1, userId: 1 }),
     db.collection('invites').createIndex({ tenantId: 1, email: 1 }),
     db.collection('resetTokens').createIndex({ tenantId: 1, userId: 1 }),

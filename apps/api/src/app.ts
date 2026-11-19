@@ -10,6 +10,7 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { LIMITS } from '@roadmap/shared';
 import type { Config } from './config.ts';
 import type { Db } from './db/client.ts';
 import { registerErrorHandling } from './errors.ts';
@@ -20,6 +21,7 @@ import { registerAuthRoutes } from './auth/routes.ts';
 import { registerInviteRoutes } from './invites/routes.ts';
 import { registerAuditRoutes } from './audit/routes.ts';
 import { registerMemberRoutes } from './members/routes.ts';
+import { registerProjectRoutes } from './projects/routes.ts';
 import { registerRoadmapRoutes } from './roadmaps/routes.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { authPlugin } from './policy/hook.ts';
@@ -35,6 +37,8 @@ export interface AppDeps {
   webauthn?: PasskeyVerifiers;
   /** Outgoing email; defaults to the mailer named in the config. */
   mailer?: Mailer;
+  /** Most items one roadmap may hold; defaults to the shared limit. Tests lower it. */
+  maxProjectItems?: number;
 }
 
 const AUTH_PREFIX = '/api/auth/';
@@ -130,6 +134,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   registerMemberRoutes(app, { now });
   registerAuditRoutes(app);
+  registerProjectRoutes(app, { now, maxItems: deps.maxProjectItems ?? LIMITS.itemsPerRoadmap });
 
   app.get('/api/openapi.json', { config: { auth: { level: 'public' } } }, () => app.swagger());
 

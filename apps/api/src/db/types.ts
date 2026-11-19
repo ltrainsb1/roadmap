@@ -1,4 +1,4 @@
-import type { Role } from '@roadmap/shared';
+import type { Milestone, PriorityLabel, ProjectLink, ProjectStatus, Role } from '@roadmap/shared';
 
 // _id is a UUID v7 string. Every doc except TenantDoc and WebauthnChallengeDoc carries tenantId.
 // Later tasks add their fields to these types.
@@ -58,6 +58,35 @@ export interface RoadmapDoc {
   /** Archived roadmaps drop out of /api/me and /api/roadmaps. */
   archived: boolean;
   createdAt: Date;
+}
+
+export interface ProjectDoc {
+  _id: string;
+  tenantId: string;
+  roadmapId: string;
+  parentId: string | null;
+  depth: 1 | 2 | 3 | 4;
+  /** Ancestor ids from the top-level item down to the parent; empty at depth 1. */
+  path: string[];
+  title: string;
+  description: string;
+  status: ProjectStatus;
+  startDate: string | null;
+  endDate: string | null;
+  milestones: Milestone[];
+  tags: string[];
+  links: ProjectLink[];
+  blockedBy: string[];
+  assigneeIds: string[];
+  /** Order among siblings, from 0. */
+  rank: number;
+  priorityLabel: PriorityLabel | null;
+  archived: boolean;
+  /** Bumped on every edit; a stale client version is refused. */
+  version: number;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface SessionDoc {

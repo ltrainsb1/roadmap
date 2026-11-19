@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Role } from '@roadmap/shared';
+import type { ProjectStatus, Role } from '@roadmap/shared';
 import { hash } from '@node-rs/argon2';
 import type { FastifyInstance } from 'fastify';
 import { v7 as uuidv7 } from 'uuid';
@@ -13,7 +13,7 @@ import { loadConfig, type Config } from '../src/config.ts';
 import { connectDb, type Db } from '../src/db/client.ts';
 import { ensureIndexes } from '../src/db/indexes.ts';
 import { scoped } from '../src/db/scoped.ts';
-import type { MembershipDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
+import type { MembershipDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
 import { MemoryMailer } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
@@ -40,6 +40,20 @@ export interface Seeder {
     userId: string,
     role: Role,
   ): Promise<MembershipDoc>;
+  /** Goes through the scoped collection; computes depth, path and rank the way the create route does. */
+  project(
+    tenantId: string,
+    roadmapId: string,
+    o?: {
+      parentId?: string;
+      title?: string;
+      assigneeIds?: string[];
+      status?: ProjectStatus;
+      startDate?: string;
+      endDate?: string;
+      archived?: boolean;
+    },
+  ): Promise<ProjectDoc>;
 }
 
 export interface TestApp {
@@ -63,6 +77,8 @@ export interface TestAppOptions {
   webauthn?: PasskeyVerifiers;
   /** Environment overrides, e.g. `{ HIBP_ENABLED: 'true' }`. */
   env?: Record<string, string>;
+  /** Replaces the per-roadmap item limit. */
+  maxProjectItems?: number;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -93,6 +109,7 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
+    ...(opts.maxProjectItems !== undefined ? { maxProjectItems: opts.maxProjectItems } : {}),
   });
   opts.routes?.(app);
 
@@ -146,6 +163,37 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
       scoped(db, tenantId)
         .collection('memberships')
         .insertOne({ _id: uuidv7(), roadmapId, userId, role, createdAt: new Date() }),
+    async project(tenantId, roadmapId, o = {}) {
+      const s = scoped(db, tenantId);
+      const parent = o.parentId ? await s.collection('projects').findOne({ _id: o.parentId, roadmapId }) : null;
+      if (o.parentId && !parent) throw new Error(`seed.project: no parent ${o.parentId}`);
+      const siblings = await s.collection('projects').find({ roadmapId, parentId: parent?._id ?? null });
+      const now = new Date();
+      return s.collection('projects').insertOne({
+        _id: uuidv7(),
+        roadmapId,
+        parentId: parent?._id ?? null,
+        depth: ((parent?.depth ?? 0) + 1) as ProjectDoc['depth'],
+        path: parent ? [...parent.path, parent._id] : [],
+        title: o.title ?? 'Item',
+        description: '',
+        status: o.status ?? 'not_started',
+        startDate: o.startDate ?? null,
+        endDate: o.endDate ?? null,
+        milestones: [],
+        tags: [],
+        links: [],
+        blockedBy: [],
+        assigneeIds: o.assigneeIds ?? [],
+        rank: siblings.reduce((max, x) => Math.max(max, x.rank + 1), 0),
+        priorityLabel: null,
+        archived: o.archived ?? false,
+        version: 1,
+        createdBy: 'seed',
+        createdAt: now,
+        updatedAt: now,
+      });
+    },
   };
 
   return {

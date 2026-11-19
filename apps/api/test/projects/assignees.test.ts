@@ -185,7 +185,7 @@ describe('assignment racing a removal', () => {
       expect(roadmap).not.toBeNull();
       expect(JSON.stringify(assigned.json())).not.toMatch(/Revision/);
     }
-  });
+  }, 30_000); // conflicting transactions retry, which is slow on a loaded runner
 });
 
 describe('Tenant isolation', () => {

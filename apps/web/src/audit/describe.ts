@@ -16,6 +16,9 @@ const role = (value: unknown): string | undefined => {
   return v ? roleName(v as Role) : undefined;
 };
 
+/** The stored title of the item an event is about; the item may be gone, so this reads the event, not the list. */
+const item = (value: unknown): string => text(value, 'title') ?? 'an item';
+
 function actorName(actor: AuditEvent['actor']): string {
   if (actor.type === 'system') return 'The system';
   return actor.name ?? 'A former member';
@@ -54,6 +57,27 @@ export function describeAuditEvent(e: AuditEvent, nameOf: (userId: string) => st
     }
     case 'member.remove':
       return `${who} removed ${member(e.target.id)} from the roadmap.`;
+    case 'project.create':
+      return `${who} added ${item(e.after)}.`;
+    case 'project.update':
+      return `${who} changed ${item(e.after)}.`;
+    case 'project.delete':
+      // The item is gone, so its name comes from what was stored before.
+      return `${who} deleted ${item(e.before)}.`;
+    case 'project.archive':
+      return `${who} archived ${item(e.after)}.`;
+    case 'project.unarchive':
+      return `${who} unarchived ${item(e.after)}.`;
+    case 'project.assign':
+      return `${who} changed who is assigned to ${item(e.after)}.`;
+    case 'project.reorder': {
+      const parent = text(e.after, 'parentTitle');
+      return parent ? `${who} reordered the items under ${parent}.` : `${who} reordered the projects.`;
+    }
+    case 'project.priority_label': {
+      const label = text(e.after, 'priorityLabel');
+      return label ? `${who} set the priority label of ${item(e.after)} to ${label}.` : `${who} removed the priority label of ${item(e.after)}.`;
+    }
     default:
       return `${who} made a change: ${e.action}.`;
   }

@@ -157,8 +157,16 @@ interface TreeProps {
   role: Role;
   /** The signed-in person, to decide where a Contributor may add. */
   myId: string | undefined;
-  /** The items to show: the page decides which (for now, the ones that are not archived). */
+  /** The items to show: the page decides which (the matches and their ancestors while filtering). */
   items: readonly Project[];
+  /** Items shown only because something under them matches: greyed, and not a place to add under. */
+  contextIds?: ReadonlySet<string>;
+  /** Every shown item is open, whatever was collapsed: a filter must not hide a match. The collapsed state is left as it was. */
+  expandAll?: boolean;
+  /** False while filtering or showing archived items: a reorder sends a whole sibling group, and the list holds part of it. */
+  reorderable?: boolean;
+  /** The query string to keep when opening an item, with its leading "?" or empty. */
+  search?: string;
   byId: ReadonlyMap<string, Project>;
   /** Member names by user id. */
   memberNames: ReadonlyMap<string, string>;
@@ -182,9 +190,9 @@ interface TreeProps {
 }
 
 export function ProjectTree(props: TreeProps) {
-  const { roadmapId, role, myId, items, byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus, onOpen, onReorder, onArchive, onUnarchive, onDelete } = props;
+  const { roadmapId, role, myId, items, contextIds, expandAll = false, reorderable = true, search = '', byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus, onOpen, onReorder, onArchive, onUnarchive, onDelete } = props;
   const tree = buildTree(items);
-  const canReorder = can({ role, action: 'project.setPriority' });
+  const canReorder = reorderable && can({ role, action: 'project.setPriority' });
   // The row being dragged shows without its children, so it moves as one line.
   const [dragging, setDragging] = useState<string | null>(null);
   const sensors = useSensors(
@@ -229,7 +237,7 @@ export function ProjectTree(props: TreeProps) {
   const menuItems = (item: Project, group: TreeNode[]): MenuItem[] => {
     const entries: MenuItem[] = [{ label: 'Open', onSelect: () => onOpen(item.id) }];
     const add = addChildLabel(item.depth);
-    if (!item.archived && add && can({ role, action: 'project.create', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
+    if (!item.archived && !contextIds?.has(item.id) && add && can({ role, action: 'project.create', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
       entries.push({ label: add, onSelect: () => onStartAdd(item.id) });
     }
     if (!item.archived && canReorder) {
@@ -261,7 +269,8 @@ export function ProjectTree(props: TreeProps) {
 
   const renderNode = ({ item, children, position }: TreeNode, group: TreeNode[]): ReactNode => {
     const hasChildren = children.length > 0;
-    const open = !collapsed.has(item.id) && dragging !== item.id;
+    const open = expandAll || (!collapsed.has(item.id) && dragging !== item.id);
+    const context = contextIds?.has(item.id) === true;
     const warnings = projectWarnings(item, byId).map((w) => warningText(w, byId));
     const names = item.assigneeIds.map((id) => memberNames.get(id)).filter((n): n is string => n !== undefined);
     return (
@@ -270,13 +279,13 @@ export function ProjectTree(props: TreeProps) {
           id={item.id}
           title={item.title}
           draggable={canReorder && !item.archived}
-          className={`depth-${item.depth}${item.id === selectedId ? ' selected' : ''}`}
+          className={`depth-${item.depth}${item.id === selectedId ? ' selected' : ''}${context ? ' context' : ''}`}
         >
           {(handle) => (
             <>
           <th scope="row" className="name-cell">
             <div className="name">
-              {hasChildren ? (
+              {hasChildren && !expandAll ? (
                 <button type="button" className="icon-btn" aria-label={`${open ? 'Collapse' : 'Expand'} ${item.title}`} onClick={() => onToggle(item.id)}>
                   <Chevron open={open} />
                 </button>
@@ -284,7 +293,7 @@ export function ProjectTree(props: TreeProps) {
                 <span className="chevron-space" aria-hidden="true" />
               )}
               <span className="sr-only">{levelName(item.depth)}: </span>
-              <Link id={titleLinkId(item.id)} to={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}`} className="item-title"
+              <Link id={titleLinkId(item.id)} to={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}${search}`} className="item-title"
                 onClick={(e) => {
                   // Plain clicks go through the page; a new-tab click keeps its default.
                   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -294,11 +303,13 @@ export function ProjectTree(props: TreeProps) {
               >
                 {item.title}
               </Link>
+              {item.archived && <span className="badge">Archived</span>}
+              {context && <span className="sr-only">Shown for context</span>}
               {warnings.length > 0 && <WarningIcon texts={warnings} />}
             </div>
           </th>
           <td className="status-cell">
-            {can({ role, action: 'project.edit', ctx: { isAssigned: isAssigned(item, myId, byId) } }) ? (
+            {!item.archived && can({ role, action: 'project.edit', ctx: { isAssigned: isAssigned(item, myId, byId) } }) ? (
               <Menu
                 label={`Status of ${item.title}: ${statusName(item.status)}`}
                 buttonId={statusButtonId(item.id)}

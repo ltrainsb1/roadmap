@@ -1,7 +1,7 @@
-import { can, type PriorityLabel, type Project, type ProjectList, type ProjectStatus } from '@roadmap/shared';
+import { activeFilterCount, can, filterProjects, type PriorityLabel, type Project, type ProjectList, type ProjectStatus } from '@roadmap/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { errorCode, messageFor } from '../api/errors.ts';
 import { useMe } from '../auth/useMe.ts';
 import { useMembers } from '../members/useMembers.ts';
@@ -9,6 +9,9 @@ import { ROADMAP_NOT_FOUND, useRoadmap } from '../roadmaps/RoadmapLayout.tsx';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
+import { Field } from '../ui/Field.tsx';
+import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
+import { filtersFromSearch, filtersToSearch, hasNarrowing } from './filters.ts';
 import {
   actionsButtonId,
   NEW_PROJECT_BUTTON_ID,
@@ -32,6 +35,9 @@ import {
   useUpdateProject,
 } from './useProjects.ts';
 
+const NONE: ReadonlySet<string> = new Set();
+const FILTERS_BUTTON_ID = 'filters-button';
+
 export function ProjectsPage() {
   const { roadmapId, role } = useRoadmap();
   const { projectId } = useParams();
@@ -49,6 +55,11 @@ export function ProjectsPage() {
   const deleteItem = useDeleteProject(roadmapId);
   const queryClient = useQueryClient();
   const { collapsed, toggle, expand } = useCollapsed(roadmapId);
+  // The filters live in the address, and nowhere else: opening an item keeps them, and a copied link shows the same list.
+  const [params, setParams] = useSearchParams();
+  const myId = me.data?.user.id;
+  const filters = useMemo(() => filtersFromSearch(params, myId ?? ''), [params, myId]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [adding, setAdding] = useState<AddTarget | null>(null);
   // The message for the last failed action from a row or from a panel control that saves on change.
   const [actionError, setActionError] = useState<string | undefined>();
@@ -76,7 +87,22 @@ export function ProjectsPage() {
     if (headingFocus > 0) heading.current?.focus();
   }, [headingFocus]);
 
-  const shown = useMemo(() => projects.items.filter((i) => !i.archived), [projects.items]);
+  const narrowing = hasNarrowing(filters);
+  const filtered = narrowing || filters.showArchived;
+  const view = useMemo(() => {
+    if (!filtered) return { items: projects.items.filter((i) => !i.archived), context: NONE };
+    const { matches, context } = filterProjects(projects.items, filters);
+    return { items: projects.items.filter((i) => matches.has(i.id) || context.has(i.id)), context };
+  }, [filtered, filters, projects.items]);
+  const shown = view.items;
+  const tagsInUse = useMemo(() => [...new Set(projects.items.filter((i) => !i.archived).flatMap((i) => i.tags))].sort(), [projects.items]);
+  const search = params.toString() === '' ? '' : `?${params.toString()}`;
+  const setFilters = (next: typeof filters) => setParams(filtersToSearch(next), { replace: true });
+  const clearFilters = () => setParams(new URLSearchParams(), { replace: true });
+  const closeFilters = () => {
+    setFiltersOpen(false);
+    document.getElementById(FILTERS_BUTTON_ID)?.focus();
+  };
   const memberNames = useMemo(() => new Map((members.data?.members ?? []).map((m) => [m.userId, m.name])), [members.data]);
   const selected = projectId ? projects.byId.get(projectId) : undefined;
 
@@ -96,6 +122,8 @@ export function ProjectsPage() {
   };
 
   const listPath = `/r/${encodeURIComponent(roadmapId)}/projects`;
+  // Where closing the panel goes back to: the list as it was filtered.
+  const listUrl = `${listPath}${search}`;
   const hasPanel = projectId !== undefined;
 
   /** Runs `action` now, or after the person agrees to discard unsaved edits in the panel. */
@@ -106,11 +134,11 @@ export function ProjectsPage() {
   const closePanel = () =>
     unlessDirty(() => {
       returnFocusTo.current = projectId ?? null;
-      void navigate(listPath);
+      void navigate(listUrl);
     });
   const openItem = (itemId: string) => {
     if (itemId === projectId) return;
-    unlessDirty(() => void navigate(`${listPath}/${encodeURIComponent(itemId)}`));
+    unlessDirty(() => void navigate(`${listPath}/${encodeURIComponent(itemId)}${search}`));
   };
   useEffect(() => {
     if (hasPanel || returnFocusTo.current === null) return;
@@ -170,7 +198,7 @@ export function ProjectsPage() {
   /** Runs `action` now, or after the person agrees to discard unsaved edits in the panel `item` takes with it. */
   const unlessDirtyUnder = (item: Project, action: () => void) => (panelIsUnder(item) ? unlessDirty(action) : action());
   const leavePanelOf = (item: Project) => {
-    if (panelIsUnder(item)) void navigate(listPath);
+    if (panelIsUnder(item)) void navigate(listUrl);
     setHeadingFocus((n) => n + 1);
   };
 
@@ -225,6 +253,10 @@ export function ProjectsPage() {
   // Save is the primary button while an editable panel is open; otherwise "New project" is.
   const panelEditable =
     selected !== undefined && can({ role, action: 'project.edit', ctx: { isAssigned: isAssigned(selected, me.data?.user.id, projects.byId) } });
+  const activeCount = activeFilterCount(filters);
+  // A filtered list holds only part of a sibling group, and a reorder must send the whole group.
+  const reorderable = !filtered;
+  const canReorderRole = can({ role, action: 'project.setPriority' });
   const refreshFailed = hasList && projects.isRefetchError;
 
   return (
@@ -256,15 +288,56 @@ export function ProjectsPage() {
       {hasList && (
         <div className={hasPanel ? 'projects-layout has-panel' : 'projects-layout'}>
           <div className="projects-list">
+            <div className="list-toolbar">
+              <Field
+                id="project-search"
+                label="Search projects"
+                type="search"
+                value={filters.text}
+                onChange={(e) => setFilters({ ...filters, text: e.target.value })}
+              />
+              <Button
+                id={FILTERS_BUTTON_ID}
+                aria-expanded={filtersOpen}
+                aria-controls={FILTERS_PANEL_ID}
+                onClick={() => setFiltersOpen((open) => !open)}
+              >
+                {activeCount > 0 ? `Filters (${activeCount})` : 'Filters'}
+              </Button>
+            </div>
+            <FiltersPanel
+              open={filtersOpen}
+              filters={filters}
+              onChange={setFilters}
+              onClear={clearFilters}
+              onDone={closeFilters}
+              tagsInUse={tagsInUse}
+              members={members.data?.members ?? []}
+              myId={myId}
+            />
+            {!reorderable && canReorderRole && shown.length > 0 && <p className="reorder-note">Clear filters to reorder.</p>}
             {shown.length === 0 && adding === null && (
-              <p>{canAddTop ? 'No projects yet.' : 'No projects yet. An Admin adds the first one.'}</p>
+              <>
+                <p>
+                  {filtered && projects.items.length > 0
+                    ? 'No projects match these filters.'
+                    : canAddTop
+                      ? 'No projects yet.'
+                      : 'No projects yet. An Admin adds the first one.'}
+                </p>
+                {filtered && projects.items.length > 0 && <Button onClick={clearFilters}>Clear filters</Button>}
+              </>
             )}
             {(shown.length > 0 || adding !== null) && (
               <ProjectTree
                 roadmapId={roadmapId}
                 role={role}
-                myId={me.data?.user.id}
+                myId={myId}
                 items={shown}
+                contextIds={view.context}
+                expandAll={narrowing}
+                reorderable={reorderable}
+                search={search}
                 byId={projects.byId}
                 memberNames={memberNames}
                 onChangeStatus={changeStatus}
@@ -295,7 +368,7 @@ export function ProjectsPage() {
               myId={me.data?.user.id}
               item={selected}
               byId={projects.byId}
-              listPath={listPath}
+              listPath={listUrl}
               onClose={closePanel}
               onReload={reloadItem}
               members={members.data?.members ?? []}
@@ -308,7 +381,7 @@ export function ProjectsPage() {
           {hasPanel && !selected && (
             <section className="project-panel" aria-label="Details">
               <Alert>{ROADMAP_NOT_FOUND}</Alert>
-              <Link to={listPath} className="text-link">
+              <Link to={listUrl} className="text-link">
                 Back to projects
               </Link>
             </section>

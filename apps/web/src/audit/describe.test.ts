@@ -80,7 +80,7 @@ describe('describeAuditEvent', () => {
     expect(describeAuditEvent(event({ action: 'roadmap.create', actor: { type: 'system' } }), nameOf)).toBe(
       'The system created the roadmap.',
     );
-    expect(describeAuditEvent(event({ action: 'project.archive' }), nameOf)).toBe('Maria made a change: project.archive.');
+    expect(describeAuditEvent(event({ action: 'roadmap.delete' }), nameOf)).toBe('Maria made a change: roadmap.delete.');
   });
 
   test('ignores before and after values of the wrong shape', () => {
@@ -88,5 +88,54 @@ describe('describeAuditEvent', () => {
     expect(describeAuditEvent(event({ action: 'member.role_change', before: null, after: {} }), nameOf)).toBe(
       "Maria changed Bob's role.",
     );
+  });
+
+  describe('project events', () => {
+    const project = (action: Event['action'], over: Partial<Event> = {}) =>
+      describeAuditEvent(event({ action, target: { type: 'project', id: 'p1' }, ...over }), nameOf);
+
+    test('FR-1.8: project.create', () => {
+      expect(project('project.create', { after: { title: 'Launch', parentId: null } })).toBe('Maria added Launch.');
+    });
+
+    test('FR-1.8: project.update', () => {
+      expect(project('project.update', { before: { title: 'Old' }, after: { title: 'Launch' } })).toBe('Maria changed Launch.');
+    });
+
+    test('FR-1.8: project.delete names the item from before, so a deleted item is still named', () => {
+      expect(project('project.delete', { before: { title: 'Launch', count: 3 } })).toBe('Maria deleted Launch.');
+    });
+
+    test('FR-1.8: project.archive and project.unarchive', () => {
+      expect(project('project.archive', { after: { title: 'Launch', count: 1 } })).toBe('Maria archived Launch.');
+      expect(project('project.unarchive', { after: { title: 'Launch', count: 1 } })).toBe('Maria unarchived Launch.');
+    });
+
+    test('FR-1.8: project.assign', () => {
+      expect(project('project.assign', { before: { title: 'Launch', assigneeIds: [] }, after: { title: 'Launch', assigneeIds: ['u2'] } })).toBe(
+        'Maria changed who is assigned to Launch.',
+      );
+    });
+
+    test('FR-1.8: project.reorder names the parent, or says the projects for the top level', () => {
+      expect(project('project.reorder', { after: { parentTitle: 'Season', orderedIds: ['a', 'b'] } })).toBe(
+        'Maria reordered the items under Season.',
+      );
+      expect(project('project.reorder', { after: { parentTitle: null, orderedIds: ['a', 'b'] } })).toBe('Maria reordered the projects.');
+    });
+
+    test('FR-1.8: project.priority_label sets or removes the label', () => {
+      expect(project('project.priority_label', { before: { title: 'Launch', priorityLabel: null }, after: { title: 'Launch', priorityLabel: 'P1' } })).toBe(
+        'Maria set the priority label of Launch to P1.',
+      );
+      expect(project('project.priority_label', { before: { title: 'Launch', priorityLabel: 'P2' }, after: { title: 'Launch', priorityLabel: null } })).toBe(
+        'Maria removed the priority label of Launch.',
+      );
+    });
+
+    test('FR-1.8: an event without a stored title still reads as a sentence', () => {
+      expect(project('project.create')).toBe('Maria added an item.');
+      expect(project('project.delete', { before: 'oops' })).toBe('Maria deleted an item.');
+    });
   });
 });

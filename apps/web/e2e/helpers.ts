@@ -295,7 +295,7 @@ export async function openProject(page: Page, title: string) {
 /** Calls the API as the signed-in person on `page`, for seeding data the screen under test then shows. */
 export async function apiAs(page: Page) {
   const { csrfToken } = (await (await page.request.get('/api/me')).json()) as { csrfToken: string };
-  return async <T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, data?: unknown): Promise<T> => {
+  return async <T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, data?: unknown): Promise<T> => {
     const res = await page.request.fetch(path, { method, headers: { 'x-csrf-token': csrfToken }, ...(data === undefined ? {} : { data }) });
     expect(res.ok(), `${method} ${path} answered ${res.status()}`).toBe(true);
     return (res.status() === 204 ? undefined : await res.json()) as T;

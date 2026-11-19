@@ -41,7 +41,8 @@ function ProjectsRoute() {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      {/* The filters live in the address and drive controlled inputs, which must update in the same render as the event. */}
+      <BrowserRouter useTransitions={false}>
         <SignInRedirect />
         <Routes>
           <Route path="/login" element={<LoginPage />} />

@@ -21,6 +21,14 @@ const ACTION_FILTERS: ReadonlyArray<[AuditActionName, string]> = [
   ['invite.revoke', 'Invite revoked'],
   ['member.role_change', 'Role changed'],
   ['member.remove', 'Member removed'],
+  ['project.create', 'Item added'],
+  ['project.update', 'Item changed'],
+  ['project.delete', 'Item deleted'],
+  ['project.archive', 'Item archived'],
+  ['project.unarchive', 'Item unarchived'],
+  ['project.assign', 'Assignees changed'],
+  ['project.reorder', 'Items reordered'],
+  ['project.priority_label', 'Priority label changed'],
 ];
 
 export function AuditPage() {

@@ -859,3 +859,67 @@ select {
 .add-entry-stack .btn {
   align-self: flex-start;
 }
+
+.list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0 12px;
+}
+.list-toolbar .field {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.list-toolbar > .btn {
+  margin-bottom: 16px;
+}
+.filters-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.filters-panel[hidden] {
+  display: none;
+}
+.filters-panel h2 {
+  margin-top: 0;
+}
+.filters-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0 16px;
+}
+.filters-dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0 16px;
+}
+.filters-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.reorder-note {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+.badge {
+  display: inline-block;
+  flex: none;
+  padding: 0 8px;
+  font-size: 0.875rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.tree tr.context th,
+.tree tr.context td,
+.tree tr.context .item-title {
+  color: var(--muted);
+}
+.tree tr.context .item-title {
+  font-weight: normal;
+  font-style: italic;
+}

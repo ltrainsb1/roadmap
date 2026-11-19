@@ -24,6 +24,7 @@ export interface Actor {
   userId: string;
   tenantId: string;
   sessionId: string;
+  csrfToken: string;
   role: Role | null;
   db: ScopedDb;
 }
@@ -81,6 +82,7 @@ export const authPlugin = fp(
           userId: session.userId,
           tenantId: session.tenantId,
           sessionId: session._id,
+          csrfToken: session.csrfToken,
           role: null,
           db: scoped(opts.db, session.tenantId),
         };

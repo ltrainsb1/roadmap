@@ -16,6 +16,12 @@ export interface UserDoc {
   name: string;
   timezone: string;
   passwordHash: string | null;
+  failedLogins: number;
+  lockedUntil: Date | null;
+  /** Set by the TOTP task; absent until the user has enrolled. */
+  totp?: { secretEnc: string } | null;
+  /** Filled by the passkeys task. */
+  passkeys?: Array<{ credentialId: string; name: string; createdAt: Date }>;
   createdAt: Date;
 }
 
@@ -31,6 +37,8 @@ export interface RoadmapDoc {
   _id: string;
   tenantId: string;
   name: string;
+  /** Set when a roadmap is archived; archived roadmaps drop out of /api/me. */
+  archivedAt?: Date | null;
   createdAt: Date;
 }
 

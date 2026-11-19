@@ -11,6 +11,7 @@ import { z } from 'zod';
 import type { Config } from './config.ts';
 import type { Db } from './db/client.ts';
 import { registerErrorHandling } from './errors.ts';
+import { registerAuthRoutes } from './auth/routes.ts';
 import { authPlugin } from './policy/hook.ts';
 
 export interface AppDeps {
@@ -18,6 +19,8 @@ export interface AppDeps {
   db: Db;
   /** Clock for session lifetimes; tests replace it. */
   now?: () => Date;
+  /** Replaces global fetch; used only by the breached-password check. */
+  fetch?: typeof fetch;
 }
 
 const AUTH_PREFIX = '/api/auth/';
@@ -66,6 +69,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     },
     () => ({ status: 'ok' as const }),
   );
+
+  registerAuthRoutes(app, {
+    db: deps.db,
+    config: deps.config,
+    now: deps.now ?? (() => new Date()),
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+  });
 
   return app;
 }

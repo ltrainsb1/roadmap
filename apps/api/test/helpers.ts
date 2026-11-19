@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Role } from '@roadmap/shared';
+import { hash } from '@node-rs/argon2';
 import type { FastifyInstance } from 'fastify';
 import { v7 as uuidv7 } from 'uuid';
 import { inject } from 'vitest';
@@ -48,7 +49,14 @@ export interface TestAppOptions {
   routes?: (app: FastifyInstance) => void;
   /** Clock for the session store. */
   now?: () => Date;
+  /** Replaces global fetch for the breached-password check. */
+  fetch?: typeof fetch;
+  /** Environment overrides, e.g. `{ HIBP_ENABLED: 'true' }`. */
+  env?: Record<string, string>;
 }
+
+// Argon2id (the default algorithm) at the minimum cost the library accepts.
+const SEED_HASH_PARAMS = { memoryCost: 8, timeCost: 1, parallelism: 1 } as const;
 
 const TEST_ENV = {
   NODE_ENV: 'test',
@@ -62,10 +70,15 @@ const TEST_ENV = {
 export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   const mongo = startMongo();
   const dbName = `test_${randomUUID().replaceAll('-', '')}`;
-  const config: Config = loadConfig({ ...TEST_ENV, MONGO_URI: mongo.uri, MONGO_DB: dbName });
+  const config: Config = loadConfig({ ...TEST_ENV, ...opts.env, MONGO_URI: mongo.uri, MONGO_DB: dbName });
   const { client, db } = await connectDb(mongo.uri, dbName);
   await ensureIndexes(db);
-  const app = await buildApp({ config, db, ...(opts.now ? { now: opts.now } : {}) });
+  const app = await buildApp({
+    config,
+    db,
+    ...(opts.now ? { now: opts.now } : {}),
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
+  });
   opts.routes?.(app);
 
   const un = unscoped(db);
@@ -82,7 +95,12 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
         email: o.email ?? `user-${id}@example.com`,
         name: 'Test User',
         timezone: 'UTC',
-        passwordHash: null, // argon2 arrives with the sign-in task; password and totp are ignored until then
+        // Real argon2id, but cheap: production cost would make every seeded user take ~50 ms.
+        passwordHash: o.password === undefined ? null : await hash(o.password, SEED_HASH_PARAMS),
+        failedLogins: 0,
+        lockedUntil: null,
+        // The TOTP task replaces this marker with a real encrypted secret.
+        ...(o.totp ? { totp: { secretEnc: 'seeded' } } : {}),
         createdAt: new Date(),
       });
     },

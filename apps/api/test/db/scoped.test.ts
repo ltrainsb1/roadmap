@@ -29,6 +29,8 @@ const user = (id: string, email: string) => ({
   name: 'N',
   timezone: 'UTC',
   passwordHash: null,
+  failedLogins: 0,
+  lockedUntil: null,
   createdAt: new Date(),
 });
 

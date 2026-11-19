@@ -4,3 +4,7 @@ coverage/
 .env
 .superpowers/
 .worktrees/
+*.tsbuildinfo
+.DS_Store
+playwright-report/
+test-results/

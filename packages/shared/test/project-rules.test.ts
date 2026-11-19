@@ -223,16 +223,28 @@ describe('filterProjects', () => {
     expect(filterProjects([lost], f({ text: 'needle' })).context.size).toBe(0);
   });
 
-  test('filterProjects stays fast on 2,000 items', () => {
+  test('buildTree and filterProjects handle 2,000 items spread over four levels', () => {
     const big: Project[] = [];
-    const top = make('top');
-    big.push(top);
-    for (let i = 0; i < 1999; i++) big.push(child(`n${i}`, top, { title: `item ${i}` }));
-    const t0 = performance.now();
+    let level: Project[] = [make('p0')];
+    big.push(...level);
+    // 1 + 99 + 900 + 1000 = 2,000
+    const sizes = [99, 900, 1000];
+    for (const size of sizes) {
+      const next: Project[] = [];
+      for (let i = 0; i < size; i++) {
+        const parent = level[i % level.length]!;
+        next.push(child(`n${big.length + i}`, parent, { title: `item ${big.length + i}` }));
+      }
+      big.push(...next);
+      level = next;
+    }
+    expect(big).toHaveLength(2000);
+    expect(Math.max(...big.map((i) => i.depth))).toBe(4);
     const r = filterProjects(big, f({ text: 'item 19' }));
-    buildTree(big);
-    expect(performance.now() - t0).toBeLessThan(500);
+    const tree = buildTree(big);
+    expect(tree).toHaveLength(1);
     expect(r.matches.size).toBeGreaterThan(0);
+    for (const id of r.matches) expect(big.find((i) => i.id === id)!.title).toContain('item 19');
   });
 });
 

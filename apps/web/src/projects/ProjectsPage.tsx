@@ -1,20 +1,22 @@
-import { can } from '@roadmap/shared';
-import { useCallback, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { messageFor } from '../api/errors.ts';
+import { can, type Project, type ProjectStatus } from '@roadmap/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { errorCode, messageFor } from '../api/errors.ts';
 import { useMe } from '../auth/useMe.ts';
 import { useMembers } from '../members/useMembers.ts';
-import { useRoadmap } from '../roadmaps/RoadmapLayout.tsx';
+import { ROADMAP_NOT_FOUND, useRoadmap } from '../roadmaps/RoadmapLayout.tsx';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import {
   actionsButtonId,
   NEW_PROJECT_BUTTON_ID,
   ProjectTree,
+  titleLinkId,
   useCollapsed,
   type AddTarget,
 } from './ProjectTree.tsx';
-import { useCreateProject, useProjects } from './useProjects.ts';
+import { ProjectPanel } from './ProjectPanel.tsx';
+import { useCreateProject, useProjects, useUpdateProject } from './useProjects.ts';
 
 export function ProjectsPage() {
   const { roadmapId, role } = useRoadmap();
@@ -24,8 +26,13 @@ export function ProjectsPage() {
   const projects = useProjects(roadmapId);
   const members = useMembers(roadmapId);
   const create = useCreateProject(roadmapId);
+  const update = useUpdateProject(roadmapId);
   const { collapsed, toggle, expand } = useCollapsed(roadmapId);
   const [adding, setAdding] = useState<AddTarget | null>(null);
+  const [statusError, setStatusError] = useState<string | undefined>();
+  const heading = useRef<HTMLHeadingElement>(null);
+  // Set when the panel is closed on purpose: once the list is back in view, focus returns to that item's title.
+  const returnFocusTo = useRef<string | null>(null);
 
   const shown = useMemo(() => projects.items.filter((i) => !i.archived), [projects.items]);
   const memberNames = useMemo(() => new Map((members.data?.members ?? []).map((m) => [m.userId, m.name])), [members.data]);
@@ -46,6 +53,40 @@ export function ProjectsPage() {
     document.getElementById(parentId ? actionsButtonId(parentId) : NEW_PROJECT_BUTTON_ID)?.focus();
   };
 
+  const listPath = `/r/${encodeURIComponent(roadmapId)}/projects`;
+  const hasPanel = projectId !== undefined;
+
+  const closePanel = () => {
+    returnFocusTo.current = projectId ?? null;
+    void navigate(listPath);
+  };
+  useEffect(() => {
+    if (hasPanel || returnFocusTo.current === null) return;
+    // The row's title if it is still in the list, otherwise the page heading.
+    (document.getElementById(titleLinkId(returnFocusTo.current)) ?? heading.current)?.focus();
+    returnFocusTo.current = null;
+  }, [hasPanel]);
+
+  const changeStatus = (item: Project, status: ProjectStatus) => {
+    if (status === item.status) return;
+    setStatusError(undefined);
+    update.mutate(
+      { projectId: item.id, body: { version: item.version, status } },
+      {
+        onError: (err) => {
+          setStatusError(messageFor(err));
+          // Someone else changed it first: the list shows what they saved.
+          if (errorCode(err) === 'conflict') void projects.refetch();
+        },
+      },
+    );
+  };
+
+  const reloadItem = async (): Promise<Project | undefined> => {
+    const fresh = await projects.refetch({ throwOnError: true });
+    return fresh.data?.items.find((i) => i.id === projectId);
+  };
+
   const canAddTop = can({ role, action: 'project.create', ctx: { isAssigned: false } });
   // The list shows whenever its data is there: a failed refresh must not unmount the rows, an open add row or focus.
   // The members only name the assignees, so a slow or failed members list leaves the names out and nothing more.
@@ -55,7 +96,9 @@ export function ProjectsPage() {
   return (
     <>
       <div className="title-row">
-        <h1>Projects</h1>
+        <h1 ref={heading} tabIndex={-1}>
+          Projects
+        </h1>
         {canAddTop && (
           <Button id={NEW_PROJECT_BUTTON_ID} variant="primary" onClick={() => startAdd(null)}>
             New project
@@ -65,6 +108,7 @@ export function ProjectsPage() {
 
       {!hasList && projects.isError && <Alert>{messageFor(projects.error)}</Alert>}
       {!hasList && projects.isPending && <p role="status">Loading</p>}
+      {statusError && <Alert>{statusError}</Alert>}
       {refreshFailed && (
         <Alert>
           <p>Couldn't refresh the list. Try again.</p>
@@ -73,7 +117,7 @@ export function ProjectsPage() {
       )}
 
       {hasList && (
-        <div className={selected ? 'projects-layout has-panel' : 'projects-layout'}>
+        <div className={hasPanel ? 'projects-layout has-panel' : 'projects-layout'}>
           <div className="projects-list">
             {shown.length === 0 && adding === null && (
               <p>{canAddTop ? 'No projects yet.' : 'No projects yet. An Admin adds the first one.'}</p>
@@ -86,6 +130,7 @@ export function ProjectsPage() {
                 items={shown}
                 byId={projects.byId}
                 memberNames={memberNames}
+                onChangeStatus={changeStatus}
                 selectedId={selected?.id}
                 collapsed={collapsed}
                 onToggle={toggle}
@@ -101,10 +146,26 @@ export function ProjectsPage() {
             )}
           </div>
           {selected && (
-            <aside className="project-panel" aria-label="Details">
-              <h2>{selected.title}</h2>
-              <Button onClick={() => void navigate(`/r/${encodeURIComponent(roadmapId)}/projects`)}>Close</Button>
-            </aside>
+            <ProjectPanel
+              key={selected.id}
+              roadmapId={roadmapId}
+              role={role}
+              myId={me.data?.user.id}
+              item={selected}
+              byId={projects.byId}
+              listPath={listPath}
+              onClose={closePanel}
+              onReload={reloadItem}
+              onBack={() => (returnFocusTo.current = selected.id)}
+            />
+          )}
+          {hasPanel && !selected && (
+            <section className="project-panel" aria-label="Details">
+              <Alert>{ROADMAP_NOT_FOUND}</Alert>
+              <Link to={listPath} className="text-link">
+                Back to projects
+              </Link>
+            </section>
           )}
         </div>
       )}

@@ -1,8 +1,9 @@
-import { buildTree, can, projectWarnings, type Project, type Role, type TreeNode } from '@roadmap/shared';
+import { buildTree, can, PROJECT_STATUSES, projectWarnings, type Project, type ProjectStatus, type Role, type TreeNode } from '@roadmap/shared';
 import { Fragment, useCallback, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
 import { AddItemRow } from './AddItemRow.tsx';
+import { isAssigned } from './useProjects.ts';
 import { addChildLabel, formatDates, levelName, statusName, warningText } from './names.ts';
 
 /** Where the add row is open: under `parentId`, or at the top level when null. */
@@ -12,6 +13,8 @@ export interface AddTarget {
 
 export const NEW_PROJECT_BUTTON_ID = 'new-project-button';
 export const actionsButtonId = (itemId: string) => `actions-${itemId}`;
+export const statusButtonId = (itemId: string) => `status-${itemId}`;
+export const titleLinkId = (itemId: string) => `title-${itemId}`;
 
 const collapsedKey = (roadmapId: string) => `roadmap:${roadmapId}:collapsed`;
 
@@ -82,20 +85,19 @@ interface TreeProps {
   onStartAdd: (parentId: string) => void;
   onAdd: (parentId: string | null, title: string) => Promise<unknown>;
   onCancelAdd: () => void;
+  /** Saves a new status for the item; the page shows any error. */
+  onChangeStatus: (item: Project, status: ProjectStatus) => void;
 }
 
 export function ProjectTree(props: TreeProps) {
-  const { roadmapId, role, myId, items, byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd } = props;
+  const { roadmapId, role, myId, items, byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus } = props;
   const navigate = useNavigate();
   const tree = buildTree(items);
-
-  const isAssigned = (item: Project): boolean =>
-    myId !== undefined && [item, ...item.path.map((id) => byId.get(id))].some((i) => i?.assigneeIds.includes(myId));
 
   const menuItems = (item: Project): MenuItem[] => {
     const entries: MenuItem[] = [{ label: 'Open', onSelect: () => void navigate(`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}`) }];
     const add = addChildLabel(item.depth);
-    if (add && can({ role, action: 'project.create', ctx: { isAssigned: isAssigned(item) } })) {
+    if (add && can({ role, action: 'project.create', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
       entries.push({ label: add, onSelect: () => onStartAdd(item.id) });
     }
     return entries;
@@ -124,14 +126,28 @@ export function ProjectTree(props: TreeProps) {
                 <span className="chevron-space" aria-hidden="true" />
               )}
               <span className="sr-only">{levelName(item.depth)}: </span>
-              <Link to={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}`} className="item-title">
+              <Link id={titleLinkId(item.id)} to={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}`} className="item-title">
                 {item.title}
               </Link>
               {warnings.length > 0 && <WarningIcon texts={warnings} />}
             </div>
           </th>
           <td className="status-cell">
-            <span className="pill">{statusName(item.status)}</span>
+            {can({ role, action: 'project.edit', ctx: { isAssigned: isAssigned(item, myId, byId) } }) ? (
+              <Menu
+                label={`Status of ${item.title}: ${statusName(item.status)}`}
+                buttonId={statusButtonId(item.id)}
+                triggerClassName="pill-button"
+                trigger={<span className="pill">{statusName(item.status)}</span>}
+                items={PROJECT_STATUSES.map((status) => ({
+                  label: statusName(status),
+                  checked: status === item.status,
+                  onSelect: () => onChangeStatus(item, status),
+                }))}
+              />
+            ) : (
+              <span className="pill">{statusName(item.status)}</span>
+            )}
           </td>
           <td className="wide-cell">{names.length > 0 ? names.join(', ') : 'Unassigned'}</td>
           <td className="wide-cell">{formatDates(item.startDate, item.endDate)}</td>

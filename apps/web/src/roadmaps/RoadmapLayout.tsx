@@ -6,6 +6,8 @@ import { Alert } from '../ui/Alert.tsx';
 import { Layout } from '../ui/Layout.tsx';
 import { useRoadmaps } from './useRoadmaps.ts';
 
+export const ROADMAP_NOT_FOUND = "This roadmap doesn't exist, or you don't have access to it.";
+
 export interface RoadmapContext {
   roadmapId: string;
   roadmapName: string;
@@ -40,7 +42,7 @@ export function RoadmapLayout() {
   if (!current) {
     return (
       <Layout width="wide" signedIn>
-        <Alert>This roadmap doesn't exist, or you don't have access to it.</Alert>
+        <Alert>{ROADMAP_NOT_FOUND}</Alert>
         <Link to="/" className="text-link">
           Back to roadmaps
         </Link>

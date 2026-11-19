@@ -494,7 +494,7 @@ select {
 }
 @media (min-width: 900px) {
   .projects-layout.has-panel {
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) 360px;
     align-items: start;
   }
 }
@@ -697,5 +697,74 @@ select {
   }
   .chevron-space {
     display: none;
+  }
+}
+
+.field textarea {
+  display: block;
+  width: 100%;
+  min-height: 7rem;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+.field input[readonly],
+.field textarea[readonly] {
+  background: var(--surface);
+}
+
+.pill-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height);
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.status-cell .menu-list {
+  right: auto;
+  left: 0;
+}
+
+.panel-level {
+  margin-bottom: 16px;
+}
+.panel-warnings {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.panel-warnings li {
+  display: flex;
+  gap: 6px;
+  color: var(--error-text);
+}
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.saved {
+  min-height: 1.5em;
+  margin-top: 12px;
+  color: var(--success-text);
+}
+.panel-back {
+  display: none;
+  margin-bottom: 12px;
+}
+@media (max-width: 899px) {
+  .projects-layout.has-panel .projects-list {
+    display: none;
+  }
+  .panel-back {
+    display: inline-block;
   }
 }

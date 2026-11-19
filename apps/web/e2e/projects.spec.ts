@@ -100,13 +100,13 @@ test('FR-1.2: an Owner adds a project, a sub-project, a task and a sub-task in p
   await page.getByRole('button', { name: 'Actions for Beta' }).click();
   await page.getByRole('menuitem', { name: 'Open' }).click();
   await expect(page).toHaveURL(/\/projects\/[^/]+$/);
-  await expect(page.getByRole('complementary', { name: 'Details' }).getByRole('heading', { name: 'Beta' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Beta' })).toBeVisible();
   await page.getByRole('button', { name: 'Close' }).click();
   await expect(page).toHaveURL(/\/projects$/);
 
   // Choosing a title does the same.
   await openProject(page, 'Gamma');
-  await expect(page.getByRole('complementary', { name: 'Details' }).getByRole('heading', { name: 'Gamma' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Gamma' })).toBeVisible();
 });
 
 test('the add row stays open for another entry at the same level, and shows the server\'s answer when it refuses', async ({ page }) => {
@@ -352,7 +352,7 @@ test('Projects screens pass axe, with rows and with the add row open', async ({ 
   await expectNoA11yViolations(page);
 
   await openProject(page, 'Alpha');
-  await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Alpha' })).toBeVisible();
   await expectNoA11yViolations(page);
 });
 

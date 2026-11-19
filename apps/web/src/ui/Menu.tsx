@@ -1,8 +1,10 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 export interface MenuItem {
   label: string;
   onSelect: () => void;
+  /** When set, the entry is a radio item and this says whether it is the current choice. */
+  checked?: boolean;
 }
 
 interface MenuProps {
@@ -11,13 +13,17 @@ interface MenuProps {
   items: MenuItem[];
   /** An id for the button, so a caller can return focus to it. */
   buttonId?: string;
+  /** What the button shows in place of the three dots, such as a status pill. */
+  trigger?: ReactNode;
+  /** A class for the button, in place of the icon button's. */
+  triggerClassName?: string;
 }
 
 /**
  * A button that opens a list of actions. Arrow keys, Home and End move between items, Escape closes the list
  * and returns focus to the button, and choosing an item closes it and hands focus back to the button first.
  */
-export function Menu({ label, items, buttonId }: MenuProps) {
+export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon-btn' }: MenuProps) {
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -26,10 +32,10 @@ export function Menu({ label, items, buttonId }: MenuProps) {
   const ownButtonId = useId();
   const triggerId = buttonId ?? ownButtonId;
 
-  const entries = () => Array.from(list.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+  const entries = () => Array.from(list.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? []);
 
   useEffect(() => {
-    if (open) entries()[0]?.focus();
+    if (open) (list.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? entries()[0])?.focus();
   }, [open]);
 
   // A press outside the menu closes it, and leaves focus where the press put it.
@@ -71,7 +77,7 @@ export function Menu({ label, items, buttonId }: MenuProps) {
         ref={button}
         id={triggerId}
         type="button"
-        className="icon-btn"
+        className={triggerClassName}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -84,11 +90,13 @@ export function Menu({ label, items, buttonId }: MenuProps) {
           }
         }}
       >
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
-          <circle cx="3" cy="8" r="1.5" fill="currentColor" />
-          <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-          <circle cx="13" cy="8" r="1.5" fill="currentColor" />
-        </svg>
+        {trigger ?? (
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+            <circle cx="3" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="13" cy="8" r="1.5" fill="currentColor" />
+          </svg>
+        )}
       </button>
       {open && (
         <div id={listId} ref={list} role="menu" aria-labelledby={triggerId} className="menu-list" onKeyDown={onListKeyDown}>
@@ -96,7 +104,8 @@ export function Menu({ label, items, buttonId }: MenuProps) {
             <button
               key={item.label}
               type="button"
-              role="menuitem"
+              role={item.checked === undefined ? 'menuitem' : 'menuitemradio'}
+              aria-checked={item.checked}
               tabIndex={-1}
               className="menu-item"
               onClick={() => {

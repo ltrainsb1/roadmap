@@ -38,6 +38,8 @@ export function errorMessage(code: string, ctx: ErrorContext = {}): string {
       return 'You already own this roadmap.';
     case 'not_a_member':
       return "That person isn't a member of this roadmap.";
+    case 'date_order':
+      return 'The end date is before the start date.';
     case 'too_deep':
       return "A sub-task can't have items under it.";
     case 'parent_archived':

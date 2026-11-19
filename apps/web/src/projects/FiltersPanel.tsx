@@ -2,6 +2,7 @@ import { PRIORITY_LABELS, PROJECT_STATUSES, type ProjectFilters } from '@roadmap
 import type { ReactNode } from 'react';
 import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
+import { ME } from './filters.ts';
 import { statusName } from './names.ts';
 
 export const FILTERS_PANEL_ID = 'filters-panel';
@@ -46,21 +47,24 @@ interface Props {
   /** Tags on the roadmap's items that are not archived. */
   tagsInUse: readonly string[];
   members: ReadonlyArray<{ userId: string; name: string }>;
-  myId: string | undefined;
+  /** Whether `members` is the real list: until it is, an id with no member is not yet known to be a former one. */
+  membersLoaded: boolean;
+  myId: string;
 }
 
 /** The ids in `chosen` that are not among `known`: still in the address, so they stay in the list to be unticked. */
 const leftovers = (chosen: readonly string[], known: readonly string[]) => chosen.filter((v) => !known.includes(v));
 
 /** A disclosure under the toolbar, not a dialog: the list stays in view and in reach while a filter is changed. */
-export function FiltersPanel({ open, filters, onChange, onClear, onDone, tagsInUse, members, myId }: Props) {
+export function FiltersPanel({ open, filters, onChange, onClear, onDone, tagsInUse, members, membersLoaded, myId }: Props) {
   const set = (change: Partial<ProjectFilters>) => onChange({ ...filters, ...change });
 
   const tagValues = [...new Set([...tagsInUse, ...filters.tags])].sort();
-  const others = members.filter((m) => m.userId !== myId);
-  const gone = leftovers(filters.assigneeIds, [...others.map((m) => m.userId), ...(myId ? [myId] : [])]);
+  // Ticking someone writes their id; "Assigned to me" writes "me". A link that names the reader by id still shows them by name.
+  const others = members.filter((m) => m.userId !== myId || filters.assigneeIds.includes(myId));
+  const gone = membersLoaded ? leftovers(filters.assigneeIds, [ME, ...members.map((m) => m.userId)]) : [];
   const assigneeOptions: Option[] = [
-    ...(myId ? [{ value: myId, label: 'Assigned to me' }] : []),
+    { value: ME, label: 'Assigned to me' },
     ...others.map((m) => ({ value: m.userId, label: m.name })),
     ...gone.map((id) => ({ value: id, label: 'Former member' })),
   ];

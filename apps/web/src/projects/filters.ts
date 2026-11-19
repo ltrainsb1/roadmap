@@ -15,15 +15,13 @@ const unique = <T>(values: T[]): T[] => [...new Set(values)];
 const date = (value: string | null): string | null => (value !== null && calendarDateSchema.safeParse(value).success ? value : null);
 
 /**
- * The filters an address stands for. `assignee=me` means `meId`. Values that are not valid (an unknown status,
+ * The filters an address stands for. `assignee=me` stays the literal "me" ("Assigned to me"): it means whoever reads
+ * the address, so the page turns it into their id only when it filters. Values that are not valid (an unknown status,
  * a date that does not exist) are dropped; values that are valid but name something that is gone (a tag no
  * item has, a member who left) are kept, so the person can see and remove them.
  */
-export function filtersFromSearch(params: URLSearchParams, meId: string): ProjectFilters {
-  const assignees = params
-    .getAll('assignee')
-    .map((id) => (id === 'me' ? meId : id))
-    .filter((id) => id !== '');
+export function filtersFromSearch(params: URLSearchParams): ProjectFilters {
+  const assignees = params.getAll('assignee').filter((id) => id !== '');
   return {
     text: params.get('q') ?? '',
     statuses: unique(params.getAll('status').filter(isStatus)),
@@ -35,6 +33,9 @@ export function filtersFromSearch(params: URLSearchParams, meId: string): Projec
     showArchived: params.get('archived') === '1',
   };
 }
+
+/** The assignee value that stands for the signed-in person. */
+export const ME = 'me';
 
 /** The query string for `f`; empty when nothing is set. Multi-value fields repeat their key. */
 export function filtersToSearch(f: ProjectFilters): URLSearchParams {

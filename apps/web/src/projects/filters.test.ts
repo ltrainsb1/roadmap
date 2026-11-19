@@ -2,7 +2,7 @@ import { NO_FILTERS, type ProjectFilters } from '@roadmap/shared';
 import { describe, expect, test } from 'vitest';
 import { filtersFromSearch, filtersToSearch, hasNarrowing } from './filters.ts';
 
-const read = (query: string, meId = 'u-me') => filtersFromSearch(new URLSearchParams(query), meId);
+const read = (query: string) => filtersFromSearch(new URLSearchParams(query));
 
 describe('filters in the address', () => {
   test('FR-1.8: every field survives a round trip', () => {
@@ -26,9 +26,11 @@ describe('filters in the address', () => {
     expect(query.getAll('tag')).toEqual(['a', 'b']);
   });
 
-  test('FR-1.8: assignee=me stands for the signed-in person', () => {
-    expect(read('assignee=me&assignee=u2').assigneeIds).toEqual(['u-me', 'u2']);
-    expect(read('assignee=me', '').assigneeIds).toEqual([]);
+  test('FR-1.8: assignee=me stays "me" in both directions, so a shared link means its reader', () => {
+    const filters = read('assignee=me&assignee=u2');
+    expect(filters.assigneeIds).toEqual(['me', 'u2']);
+    expect(filtersToSearch(filters).getAll('assignee')).toEqual(['me', 'u2']);
+    expect(filtersToSearch(filters).toString()).toBe('assignee=me&assignee=u2');
   });
 
   test('FR-1.8: unknown and malformed values are dropped', () => {

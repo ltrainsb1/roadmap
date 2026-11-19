@@ -41,7 +41,12 @@ function ProjectsRoute() {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      {/* The filters live in the address and drive controlled inputs, which must update in the same render as the event. */}
+      {/*
+        useTransitions={false}: the project filters live in the address and drive controlled inputs (a search box,
+        checkboxes), which must update in the same render as the event or typing drops keystrokes and the caret jumps.
+        Cost: navigations no longer run in a React transition, so a future lazy route would show its fallback instead
+        of keeping the old screen until the new one is ready.
+      */}
       <BrowserRouter useTransitions={false}>
         <SignInRedirect />
         <Routes>

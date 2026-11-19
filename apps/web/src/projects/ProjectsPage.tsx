@@ -11,7 +11,7 @@ import { Button } from '../ui/Button.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Field } from '../ui/Field.tsx';
 import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
-import { filtersFromSearch, filtersToSearch, hasNarrowing } from './filters.ts';
+import { filtersFromSearch, filtersToSearch, hasNarrowing, ME } from './filters.ts';
 import {
   actionsButtonId,
   NEW_PROJECT_BUTTON_ID,
@@ -58,7 +58,7 @@ export function ProjectsPage() {
   // The filters live in the address, and nowhere else: opening an item keeps them, and a copied link shows the same list.
   const [params, setParams] = useSearchParams();
   const myId = me.data?.user.id;
-  const filters = useMemo(() => filtersFromSearch(params, myId ?? ''), [params, myId]);
+  const filters = useMemo(() => filtersFromSearch(params), [params]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [adding, setAdding] = useState<AddTarget | null>(null);
   // The message for the last failed action from a row or from a panel control that saves on change.
@@ -91,9 +91,11 @@ export function ProjectsPage() {
   const filtered = narrowing || filters.showArchived;
   const view = useMemo(() => {
     if (!filtered) return { items: projects.items.filter((i) => !i.archived), context: NONE };
-    const { matches, context } = filterProjects(projects.items, filters);
+    // "Assigned to me" is the reader, whoever wrote the address.
+    const mine = filters.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id));
+    const { matches, context } = filterProjects(projects.items, { ...filters, assigneeIds: mine });
     return { items: projects.items.filter((i) => matches.has(i.id) || context.has(i.id)), context };
-  }, [filtered, filters, projects.items]);
+  }, [filtered, filters, projects.items, myId]);
   const shown = view.items;
   const tagsInUse = useMemo(() => [...new Set(projects.items.filter((i) => !i.archived).flatMap((i) => i.tags))].sort(), [projects.items]);
   const search = params.toString() === '' ? '' : `?${params.toString()}`;
@@ -249,7 +251,8 @@ export function ProjectsPage() {
   const canAddTop = can({ role, action: 'project.create', ctx: { isAssigned: false } });
   // The list shows whenever its data is there: a failed refresh must not unmount the rows, an open add row or focus.
   // The members only name the assignees, so a slow or failed members list leaves the names out and nothing more.
-  const hasList = projects.data !== undefined;
+  // It waits for the signed-in person too, so "Assigned to me" in the address always has someone to mean.
+  const hasList = projects.data !== undefined && myId !== undefined;
   // Save is the primary button while an editable panel is open; otherwise "New project" is.
   const panelEditable =
     selected !== undefined && can({ role, action: 'project.edit', ctx: { isAssigned: isAssigned(selected, me.data?.user.id, projects.byId) } });
@@ -313,7 +316,8 @@ export function ProjectsPage() {
               onDone={closeFilters}
               tagsInUse={tagsInUse}
               members={members.data?.members ?? []}
-              myId={myId}
+              membersLoaded={members.data !== undefined}
+              myId={myId ?? ''}
             />
             {!reorderable && canReorderRole && shown.length > 0 && <p className="reorder-note">Clear filters to reorder.</p>}
             {shown.length === 0 && adding === null && (

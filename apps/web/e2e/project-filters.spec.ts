@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { apiAs, createRoadmap, createSignedInUser, expectNoA11yViolations, field, projectRow, seedProject, useCspGuard } from './helpers.ts';
+import { apiAs, createRoadmap, createSignedInUser, expectNoA11yViolations, field, inviteAndJoin, projectRow, seedProject, useCspGuard } from './helpers.ts';
 
 useCspGuard();
 
@@ -170,6 +170,44 @@ test('the filtered address can be opened in a new tab and shows the same list', 
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page).toHaveURL(/\/projects\?.*status=done/);
   await expect.poll(() => titles(page)).toEqual(['Season', 'Closing']);
+});
+
+test('typing in the search box keeps every keystroke, the focus and the caret', async ({ page }) => {
+  await seeded(page, 'typist');
+  await search(page).click();
+  await search(page).pressSequentially('clos');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('x');
+  await expect(search(page)).toHaveValue('cloxs');
+  await expect(search(page)).toBeFocused();
+  await expect(page).toHaveURL(/\?q=cloxs$/);
+  // The caret stayed where it was typed: the next character goes after the "x".
+  await page.keyboard.type('y');
+  await expect(search(page)).toHaveValue('cloxys');
+  await expect(page).toHaveURL(/\?q=cloxys$/);
+});
+
+test('FR-1.8: "Assigned to me" is kept as "me" in the address and means the reader of a shared link', async ({ page, browser }, testInfo) => {
+  const { id, call, ids } = await seeded(page, 'sharedme');
+  await openFilters(page);
+  await panel(page).getByLabel('Assigned to me', { exact: true }).check();
+  await expect(page).toHaveURL(/\?assignee=me$/);
+
+  const helper = await inviteAndJoin(page, browser, testInfo, 'sharedme plan', 'reader', 'Admin');
+  const members = await call<{ members: { userId: string; name: string }[] }>('GET', `/api/roadmaps/${id}/members`);
+  const readerId = members.members.find((m) => m.name === helper.name)!.userId;
+  await call('PUT', `/api/roadmaps/${id}/projects/${ids.closing}/assignees`, { userIds: [readerId] });
+
+  const theirs = helper.page;
+  await theirs.goto(`/r/${id}/projects?assignee=me`);
+  await expect.poll(() => titles(theirs)).toEqual(['Season', 'Closing']);
+  await expect(filtersButton(theirs, 'Filters (1)')).toBeVisible();
+  await theirs.getByRole('button', { name: /^Filters/ }).click();
+  await expect(theirs.getByRole('region', { name: 'Filters', exact: true }).getByLabel('Assigned to me', { exact: true })).toBeChecked();
+  // An edit made on the filtered address keeps "me".
+  await theirs.getByRole('region', { name: 'Filters', exact: true }).getByLabel('Done', { exact: true }).check();
+  await expect(theirs).toHaveURL(/assignee=me/);
+  await helper.context.close();
 });
 
 test('FR-1.8: "Show archived" reveals archived items marked "Archived", with Unarchive in their menu', async ({ page }) => {

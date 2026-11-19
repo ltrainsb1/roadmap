@@ -1,8 +1,24 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { LOCK_MS } from '../../src/auth/lockout.ts';
 import { SESSION_COOKIE } from '../../src/auth/sessions.ts';
 import { scoped, type ScopedDb } from '../../src/db/scoped.ts';
 import type { UserDoc } from '../../src/db/types.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
+
+// Lets one test run code after the password check has started, i.e. after the user lookup.
+const verifyHook = vi.hoisted(() => ({ run: null as null | (() => Promise<void>) }));
+vi.mock('../../src/auth/passwords.ts', async (orig) => {
+  const actual = await orig<typeof import('../../src/auth/passwords.ts')>();
+  return {
+    ...actual,
+    verifyPassword: async (...args: Parameters<typeof actual.verifyPassword>) => {
+      const hook = verifyHook.run;
+      verifyHook.run = null;
+      await hook?.();
+      return actual.verifyPassword(...args);
+    },
+  };
+});
 
 const MIN = 60_000;
 const PASSWORD = 'correct horse battery';
@@ -110,6 +126,20 @@ describe('POST /api/auth/login (FR-1)', () => {
     expect((await login(u.email, PASSWORD)).statusCode).toBe(401);
     advance(1 * MIN);
     expect((await login(u.email, PASSWORD)).statusCode).toBe(200);
+  });
+
+  test('lockout: a correct password is refused when the account locks between the user lookup and the post-verify check', async () => {
+    const u = await newUser();
+    verifyHook.run = async () => {
+      await s
+        .collection('users')
+        .updateOne({ _id: u._id }, { $set: { lockedUntil: new Date(clock.getTime() + LOCK_MS) } });
+    };
+    const res = await login(u.email, PASSWORD);
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'invalid_credentials' });
+    expect(cookieOf(res)).toBeUndefined();
+    expect(await s.collection('sessions').countDocuments({ userId: u._id })).toBe(0);
   });
 
   test('4 failures do not lock the account', async () => {

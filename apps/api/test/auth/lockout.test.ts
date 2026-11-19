@@ -35,6 +35,26 @@ describe('lockout (FR-1)', () => {
     expect(await assertNotLocked(s, 'missing', now)).toBe(false);
   });
 
+  test('the fifth failure sets the lock and resets the counter in one write', async () => {
+    const u = await t.seed.user(s.tenantId);
+    for (let i = 0; i < 4; i++) await recordFailure(s, u._id, now);
+    expect(await state(u._id)).toMatchObject({ failedLogins: 4, lockedUntil: null });
+    await recordFailure(s, u._id, now);
+    expect(await state(u._id)).toMatchObject({ failedLogins: 0, lockedUntil: new Date(now.getTime() + 15 * 60_000) });
+  });
+
+  test('a parallel burst of 12 failures never leaves a count of 5 or more, and ends locked', async () => {
+    const u = await t.seed.user(s.tenantId);
+    await Promise.all(Array.from({ length: 12 }, () => recordFailure(s, u._id, now)));
+    const after = await state(u._id);
+    expect(after.failedLogins).toBe(2);
+    expect(after.lockedUntil).not.toBeNull();
+  });
+
+  test('recordFailure for a missing user does nothing and terminates', async () => {
+    await expect(recordFailure(s, 'missing', now)).resolves.toBeUndefined();
+  });
+
   test('recordSuccess clears the counter and any lock', async () => {
     const u = await t.seed.user(s.tenantId);
     for (let i = 0; i < 5; i++) await recordFailure(s, u._id, now);

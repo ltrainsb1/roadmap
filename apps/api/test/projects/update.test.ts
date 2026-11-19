@@ -238,16 +238,6 @@ describe('update', () => {
     expect((await w.patch('A', p._id, { title: 'no version' })).statusCode).toBe(400);
     expect((await w.patch('A', p._id, { version: 1, title: '  ' })).statusCode).toBe(400);
   });
-
-  test('a request carrying blockedBy returns 422 not_supported', async () => {
-    const w = await world();
-    const p = await t.seed.project(w.tenantId, w.roadmap._id);
-    const other = await t.seed.project(w.tenantId, w.roadmap._id);
-    const res = await w.patch('A', p._id, { version: 1, title: 'Changed', blockedBy: [other._id] });
-    expect(res.statusCode).toBe(422);
-    expect(res.json()).toEqual({ error: 'not_supported' });
-    expect(await w.stored(p._id)).toMatchObject({ title: 'Item', version: 1 });
-  });
 });
 
 describe('Permissions (project.edit)', () => {

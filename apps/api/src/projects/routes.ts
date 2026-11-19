@@ -5,6 +5,7 @@ import {
   projectSchema,
   type Milestone,
   type ProjectLink,
+  wouldCycle,
   updateProjectBodySchema,
 } from '@roadmap/shared';
 import type { FastifyInstance } from 'fastify';
@@ -42,9 +43,9 @@ const sameLinks = (a: ProjectLink[], b: ProjectLink[]): boolean =>
   a.length === b.length && a.every((x, i) => x.id === b[i]!.id && x.label === b[i]!.label && x.url === b[i]!.url);
 const sameMilestones = (a: Milestone[], b: Milestone[]): boolean =>
   a.length === b.length && a.every((x, i) => x.id === b[i]!.id && x.name === b[i]!.name && x.date === b[i]!.date);
-const sameTags = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+const sameIds = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 
-const EDITABLE_FIELDS = ['title', 'description', 'status', 'startDate', 'endDate', 'milestones', 'tags', 'links'] as const;
+const EDITABLE_FIELDS = ['title', 'description', 'status', 'startDate', 'endDate', 'milestones', 'tags', 'links', 'blockedBy'] as const;
 type EditableField = (typeof EDITABLE_FIELDS)[number];
 
 export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDeps): void {
@@ -134,8 +135,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
     async (req) => {
       const actor = req.actor!;
       const { roadmapId, projectId } = req.params;
-      const { version, blockedBy, ...fields } = req.body;
-      if (blockedBy !== undefined) throw new HttpError(422, 'not_supported');
+      const { version, ...fields } = req.body;
       return actor.db.withTransaction(async (s) => {
         const projects = s.collection('projects');
         const current = await loadProject(s, roadmapId, projectId);
@@ -153,7 +153,8 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
           if (key === 'milestones') {
             return wanted.milestones !== undefined && !sameMilestones(wanted.milestones, current.milestones);
           }
-          if (key === 'tags') return wanted.tags !== undefined && !sameTags(wanted.tags, current.tags);
+          if (key === 'tags') return wanted.tags !== undefined && !sameIds(wanted.tags, current.tags);
+          if (key === 'blockedBy') return wanted.blockedBy !== undefined && !sameIds(wanted.blockedBy, current.blockedBy);
           return wanted[key] !== undefined && wanted[key] !== current[key];
         };
         for (const key of EDITABLE_FIELDS) {
@@ -165,6 +166,17 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
         const startDate = changes.startDate !== undefined ? changes.startDate : current.startDate;
         const endDate = changes.endDate !== undefined ? changes.endDate : current.endDate;
         if (startDate && endDate && endDate < startDate) throw new HttpError(422, 'date_order');
+
+        if (changes.blockedBy !== undefined) {
+          const items = await projects.find({ roadmapId });
+          const byId = new Map(items.map((doc) => [doc._id, toProjectDto(doc)]));
+          if (changes.blockedBy.some((id) => !byId.has(id))) throw new HttpError(422, 'unknown_item');
+          if (wouldCycle(projectId, changes.blockedBy, byId)) throw new HttpError(422, 'dependency_cycle');
+          // The version filter below guards only this item, so two requests editing two different items could each
+          // pass the check above and together close a cycle. Every blocked-by change writes this one document, so
+          // MongoDB reports a write conflict to the second transaction; it retries, re-reads and sees the cycle.
+          await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { dependencyRevision: 1 } });
+        }
 
         const updated = await projects.findOneAndUpdate(
           { _id: projectId, roadmapId, version },

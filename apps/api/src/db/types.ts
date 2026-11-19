@@ -57,6 +57,8 @@ export interface RoadmapDoc {
   ownerId: string;
   /** Archived roadmaps drop out of /api/me and /api/roadmaps. */
   archived: boolean;
+  /** Bumped by every blocked-by change so concurrent changes in one roadmap conflict and run one after the other. */
+  dependencyRevision?: number;
   createdAt: Date;
 }
 

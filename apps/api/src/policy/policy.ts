@@ -47,3 +47,22 @@ export function can(input: { role: Role | null; action: Action; ctx?: PolicyCont
   const rule = Object.hasOwn(RULES, action) ? RULES[action] : undefined;
   return rule ? rule(role, ctx) : false;
 }
+
+const ROLE_VALUES: ReadonlyArray<Role | undefined> = [undefined, 'owner', 'admin', 'contributor'];
+
+/** True when some context could make `can` allow this role; false means no request body can change the answer. */
+export function canEver(role: Role | null, action: Action): boolean {
+  for (const isAssigned of [undefined, true, false]) {
+    for (const targetRole of ROLE_VALUES) {
+      for (const newRole of ROLE_VALUES) {
+        const ctx: PolicyContext = {
+          ...(isAssigned !== undefined && { isAssigned }),
+          ...(targetRole !== undefined && { targetRole }),
+          ...(newRole !== undefined && { newRole }),
+        };
+        if (can({ role, action, ctx })) return true;
+      }
+    }
+  }
+  return false;
+}

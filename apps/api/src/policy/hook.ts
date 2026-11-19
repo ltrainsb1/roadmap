@@ -7,7 +7,7 @@ import type { Db } from '../db/client.ts';
 import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { SessionDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
-import { can, type PolicyContext } from './policy.ts';
+import { can, canEver, type PolicyContext } from './policy.ts';
 
 export type AuthConfig =
   | { level: 'public' }
@@ -107,15 +107,21 @@ export const authPlugin = fp(
       if (!membership) throw new HttpError(404, 'not_found');
       req.actor.role = membership.role;
       // A route with ctx is judged in preHandler, where the body has been parsed and validated.
-      if (auth.ctx) return;
+      if (auth.ctx) {
+        // No context could change this answer, so refuse before the body is validated.
+        if (!canEver(membership.role, auth.action)) throw new HttpError(403, 'forbidden');
+        return;
+      }
       if (!can({ role: membership.role, action: auth.action })) throw new HttpError(403, 'forbidden');
     });
 
     app.addHook('preHandler', async (req) => {
       const auth = req.routeOptions.config.auth;
-      if (auth?.level !== 'full' || !auth.action || !auth.ctx || !req.actor?.role) return;
+      if (auth?.level !== 'full' || !auth.action || !auth.ctx) return;
+      const role = req.actor?.role;
+      if (!role) throw new HttpError(403, 'forbidden');
       const ctx = await auth.ctx(req);
-      if (!can({ role: req.actor.role, action: auth.action, ctx })) throw new HttpError(403, 'forbidden');
+      if (!can({ role, action: auth.action, ctx })) throw new HttpError(403, 'forbidden');
     });
   },
   { name: 'auth' },

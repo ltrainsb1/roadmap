@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { z } from 'zod';
 import { afterEach, describe, expect, test } from 'vitest';
 import { clearSessionCookie, setSessionCookie } from '../../src/auth/sessions.ts';
 import { scoped } from '../../src/db/scoped.ts';
+import { ACTIONS, ROLES } from '@roadmap/shared';
+import { canEver, can } from '../../src/policy/policy.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
 
 const open: TestApp[] = [];
@@ -53,6 +56,20 @@ function routes(app: FastifyInstance): void {
           ctx: (req) => Promise.resolve({ isAssigned: req.headers['x-assigned'] === '1' }),
         },
       },
+    },
+    ok,
+  );
+  app.withTypeProvider<ZodTypeProvider>().post(
+    '/api/t/r/:roadmapId/members',
+    {
+      config: {
+        auth: {
+          level: 'full',
+          action: 'member.invite',
+          ctx: (req) => Promise.resolve({ newRole: (req.body as { role: 'admin' }).role }),
+        },
+      },
+      schema: { body: z.object({ role: z.enum(['admin', 'contributor']) }) },
     },
     ok,
   );
@@ -271,6 +288,82 @@ describe('roadmap authorization', () => {
     expect(
       (await t.app.inject({ url, headers: { cookie, 'x-assigned': '1' } })).statusCode,
     ).toBe(200);
+  });
+});
+
+describe('forbidden roles on ctx routes', () => {
+  test('a contributor gets 403 before body validation; an admin with the same bad body gets 400', async () => {
+    const t = await setup(routes);
+    const a = await t.seed.tenant();
+    const owner = await t.seed.user(a._id);
+    const contrib = await t.seed.user(a._id);
+    const admin = await t.seed.user(a._id);
+    const r = await t.seed.roadmap(a._id, owner._id);
+    await t.seed.member(a._id, r._id, contrib._id, 'contributor');
+    await t.seed.member(a._id, r._id, admin._id, 'admin');
+    const post = async (userId: string, payload: unknown) => {
+      const { cookie, csrf } = await signInAs(t.app, t.db, userId);
+      return t.app.inject({
+        method: 'POST',
+        url: `/api/t/r/${r._id}/members`,
+        headers: { cookie, 'x-csrf-token': csrf },
+        payload: payload as object,
+      });
+    };
+    const c = await post(contrib._id, { role: 'nonsense' });
+    expect(c.statusCode).toBe(403);
+    expect(c.json()).toEqual({ error: 'forbidden' });
+    expect((await post(admin._id, { role: 'nonsense' })).statusCode).toBe(400);
+    expect((await post(owner._id, { role: 'nonsense' })).statusCode).toBe(400);
+    expect((await post(admin._id, { role: 'contributor' })).statusCode).toBe(200);
+  });
+
+  test('a ctx route reached with no role is refused with 403', async () => {
+    const t = await setup((app) => {
+      app.addHook('onRequest', async (req) => {
+        // Runs after the auth hook (registered earlier): simulates a request whose role was never set.
+        if (req.actor) req.actor.role = null;
+      });
+      routes(app);
+    });
+    const a = await t.seed.tenant();
+    const owner = await t.seed.user(a._id);
+    const r = await t.seed.roadmap(a._id, owner._id);
+    const { cookie } = await signInAs(t.app, t.db, owner._id);
+    const res = await t.app.inject({ url: `/api/t/x/${r._id}/edit`, headers: { cookie } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'forbidden' });
+  });
+});
+
+describe('canEver', () => {
+  test('is true exactly when some context makes can() true', () => {
+    expect(canEver(null, 'roadmap.view')).toBe(false);
+    for (const action of ACTIONS) {
+      for (const role of ROLES) {
+        const roles = [undefined, ...ROLES];
+        const any = [true, false, undefined].some((isAssigned) =>
+          roles.some((targetRole) =>
+            roles.some((newRole) =>
+              can({
+                role,
+                action,
+                ctx: {
+                  ...(isAssigned !== undefined && { isAssigned }),
+                  ...(targetRole && { targetRole }),
+                  ...(newRole && { newRole }),
+                },
+              }),
+            ),
+          ),
+        );
+        expect(canEver(role, action), `${role} ${action}`).toBe(any);
+      }
+    }
+    expect(canEver('contributor', 'member.remove')).toBe(false);
+    expect(canEver('admin', 'member.remove')).toBe(true);
+    expect(canEver('admin', 'roadmap.delete')).toBe(false);
+    expect(canEver('contributor', 'project.edit')).toBe(true);
   });
 });
 

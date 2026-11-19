@@ -80,7 +80,8 @@ describe('inviting (FR-1.1)', () => {
     for (const role of ['admin', 'contributor']) {
       expect((await invite(roadmap._id, contribSess, { email: email(), role })).statusCode).toBe(403);
     }
-    expect((await invite(roadmap._id, contribSess, { email: email(), role: 'owner' })).statusCode).toBe(400);
+    // Refused on role alone, before the body is validated.
+    expect((await invite(roadmap._id, contribSess, { email: email(), role: 'owner' })).statusCode).toBe(403);
   });
 
   test('creates a 7 day invite, stores only the token hash, emails the link and audits without the token', async () => {

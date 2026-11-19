@@ -3,6 +3,8 @@ import {
   createProjectRequestSchema,
   projectListSchema,
   projectSchema,
+  type Milestone,
+  type ProjectLink,
   updateProjectBodySchema,
 } from '@roadmap/shared';
 import type { FastifyInstance } from 'fastify';
@@ -22,13 +24,25 @@ export interface ProjectRouteDeps {
 const roadmapParams = z.object({ roadmapId: z.string().min(1).max(100) });
 const projectParams = roadmapParams.extend({ projectId: z.string().min(1).max(100) });
 
-/** Keeps the stored id of an entry the item already has; anything else is new and gets a fresh id. */
-function withIds<T extends { id?: string | undefined }>(entries: T[], stored: Array<{ id: string }>): Array<T & { id: string }> {
-  const known = new Set(stored.map((e) => e.id));
-  return entries.map((e) => ({ ...e, id: e.id !== undefined && known.has(e.id) ? e.id : uuidv7() }));
+/** Keeps the stored id of an entry the item already has, once; anything else is new and gets a fresh id. */
+function resolveIds<T extends { id?: string | undefined }>(entries: T[], stored: Array<{ id: string }>): Array<T & { id: string }> {
+  const available = new Set(stored.map((e) => e.id));
+  return entries.map((e) => {
+    const keep = e.id !== undefined && available.delete(e.id);
+    return { ...e, id: keep ? e.id! : uuidv7() };
+  });
 }
 
-const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+const resolveLinks = (entries: Array<Omit<ProjectLink, 'id'> & { id?: string | undefined }>, stored: ProjectLink[]): ProjectLink[] =>
+  resolveIds(entries, stored).map(({ id, label, url }) => ({ id, label, url }));
+const resolveMilestones = (entries: Array<Omit<Milestone, 'id'> & { id?: string | undefined }>, stored: Milestone[]): Milestone[] =>
+  resolveIds(entries, stored).map(({ id, name, date }) => ({ id, name, date }));
+
+const sameLinks = (a: ProjectLink[], b: ProjectLink[]): boolean =>
+  a.length === b.length && a.every((x, i) => x.id === b[i]!.id && x.label === b[i]!.label && x.url === b[i]!.url);
+const sameMilestones = (a: Milestone[], b: Milestone[]): boolean =>
+  a.length === b.length && a.every((x, i) => x.id === b[i]!.id && x.name === b[i]!.name && x.date === b[i]!.date);
+const sameTags = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 
 const EDITABLE_FIELDS = ['title', 'description', 'status', 'startDate', 'endDate', 'milestones', 'tags', 'links'] as const;
 type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -127,17 +141,23 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
         const current = await loadProject(s, roadmapId, projectId);
         if (current.version !== version) throw new HttpError(409, 'conflict');
 
+        const { links, milestones, ...plain } = fields;
         const wanted = {
-          ...fields,
-          ...(fields.links !== undefined ? { links: withIds(fields.links, current.links) } : {}),
-          ...(fields.milestones !== undefined
-            ? { milestones: withIds(fields.milestones, current.milestones) }
-            : {}),
+          ...plain,
+          ...(links !== undefined ? { links: resolveLinks(links, current.links) } : {}),
+          ...(milestones !== undefined ? { milestones: resolveMilestones(milestones, current.milestones) } : {}),
         };
         const changes: Partial<Pick<ProjectDoc, EditableField>> = {};
+        const differs = (key: EditableField): boolean => {
+          if (key === 'links') return wanted.links !== undefined && !sameLinks(wanted.links, current.links);
+          if (key === 'milestones') {
+            return wanted.milestones !== undefined && !sameMilestones(wanted.milestones, current.milestones);
+          }
+          if (key === 'tags') return wanted.tags !== undefined && !sameTags(wanted.tags, current.tags);
+          return wanted[key] !== undefined && wanted[key] !== current[key];
+        };
         for (const key of EDITABLE_FIELDS) {
-          const value = wanted[key];
-          if (value !== undefined && !sameValue(value, current[key])) Object.assign(changes, { [key]: value });
+          if (differs(key)) Object.assign(changes, { [key]: wanted[key] });
         }
         const changed = Object.keys(changes) as EditableField[];
         if (changed.length === 0) return toProjectDto(current);

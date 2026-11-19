@@ -126,6 +126,42 @@ describe('update', () => {
     expect(second.milestones[0]!).toMatchObject({ id: msId, date: '2026-01-02' });
   });
 
+  test('resending unchanged links and milestones changes nothing', async () => {
+    const w = await world();
+    const p = await t.seed.project(w.tenantId, w.roadmap._id);
+    const first = (
+      await w.patch('A', p._id, {
+        version: 1,
+        links: [{ label: 'a', url: 'https://a.example' }],
+        milestones: [{ name: 'm', date: '2026-01-01' }],
+      })
+    ).json<Dto>();
+    const res = await w.patch('A', p._id, { version: first.version, links: first.links, milestones: first.milestones });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<Dto>().version).toBe(first.version);
+    const events = await w.db.audit.find({ roadmapId: w.roadmap._id, action: 'project.update' }, { sort: { timestamp: -1 }, limit: 10 });
+    expect(events).toHaveLength(1);
+  });
+
+  test('a repeated id in one request is kept once', async () => {
+    const w = await world();
+    const p = await t.seed.project(w.tenantId, w.roadmap._id);
+    const first = (await w.patch('A', p._id, { version: 1, links: [{ label: 'a', url: 'https://a.example' }] })).json<Dto>();
+    const id = first.links[0]!.id;
+    const res = await w.patch('A', p._id, {
+      version: 2,
+      links: [
+        { id, label: 'a', url: 'https://a.example' },
+        { id, label: 'b', url: 'https://b.example' },
+      ],
+    });
+    expect(res.statusCode).toBe(200);
+    const links = res.json<Dto>().links;
+    expect(links[0]!.id).toBe(id);
+    expect(links[1]!.id).not.toBe(id);
+    expect(new Set(links.map((l) => l.id)).size).toBe(2);
+  });
+
   test('Review focus 1: a stale version returns 409 conflict and the stored item is unchanged', async () => {
     const w = await world();
     const p = await t.seed.project(w.tenantId, w.roadmap._id, { title: 'Original' });

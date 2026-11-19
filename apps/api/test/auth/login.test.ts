@@ -6,12 +6,14 @@ import type { UserDoc } from '../../src/db/types.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
 
 // Lets one test run code after the password check has started, i.e. after the user lookup.
-const verifyHook = vi.hoisted(() => ({ run: null as null | (() => Promise<void>) }));
+// `calls` counts every password verification, so tests can check the timing equalisation runs exactly one.
+const verifyHook = vi.hoisted(() => ({ run: null as null | (() => Promise<void>), calls: 0 }));
 vi.mock('../../src/auth/passwords.ts', async (orig) => {
   const actual = await orig<typeof import('../../src/auth/passwords.ts')>();
   return {
     ...actual,
     verifyPassword: async (...args: Parameters<typeof actual.verifyPassword>) => {
+      verifyHook.calls++;
       const hook = verifyHook.run;
       verifyHook.run = null;
       await hook?.();
@@ -114,6 +116,42 @@ describe('POST /api/auth/login (FR-1)', () => {
   test('a user with no password set cannot sign in', async () => {
     const u = await t.seed.user(tenantId);
     expect((await login(u.email, PASSWORD)).statusCode).toBe(401);
+  });
+
+  test('FR-1 security: a user with no password cannot sign in with the old timing-dummy literal', async () => {
+    const u = await t.seed.user(tenantId);
+    expect(u.passwordHash).toBeNull();
+    const res = await login(u.email, 'dummy-password-for-timing');
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'invalid_credentials' });
+    expect(res.headers['set-cookie']).toBeUndefined();
+    expect(await s.collection('sessions').countDocuments({ userId: u._id })).toBe(0);
+  });
+
+  test('FR-1 security: an unknown email with the old timing-dummy literal gets 401 and no cookie', async () => {
+    const res = await login('nobody-dummy@example.com', 'dummy-password-for-timing');
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'invalid_credentials' });
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  test('FR-1 timing: every login path runs exactly one password verification', async () => {
+    const withPassword = await newUser();
+    const noPassword = await t.seed.user(tenantId);
+    const lockedUser = await newUser();
+    await s.collection('users').updateOne({ _id: lockedUser._id }, { $set: { lockedUntil: new Date(clock.getTime() + LOCK_MS) } });
+    const cases: Array<[string, string]> = [
+      [withPassword.email, PASSWORD],
+      [withPassword.email, 'wrong password here'],
+      [noPassword.email, PASSWORD],
+      ['nobody-timing@example.com', PASSWORD],
+      [lockedUser.email, PASSWORD],
+    ];
+    for (const [email, password] of cases) {
+      verifyHook.calls = 0;
+      await login(email, password);
+      expect(verifyHook.calls, email).toBe(1);
+    }
   });
 
   test('lockout: 5 failures lock for 15 min even with the right password', async () => {

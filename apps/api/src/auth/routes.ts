@@ -4,6 +4,7 @@ import {
   meResponseSchema,
   type MeResponse,
 } from '@roadmap/shared';
+import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -31,10 +32,6 @@ export interface AuthRouteDeps {
   fetch?: typeof fetch;
 }
 
-// Verified against when the email is unknown, so "no such user" costs the same as "wrong password".
-let dummyHash: Promise<string> | undefined;
-const getDummyHash = () => (dummyHash ??= hashPassword('dummy-password-for-timing'));
-
 /** Second factors the user has set up. */
 function factorsOf(user: UserDoc): { hasTotp: boolean; passkeys: MeResponse['user']['passkeys'] } {
   return {
@@ -60,6 +57,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
   const audit = createAuditLog();
   const lookup = unscoped(deps.db);
   const anySession: AuthConfig = { level: 'pending', states: ['pending_mfa', 'pending_enroll', 'full'] };
+  // Verified against when there is no stored hash to check, so every path costs one argon2 verification.
+  // It hashes random bytes nobody knows, and a match against it is never accepted anyway.
+  const dummyHash = hashPassword(randomBytes(32).toString('base64url'));
 
   r.post(
     '/api/auth/login',
@@ -72,9 +72,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const now = deps.now();
       const user = await lookup.findUserByEmail(email);
       let locked = user !== null && isLocked(user, now);
-      // Always run one argon2 verification; a locked account is not verified at all but still pays for the dummy.
-      const hashToCheck = user?.passwordHash && !locked ? user.passwordHash : await getDummyHash();
-      const ok = await verifyPassword(hashToCheck, password);
+      // Always run one argon2 verification. With no stored hash (unknown email, no password set, locked account)
+      // it runs against the dummy, and the result is never a match.
+      const stored = user && !locked ? user.passwordHash : null;
+      const ok = (await verifyPassword(stored ?? (await dummyHash), password)) && stored !== null;
       // Concurrent guesses may have locked the account since we read it: check the stored document again.
       if (user && ok && !locked) locked = !(await assertNotLocked(scoped(deps.db, user.tenantId), user._id, now));
 

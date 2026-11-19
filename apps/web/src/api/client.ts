@@ -12,6 +12,8 @@ export class ApiError extends Error {
 export interface ApiOptions {
   method?: string;
   body?: unknown;
+  /** A 401 is an answer, not a reason to send the person to sign in (e.g. "is anyone signed in?"). */
+  quiet?: boolean;
 }
 
 /** The CSRF token lives in memory only: the server hands out a new one whenever the session changes. */
@@ -65,7 +67,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     if (res.status === 401) {
       // A wrong second-step code is also a 401, but its pending session lives on and the retry needs the token.
       if (code === 'unauthenticated') csrfToken = null;
-      if (!path.startsWith(AUTH_PREFIX)) onUnauthorized();
+      if (!path.startsWith(AUTH_PREFIX) && !opts.quiet) onUnauthorized();
     }
     throw new ApiError(res.status, code);
   }

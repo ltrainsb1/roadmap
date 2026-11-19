@@ -2,7 +2,7 @@ import type { AcceptInviteResponse, InviteInfo } from '@roadmap/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api } from '../api/client.ts';
+import { api, ApiError, getCsrfToken } from '../api/client.ts';
 import { errorCode, messageFor } from '../api/errors.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
@@ -13,6 +13,20 @@ import { useFocusFirstError, type FormErrors } from '../ui/useFocusFirstError.ts
 import { roleName } from '../roles.ts';
 import { PASSWORD_LENGTH_ERROR, passwordLengthError } from './passwordRules.ts';
 import { ME_KEY } from './useMe.ts';
+
+/**
+ * After a fresh page load the CSRF token is not in memory, but a live session cookie makes the server
+ * demand it on accept. `/api/me` hands it out; a 401 there just means nobody is signed in.
+ */
+async function loadCsrfToken(): Promise<void> {
+  if (getCsrfToken()) return;
+  try {
+    await api('/api/me', { quiet: true });
+  } catch (err) {
+    // Anonymous (401) or not fully signed in (403): accept without a token and let the server answer.
+    if (!(err instanceof ApiError)) throw err;
+  }
+}
 
 export function InvitePage() {
   const { token = '' } = useParams();
@@ -29,6 +43,7 @@ export function InvitePage() {
 
   const accept = async (body?: { name: string; password: string; timezone: string }) => {
     const path = `/api/invites/${encodeURIComponent(token)}/accept`;
+    await loadCsrfToken();
     const res = await api<AcceptInviteResponse>(path, { method: 'POST', ...(body ? { body } : {}) });
     await queryClient.invalidateQueries({ queryKey: ME_KEY });
     // A new account enrolls first and then lands on the roadmap list; an existing one goes straight in.

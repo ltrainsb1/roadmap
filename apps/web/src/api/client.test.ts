@@ -69,6 +69,22 @@ describe('api client', () => {
     expect(getCsrfToken()).toBeNull();
   });
 
+  test('quiet: a 401 does not send the person to sign in, and drops the token', async () => {
+    const redirect = vi.fn();
+    setUnauthorizedHandler(redirect);
+    setCsrfToken('stale');
+    fetchMock.mockResolvedValue(json(401, { error: 'unauthenticated' }));
+    await expect(api('/api/me', { quiet: true })).rejects.toMatchObject({ status: 401, code: 'unauthenticated' });
+    expect(redirect).not.toHaveBeenCalled();
+    expect(getCsrfToken()).toBeNull();
+  });
+
+  test('quiet: a success still stores the CSRF token it carries', async () => {
+    fetchMock.mockResolvedValue(json(200, { csrfToken: 'from-me' }));
+    await api('/api/me', { quiet: true });
+    expect(getCsrfToken()).toBe('from-me');
+  });
+
   test('keeps the token after a wrong second-step code: the pending session is still alive', async () => {
     setCsrfToken('pending-token');
     fetchMock.mockResolvedValue(json(401, { error: 'invalid_code' }));

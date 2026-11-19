@@ -181,3 +181,23 @@ test('Owner revokes a pending invite after confirming', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Pending invites' })).toHaveCount(0);
 });
+
+test('A signed-in member opens a second invite after a page load and joins without signing in again', async ({ page, browser }, testInfo) => {
+  await createSignedInUser(page, 'twice');
+  await createRoadmap(page, 'First plan');
+  const guest = uniqueEmail('returning');
+  await sendInvite(page, guest, 'Contributor');
+  const joined = await joinViaInvite(browser, testInfo, await inviteLinkFor(guest, 'First plan'), 'Rita Returning', guest);
+
+  const secondId = await createRoadmap(page, 'Second plan');
+  await sendInvite(page, guest, 'Contributor');
+  const secondInvite = await inviteLinkFor(guest, 'Second plan');
+
+  // A full page load: the session cookie is live, but no CSRF token is in memory yet.
+  await joined.page.goto(secondInvite);
+  await expect(joined.page.getByRole('heading', { name: 'Join Second plan' })).toBeVisible();
+  await joined.page.getByRole('button', { name: 'Sign in to join' }).click();
+  await expect(joined.page).toHaveURL(`/r/${secondId}/members`);
+  await expect(joined.page.getByRole('heading', { name: 'Members', level: 1 })).toBeVisible();
+  await joined.context.close();
+});

@@ -54,6 +54,7 @@ describe('loadConfig', () => {
       mailOutboxFile: '/tmp/outbox.jsonl',
       awsRegion: 'eu-west-1',
       hibpEnabled: false,
+      authRateLimitPerMin: 10,
     });
   });
 
@@ -71,8 +72,14 @@ describe('loadConfig', () => {
       mailer: 'file',
       mailFrom: 'no-reply@app.example.org',
       hibpEnabled: true,
+      authRateLimitPerMin: 10,
     });
     expect(c.mailOutboxFile).toBeUndefined();
+  });
+
+  test('AUTH_RATE_LIMIT_PER_MIN overrides the default of 10 and must be a positive integer', () => {
+    expect(loadConfig({ ...valid, AUTH_RATE_LIMIT_PER_MIN: '1000' }).authRateLimitPerMin).toBe(1000);
+    expect(() => loadConfig({ ...valid, AUTH_RATE_LIMIT_PER_MIN: '0' })).toThrow(/AUTH_RATE_LIMIT_PER_MIN/);
   });
 
   test('rejects invalid values', () => {

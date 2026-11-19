@@ -67,7 +67,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // Default in-memory store: one per app instance. Only sign-in style endpoints are limited.
   await app.register(rateLimit, {
     global: true,
-    max: 10,
+    max: deps.config.authRateLimitPerMin,
     timeWindow: '1 minute',
     // Match on the routed pattern: the raw URL can be percent-encoded (/api/%61uth/...).
     allowList: (req) => !(req.routeOptions.url ?? '').startsWith(AUTH_PREFIX),

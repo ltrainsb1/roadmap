@@ -14,6 +14,8 @@ export interface Config {
   mailOutboxFile?: string;
   awsRegion: string;
   hibpEnabled: boolean;
+  /** Requests per minute per IP on /api/auth/*. */
+  authRateLimitPerMin: number;
 }
 
 export class ConfigError extends Error {
@@ -48,6 +50,7 @@ const envSchema = z.object({
   MAIL_OUTBOX_FILE: z.string().min(1).optional(),
   AWS_REGION: z.string().min(1).default('us-east-1'),
   HIBP_ENABLED: boolString.default(true),
+  AUTH_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(10),
 });
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
@@ -73,5 +76,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     ...(e.MAIL_OUTBOX_FILE ? { mailOutboxFile: e.MAIL_OUTBOX_FILE } : {}),
     awsRegion: e.AWS_REGION,
     hibpEnabled: e.HIBP_ENABLED,
+    authRateLimitPerMin: e.AUTH_RATE_LIMIT_PER_MIN,
   };
 }

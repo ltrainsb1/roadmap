@@ -151,7 +151,7 @@ describe('unscoped', () => {
       lastSeenAt: new Date(), expiresAt: exp, ip: '127.0.0.1', userAgent: 'vitest',
     });
     await scoped(db, 'A').collection('invites').insertOne({ _id: 'i1', email: 'n@x.com', tokenHash: 'ih', expiresAt: exp });
-    await scoped(db, 'A').collection('resetTokens').insertOne({ _id: 'r1', userId: 'u1', tokenHash: 'rh', expiresAt: exp });
+    await scoped(db, 'A').collection('resetTokens').insertOne({ _id: 'r1', userId: 'u1', tokenHash: 'rh', expiresAt: exp, usedAt: null });
     expect((await un.findSessionByTokenHash('sh'))?._id).toBe('s1');
     expect((await un.findInviteByTokenHash('ih'))?._id).toBe('i1');
     expect((await un.findResetByTokenHash('rh'))?._id).toBe('r1');

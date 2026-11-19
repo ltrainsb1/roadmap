@@ -14,6 +14,7 @@ import { connectDb, type Db } from '../src/db/client.ts';
 import { ensureIndexes } from '../src/db/indexes.ts';
 import { scoped } from '../src/db/scoped.ts';
 import type { MembershipDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
+import { MemoryMailer } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
 export interface TestMongo {
@@ -44,6 +45,9 @@ export interface Seeder {
 export interface TestApp {
   app: FastifyInstance;
   db: Db;
+  config: Config;
+  /** What the app emailed. */
+  mail: MemoryMailer;
   seed: Seeder;
   close(): Promise<void>;
 }
@@ -66,7 +70,7 @@ const SEED_HASH_PARAMS = { memoryCost: 8, timeCost: 1, parallelism: 1 } as const
 
 export const TEST_TOTP_KEY = Buffer.alloc(32, 7);
 
-const TEST_ENV = {
+export const TEST_ENV = {
   NODE_ENV: 'test',
   MONGO_URI: 'mongodb://unused',
   APP_ORIGIN: 'http://localhost:5173',
@@ -81,9 +85,11 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   const config: Config = loadConfig({ ...TEST_ENV, ...opts.env, MONGO_URI: mongo.uri, MONGO_DB: dbName });
   const { client, db } = await connectDb(mongo.uri, dbName);
   await ensureIndexes(db);
+  const mail = new MemoryMailer();
   const app = await buildApp({
     config,
     db,
+    mailer: mail,
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
@@ -142,6 +148,8 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   return {
     app,
     db,
+    config,
+    mail,
     seed,
     async close() {
       await app.close();

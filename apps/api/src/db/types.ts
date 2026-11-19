@@ -88,6 +88,8 @@ export interface ResetTokenDoc {
   userId: string;
   tokenHash: string;
   expiresAt: Date;
+  /** Set when the token is spent; a spent token never works again. */
+  usedAt: Date | null;
 }
 
 export interface WebauthnChallengeDoc {

@@ -1,0 +1,114 @@
+import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { z } from 'zod';
+import { createAuditLog } from '../audit/audit.ts';
+import type { ScopedDb } from '../db/scoped.ts';
+import type { ProjectDoc } from '../db/types.ts';
+import { HttpError } from '../errors.ts';
+import { assignedCtx, loadProject } from './access.ts';
+
+const projectParams = z.object({ roadmapId: z.string().min(1).max(100), projectId: z.string().min(1).max(100) });
+
+/** Every item in the roadmap under `item`, at any depth. */
+const descendantsOf = (s: ScopedDb, item: ProjectDoc) =>
+  s.collection('projects').find({ roadmapId: item.roadmapId, path: item._id });
+
+/** The non-archived siblings of `item` keep their order and get ranks 0..n-1; only changed ranks are written. */
+async function closeRankGap(s: ScopedDb, item: ProjectDoc): Promise<void> {
+  const projects = s.collection('projects');
+  const siblings = await projects.find(
+    { roadmapId: item.roadmapId, parentId: item.parentId, archived: false, _id: { $ne: item._id } },
+    { sort: { rank: 1, _id: 1 } },
+  );
+  for (const [index, sibling] of siblings.entries()) {
+    if (sibling.rank !== index) await projects.updateOne({ _id: sibling._id, roadmapId: item.roadmapId }, { $set: { rank: index } });
+  }
+}
+
+// Every transaction that changes sibling order bumps the roadmap document, as the reorder route does, so two
+// concurrent order changes in one roadmap conflict and one retries against fresh data.
+const bumpOrderRevision = (s: ScopedDb, roadmapId: string) =>
+  s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { orderRevision: 1 } });
+
+export function registerLifecycleRoutes(app: FastifyInstance): void {
+  const r = app.withTypeProvider<ZodTypeProvider>();
+  const audit = createAuditLog();
+  const base = '/api/roadmaps/:roadmapId/projects/:projectId';
+  const config = { auth: { level: 'full', action: 'project.delete', ctx: assignedCtx } } as const;
+
+  r.post(`${base}/archive`, { config, schema: { params: projectParams } }, async (req, reply) => {
+    const actor = req.actor!;
+    const { roadmapId, projectId } = req.params;
+    await actor.db.withTransaction(async (s) => {
+      const item = await loadProject(s, roadmapId, projectId);
+      if (item.archived) return;
+      const count = (await descendantsOf(s, item)).length + 1;
+      await s
+        .collection('projects')
+        .updateMany({ roadmapId, $or: [{ _id: projectId }, { path: projectId }] }, { $set: { archived: true } });
+      await closeRankGap(s, item);
+      await bumpOrderRevision(s, roadmapId);
+      await audit.record(s, {
+        action: 'project.archive',
+        actor: { type: 'user', userId: actor.userId },
+        roadmapId,
+        target: { type: 'project', id: projectId },
+        after: { title: item.title, count },
+        ip: req.ip,
+      });
+    });
+    return reply.status(204).send();
+  });
+
+  r.post(`${base}/unarchive`, { config, schema: { params: projectParams } }, async (req, reply) => {
+    const actor = req.actor!;
+    const { roadmapId, projectId } = req.params;
+    await actor.db.withTransaction(async (s) => {
+      const item = await loadProject(s, roadmapId, projectId);
+      if (!item.archived) return;
+      if (item.parentId !== null && (await loadProject(s, roadmapId, item.parentId)).archived) {
+        throw new HttpError(409, 'parent_archived');
+      }
+      const projects = s.collection('projects');
+      const siblings = await projects.find({ roadmapId, parentId: item.parentId, archived: false });
+      const rank = siblings.reduce((max, x) => Math.max(max, x.rank + 1), 0);
+      const count = (await descendantsOf(s, item)).length + 1;
+      await projects.updateMany({ roadmapId, path: projectId }, { $set: { archived: false } });
+      await projects.updateOne({ _id: projectId, roadmapId }, { $set: { archived: false, rank } });
+      await bumpOrderRevision(s, roadmapId);
+      await audit.record(s, {
+        action: 'project.unarchive',
+        actor: { type: 'user', userId: actor.userId },
+        roadmapId,
+        target: { type: 'project', id: projectId },
+        after: { title: item.title, count },
+        ip: req.ip,
+      });
+    });
+    return reply.status(204).send();
+  });
+
+  r.delete(base, { config, schema: { params: projectParams, response: { 200: z.object({ deleted: z.number() }) } } }, async (req) => {
+    const actor = req.actor!;
+    const { roadmapId, projectId } = req.params;
+    return actor.db.withTransaction(async (s) => {
+      const item = await loadProject(s, roadmapId, projectId);
+      const ids = [item._id, ...(await descendantsOf(s, item)).map((x) => x._id)];
+      const projects = s.collection('projects');
+      const { deleted } = await projects.deleteMany({ roadmapId, _id: { $in: ids } });
+      const pulled = await projects.updateMany({ roadmapId, blockedBy: { $in: ids } }, { $pull: { blockedBy: { $in: ids } } });
+      await closeRankGap(s, item);
+      await bumpOrderRevision(s, roadmapId);
+      if (pulled.matched > 0) await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { dependencyRevision: 1 } });
+      await audit.record(s, {
+        action: 'project.delete',
+        actor: { type: 'user', userId: actor.userId },
+        roadmapId,
+        target: { type: 'project', id: projectId },
+        before: { title: item.title, count: deleted },
+        ip: req.ip,
+      });
+      return { deleted };
+    });
+  });
+}

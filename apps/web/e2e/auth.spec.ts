@@ -123,6 +123,36 @@ test('Auth: sign in with password + TOTP', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
 });
 
+test('Auth: a wrong authenticator code shows the message and the next code signs in', async ({ page }) => {
+  const { email, secret } = await createEnrolledUser(page, 'wrongtotp');
+  await signIn(page, email);
+  await expect(page.getByRole('heading', { name: 'Enter your 6-digit code' })).toBeVisible();
+  const code = field(page, 'Code from your authenticator app');
+  await code.fill('000000');
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page.getByText(BAD_CODE)).toBeVisible();
+  await expect(code).toBeFocused();
+  // The retry must still carry the CSRF token of the pending session.
+  await code.fill(totpFor(secret, 1));
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
+});
+
+test('Auth: a wrong recovery code shows the message and a valid one signs in', async ({ page }) => {
+  const { email, recoveryCodes } = await createEnrolledUser(page, 'wrongrec');
+  await signIn(page, email);
+  await page.getByRole('button', { name: 'Use a recovery code' }).click();
+  const code = field(page, 'Recovery code');
+  await code.fill('AAAAA-AAAAA');
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page.getByText("That recovery code didn't work. Check it and try again.")).toBeVisible();
+  await code.fill(recoveryCodes[0]!);
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
+});
+
 test('Auth: sign in with a recovery code', async ({ page }) => {
   const { email, recoveryCodes } = await createEnrolledUser(page, 'recovery');
   await signIn(page, email);

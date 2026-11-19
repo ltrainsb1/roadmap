@@ -69,6 +69,24 @@ describe('api client', () => {
     expect(getCsrfToken()).toBeNull();
   });
 
+  test('keeps the token after a wrong second-step code: the pending session is still alive', async () => {
+    setCsrfToken('pending-token');
+    fetchMock.mockResolvedValue(json(401, { error: 'invalid_code' }));
+    await expect(api('/api/auth/mfa/totp', { method: 'POST', body: { code: '000000' } })).rejects.toMatchObject({
+      code: 'invalid_code',
+    });
+    expect(getCsrfToken()).toBe('pending-token');
+  });
+
+  test('drops the token when the session is gone (unauthenticated), even on an auth path', async () => {
+    setCsrfToken('pending-token');
+    fetchMock.mockResolvedValue(json(401, { error: 'unauthenticated' }));
+    await expect(api('/api/auth/mfa/totp', { method: 'POST', body: { code: '000000' } })).rejects.toMatchObject({
+      code: 'unauthenticated',
+    });
+    expect(getCsrfToken()).toBeNull();
+  });
+
   test('does not redirect on a 401 from an auth call', async () => {
     const redirect = vi.fn();
     setUnauthorizedHandler(redirect);

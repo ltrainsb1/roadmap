@@ -63,7 +63,8 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   if (!res.ok) {
     const code = typeof (data as { error?: unknown } | undefined)?.error === 'string' ? (data as { error: string }).error : 'unknown';
     if (res.status === 401) {
-      csrfToken = null;
+      // A wrong second-step code is also a 401, but its pending session lives on and the retry needs the token.
+      if (code === 'unauthenticated') csrfToken = null;
       if (!path.startsWith(AUTH_PREFIX)) onUnauthorized();
     }
     throw new ApiError(res.status, code);

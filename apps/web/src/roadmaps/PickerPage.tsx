@@ -26,7 +26,7 @@ export function PickerPage() {
         <ul className="roadmap-list" aria-label="Your roadmaps">
           {roadmaps.data.map((r) => (
             <li key={r.roadmapId}>
-              <Link to={`/r/${encodeURIComponent(r.roadmapId)}/members`} className="roadmap-link">
+              <Link to={`/r/${encodeURIComponent(r.roadmapId)}/projects`} className="roadmap-link">
                 {r.roadmapName}
               </Link>
               <span className="badge">{roleName(r.role)}</span>

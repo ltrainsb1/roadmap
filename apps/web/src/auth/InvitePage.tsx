@@ -47,7 +47,7 @@ export function InvitePage() {
     const res = await api<AcceptInviteResponse>(path, { method: 'POST', ...(body ? { body } : {}) });
     await queryClient.invalidateQueries({ queryKey: ME_KEY });
     // A new account enrolls first and then lands on the roadmap list; an existing one goes straight in.
-    void navigate(res.next === 'enroll' ? '/setup/totp' : `/r/${encodeURIComponent(res.roadmapId)}/members`);
+    void navigate(res.next === 'enroll' ? '/setup/totp' : `/r/${encodeURIComponent(res.roadmapId)}/projects`);
   };
 
   const onCreate = async (e: FormEvent<HTMLFormElement>) => {

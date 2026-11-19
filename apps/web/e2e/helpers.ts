@@ -193,13 +193,20 @@ export async function createRoadmap(page: Page, name: string): Promise<string> {
   const dialog = page.getByRole('dialog', { name: 'New roadmap' });
   await dialog.getByLabel('Name', { exact: true }).fill(name);
   await dialog.getByRole('button', { name: 'Create roadmap' }).click();
-  await expect(page).toHaveURL(/\/r\/[^/]+\/members$/);
-  await expect(page.getByRole('heading', { name: 'Members', level: 1 })).toBeVisible();
+  await expect(page).toHaveURL(/\/r\/[^/]+\/projects$/);
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
   return /\/r\/([^/]+)\//.exec(page.url())![1]!;
 }
 
-/** Sends an invite from the Members screen. */
+/** Opens the Members tab of the roadmap the page is in. */
+export async function openMembers(page: Page) {
+  await page.getByRole('link', { name: 'Members', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Members', level: 1 })).toBeVisible();
+}
+
+/** Sends an invite from the Members screen, opening its tab first. */
 export async function sendInvite(page: Page, email: string, role: 'Admin' | 'Contributor') {
+  await openMembers(page);
   await field(page, 'Email').fill(email);
   await page.getByLabel('Role', { exact: true }).selectOption({ label: role });
   await page.getByRole('button', { name: 'Send invite' }).click();
@@ -250,4 +257,52 @@ export async function inviteAndJoin(
   await sendInvite(owner, email, role);
   const path = await inviteLinkFor(email, roadmapName);
   return joinViaInvite(browser, info, path, `${label} user`, email);
+}
+
+/** The row of the project list for the item titled `title`. */
+export const projectRow = (page: Page, title: string) =>
+  page.getByRole('row').filter({ has: page.getByRole('link', { name: title, exact: true }) });
+
+const newItemInput = (page: Page) => page.getByRole('textbox', { name: /^Title of the new / });
+
+/** Adds a top-level project through the "New project" button and closes the add row. */
+export async function addProject(page: Page, title: string) {
+  await page.getByRole('button', { name: 'New project' }).click();
+  await newItemInput(page).fill(title);
+  await newItemInput(page).press('Enter');
+  await expect(projectRow(page, title)).toBeVisible();
+  await newItemInput(page).press('Escape');
+  await expect(newItemInput(page)).toHaveCount(0);
+}
+
+/** Adds an item under `parentTitle` through that row's menu and closes the add row. */
+export async function addChild(page: Page, parentTitle: string, title: string) {
+  await page.getByRole('button', { name: `Actions for ${parentTitle}` }).click();
+  await page.getByRole('menuitem', { name: /^Add (sub-project|task|sub-task)$/ }).click();
+  await newItemInput(page).fill(title);
+  await newItemInput(page).press('Enter');
+  await expect(projectRow(page, title)).toBeVisible();
+  await newItemInput(page).press('Escape');
+  await expect(newItemInput(page)).toHaveCount(0);
+}
+
+/** Opens the item's panel by choosing its title. */
+export async function openProject(page: Page, title: string) {
+  await page.getByRole('link', { name: title, exact: true }).click();
+  await expect(page).toHaveURL(/\/r\/[^/]+\/projects\/[^/]+$/);
+}
+
+/** Calls the API as the signed-in person on `page`, for seeding data the screen under test then shows. */
+export async function apiAs(page: Page) {
+  const { csrfToken } = (await (await page.request.get('/api/me')).json()) as { csrfToken: string };
+  return async <T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, data?: unknown): Promise<T> => {
+    const res = await page.request.fetch(path, { method, headers: { 'x-csrf-token': csrfToken }, ...(data === undefined ? {} : { data }) });
+    expect(res.ok(), `${method} ${path} answered ${res.status()}`).toBe(true);
+    return (res.status() === 204 ? undefined : await res.json()) as T;
+  };
+}
+
+/** Creates an item through the API; returns its id. */
+export async function seedProject(call: Awaited<ReturnType<typeof apiAs>>, roadmapId: string, title: string, parentId: string | null = null) {
+  return (await call<{ id: string }>('POST', `/api/roadmaps/${roadmapId}/projects`, { parentId, title })).id;
 }

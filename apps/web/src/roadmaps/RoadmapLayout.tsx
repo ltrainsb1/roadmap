@@ -15,7 +15,7 @@ export interface RoadmapContext {
 /** The roadmap a screen inside `RoadmapLayout` belongs to, and the signed-in person's role in it. */
 export const useRoadmap = (): RoadmapContext => useOutletContext<RoadmapContext>();
 
-/** Header picker and nav tabs around every screen of one roadmap. Later plans add Projects and views here. */
+/** Header picker and nav tabs around every screen of one roadmap. Later plans add views here. */
 export function RoadmapLayout() {
   const { roadmapId = '' } = useParams();
   const navigate = useNavigate();
@@ -50,7 +50,9 @@ export function RoadmapLayout() {
 
   const base = `/r/${encodeURIComponent(roadmapId)}`;
   // Switching keeps the tab: the same section of the other roadmap.
-  const section = location.pathname.slice(base.length) || '/members';
+  // A project's panel belongs to its own roadmap, so switching lands on the list.
+  const rawSection = location.pathname.slice(base.length) || '/projects';
+  const section = rawSection.startsWith('/projects') ? '/projects' : rawSection;
   const picker = (
     <div className="roadmap-picker">
       <label htmlFor="roadmap-picker">Roadmap</label>
@@ -59,7 +61,7 @@ export function RoadmapLayout() {
         value={roadmapId}
         onChange={(e) => {
           const target = roadmaps.data.find((r) => r.roadmapId === e.target.value);
-          const keep = target && section === '/audit' && !can({ role: target.role, action: 'audit.view' }) ? '/members' : section;
+          const keep = target && section === '/audit' && !can({ role: target.role, action: 'audit.view' }) ? '/projects' : section;
           void navigate(`/r/${encodeURIComponent(e.target.value)}${keep}`);
         }}
       >
@@ -75,6 +77,7 @@ export function RoadmapLayout() {
   return (
     <Layout width="wide" signedIn headerExtra={picker}>
       <nav aria-label="Roadmap sections" className="tabs">
+        <NavLink to={`${base}/projects`}>Projects</NavLink>
         <NavLink to={`${base}/members`}>Members</NavLink>
         {can({ role: current.role, action: 'audit.view' }) && <NavLink to={`${base}/audit`}>Audit log</NavLink>}
       </nav>
@@ -86,5 +89,5 @@ export function RoadmapLayout() {
 /** `/r/:roadmapId` on its own opens the first tab. */
 export function RoadmapIndex() {
   const { roadmapId = '' } = useParams();
-  return <Navigate to={`/r/${encodeURIComponent(roadmapId)}/members`} replace />;
+  return <Navigate to={`/r/${encodeURIComponent(roadmapId)}/projects`} replace />;
 }

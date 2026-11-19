@@ -38,6 +38,12 @@ export function errorMessage(code: string, ctx: ErrorContext = {}): string {
       return 'You already own this roadmap.';
     case 'not_a_member':
       return "That person isn't a member of this roadmap.";
+    case 'too_deep':
+      return "A sub-task can't have items under it.";
+    case 'parent_archived':
+      return 'Unarchive the item above this one first.';
+    case 'too_many_items':
+      return 'This roadmap has reached 2,000 items.';
     case 'confirm_mismatch':
       return "The name doesn't match.";
     case 'last_factor':

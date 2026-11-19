@@ -1,5 +1,5 @@
 import { can, INVITE_ROLES, type InviteRequest, type MembersResponse } from '@roadmap/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.ts';
@@ -14,11 +14,10 @@ import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Field } from '../ui/Field.tsx';
 import { formText } from '../ui/formText.ts';
 import { SelectField } from '../ui/SelectField.tsx';
+import { MEMBERS_KEY, useMembers } from './useMembers.ts';
 
 type Member = MembersResponse['members'][number];
 type Message = { tone: 'error' | 'success'; text: string };
-
-const membersKey = (roadmapId: string) => ['members', roadmapId] as const;
 
 export function MembersPage() {
   const { roadmapId, roadmapName, role } = useRoadmap();
@@ -27,7 +26,7 @@ export function MembersPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const base = `/api/roadmaps/${encodeURIComponent(roadmapId)}`;
-  const members = useQuery({ queryKey: membersKey(roadmapId), queryFn: () => api<MembersResponse>(`${base}/members`) });
+  const members = useMembers(roadmapId);
 
   const [message, setMessage] = useState<Message | null>(null);
   const [emailError, setEmailError] = useState<string | undefined>();
@@ -41,7 +40,7 @@ export function MembersPage() {
   const newOwner = useRef<HTMLSelectElement>(null);
   const confirmName = useRef<HTMLInputElement>(null);
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: membersKey(roadmapId) });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: MEMBERS_KEY(roadmapId) });
   const fail = (err: unknown, ctx?: { email?: string }) => {
     setMessage({ tone: 'error', text: messageFor(err, ctx) });
     // A conflict or a stale list is cured by looking again.

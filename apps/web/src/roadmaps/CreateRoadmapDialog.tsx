@@ -32,7 +32,7 @@ export function CreateRoadmapDialog({ open, onClose }: { open: boolean; onClose:
       const { id } = await api<IdResponse>('/api/roadmaps', { body: { name } });
       await queryClient.invalidateQueries({ queryKey: ROADMAPS_KEY });
       close();
-      void navigate(`/r/${encodeURIComponent(id)}/members`);
+      void navigate(`/r/${encodeURIComponent(id)}/projects`);
     } catch (err) {
       setFormError(messageFor(err));
     }

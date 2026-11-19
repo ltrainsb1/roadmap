@@ -11,6 +11,7 @@ import { RequireAuth } from './auth/RequireAuth.tsx';
 import { ResetPage } from './auth/ResetPage.tsx';
 import { AuditPage } from './audit/AuditPage.tsx';
 import { MembersPage } from './members/MembersPage.tsx';
+import { ProjectsPage } from './projects/ProjectsPage.tsx';
 import { PickerPage } from './roadmaps/PickerPage.tsx';
 import { RoadmapIndex, RoadmapLayout } from './roadmaps/RoadmapLayout.tsx';
 import { SecurityPage } from './settings/SecurityPage.tsx';
@@ -60,6 +61,7 @@ export function App() {
             }
           >
             <Route index element={<RoadmapIndex />} />
+            <Route path="projects/:projectId?" element={<ProjectsPage />} />
             <Route path="members" element={<MembersPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>

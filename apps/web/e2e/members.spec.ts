@@ -5,6 +5,7 @@ import {
   field,
   inviteAndJoin,
   inviteLinkFor,
+  openMembers,
   joinViaInvite,
   sendInvite,
   uniqueEmail,
@@ -33,7 +34,8 @@ test('Owner invites a contributor by email; contributor accepts, enrolls, sees r
   await expect(guestPage.getByRole('list', { name: 'Your roadmaps' }).getByRole('listitem')).toContainText('Launch plan');
   await expect(guestPage.getByRole('list', { name: 'Your roadmaps' }).getByRole('listitem')).toContainText('Contributor');
   await guestPage.getByRole('link', { name: 'Launch plan' }).click();
-  await expect(guestPage).toHaveURL(`/r/${id}/members`);
+  await expect(guestPage).toHaveURL(`/r/${id}/projects`);
+  await guestPage.getByRole('link', { name: 'Members', exact: true }).click();
   await expect(memberRow(guestPage, 'Nina Newcomer')).toBeVisible();
 
   // The owner now sees the new member, and the invite is no longer pending.
@@ -91,6 +93,7 @@ test('Permissions: contributor calling PATCH members via fetch gets 403', async 
 test('Owner transfers ownership; former owner loses Danger zone', async ({ page, browser }, testInfo) => {
   await createSignedInUser(page, 'founder');
   const id = await createRoadmap(page, 'Handover plan');
+  await openMembers(page);
   await expect(page.getByRole('heading', { name: 'Danger zone' })).toBeVisible();
   const heir = await inviteAndJoin(page, browser, testInfo, 'Handover plan', 'heir', 'Admin');
 
@@ -112,6 +115,7 @@ test('Owner transfers ownership; former owner loses Danger zone', async ({ page,
 test('Owner deletes roadmap after typing its name', async ({ page }) => {
   await createSignedInUser(page, 'cleaner');
   await createRoadmap(page, 'Doomed plan');
+  await openMembers(page);
   await page.getByRole('button', { name: 'Delete roadmap' }).click();
   const dialog = page.getByRole('dialog', { name: 'Delete roadmap' });
   await expect(dialog.getByText("Type Doomed plan to delete it. This can't be undone.")).toBeVisible();
@@ -197,7 +201,7 @@ test('A signed-in member opens a second invite after a page load and joins witho
   await joined.page.goto(secondInvite);
   await expect(joined.page.getByRole('heading', { name: 'Join Second plan' })).toBeVisible();
   await joined.page.getByRole('button', { name: 'Sign in to join' }).click();
-  await expect(joined.page).toHaveURL(`/r/${secondId}/members`);
-  await expect(joined.page.getByRole('heading', { name: 'Members', level: 1 })).toBeVisible();
+  await expect(joined.page).toHaveURL(`/r/${secondId}/projects`);
+  await expect(joined.page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
   await joined.context.close();
 });

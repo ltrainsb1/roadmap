@@ -256,8 +256,8 @@ test('Auth: an invited person with an account signs in, then joins', async ({ pa
   await page.getByRole('button', { name: 'Verify' }).click();
   await expect(page).toHaveURL(secondInvite);
   await page.getByRole('button', { name: 'Sign in to join' }).click();
-  await expect(page).toHaveURL(/\/r\/[^/]+\/members$/);
-  await expect(page.getByRole('heading', { name: 'Members', level: 1 })).toBeVisible();
+  await expect(page).toHaveURL(/\/r\/[^/]+\/projects$/);
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
 });
 
 test('Auth: an unknown invite link shows the expired message', async ({ page }) => {

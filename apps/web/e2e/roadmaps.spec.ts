@@ -26,11 +26,11 @@ test('FR-1.1: user creates two roadmaps and switches between them from the picke
 
   // Choosing a roadmap opens it; the header picker switches to the other one.
   await page.getByRole('link', { name: 'Beta plan' }).click();
-  await expect(page).toHaveURL(`/r/${betaId}/members`);
+  await expect(page).toHaveURL(`/r/${betaId}/projects`);
   const picker = field(page, 'Roadmap');
   await expect(picker).toHaveValue(betaId);
   await picker.selectOption({ label: 'Alpha plan' });
-  await expect(page).toHaveURL(`/r/${alphaId}/members`);
+  await expect(page).toHaveURL(`/r/${alphaId}/projects`);
   await expect(picker).toHaveValue(alphaId);
 
   // A person with no access to a roadmap id sees a plain message, not someone else's data.
@@ -45,6 +45,7 @@ test('Signed-in screens pass axe at 375px and 1280px, with no horizontal scroll 
 
   const screens: [string, string][] = [
     ['/', 'Roadmaps'],
+    [`/r/${id}/projects`, 'Projects'],
     [`/r/${id}/members`, 'Members'],
     [`/r/${id}/audit`, 'Audit log'],
     ['/settings/security', 'Security'],

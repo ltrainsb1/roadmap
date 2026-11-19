@@ -142,6 +142,8 @@ export function registerInviteRoutes(app: FastifyInstance, deps: InviteRouteDeps
       const tokenHash = hashToken(req.params.token);
       const found = await lookup.findInviteByTokenHash(tokenHash);
       if (!found || !isOpen(found, now)) throw inviteInvalid();
+      // The route is public, so the hook did not check CSRF; whenever a session is present, we do.
+      if (req.actor && !csrfMatches(req.headers['x-csrf-token'], req.actor.csrfToken)) throw new HttpError(403, 'csrf');
       const s = scoped(deps.db, found.tenantId);
       const account = await lookup.findUserByEmail(found.email);
 
@@ -231,12 +233,10 @@ export function registerInviteRoutes(app: FastifyInstance, deps: InviteRouteDeps
     },
   );
 
-  /** The existing-account path: the caller must hold a full session of that very user, with a matching CSRF token. */
+  /** The existing-account path: the caller must hold a full session of that very user. */
   async function requireSignedInAs(req: import('fastify').FastifyRequest, account: UserDoc): Promise<void> {
     const actor = req.actor;
     if (!actor) throw new HttpError(401, 'sign_in_required');
-    // The route is public, so the hook did not check CSRF.
-    if (!csrfMatches(req.headers['x-csrf-token'], actor.csrfToken)) throw new HttpError(403, 'csrf');
     const session = await actor.db.collection('sessions').findOne({ _id: actor.sessionId });
     if (session?.state !== 'full' || actor.userId !== account._id) throw new HttpError(401, 'sign_in_required');
   }

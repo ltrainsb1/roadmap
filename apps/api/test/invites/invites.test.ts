@@ -285,6 +285,17 @@ describe('accepting (FR-1.1)', () => {
     expect((await stored(id))!.acceptedAt).toBeNull();
   });
 
+  test('a signed-in caller with a wrong CSRF token cannot accept a new-account invite: 403 and the link is not spent', async () => {
+    const { roadmap, sess } = await setup();
+    const { token, id } = await invited(roadmap._id, sess, 'nocsrf@example.com');
+    const res = await accept(token, sess, { name: 'N', password: PASSWORD }, 'wrong');
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'csrf' });
+    expect((await stored(id))!.acceptedAt).toBeNull();
+    expect(await unscoped(t.db).findUserByEmail('nocsrf@example.com')).toBeNull();
+    expect((await accept(token, sess, { name: 'N', password: PASSWORD })).statusCode).toBe(200);
+  });
+
   test('a pending (not fully signed in) session is not enough', async () => {
     const { roadmap, sess } = await setup();
     const existing = await newUser('pending@example.com');

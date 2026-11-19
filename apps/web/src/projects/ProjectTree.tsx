@@ -1,6 +1,6 @@
 import { buildTree, can, PROJECT_STATUSES, projectWarnings, type Project, type ProjectStatus, type Role, type TreeNode } from '@roadmap/shared';
 import { Fragment, useCallback, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
 import { AddItemRow } from './AddItemRow.tsx';
 import { isAssigned } from './useProjects.ts';
@@ -87,15 +87,16 @@ interface TreeProps {
   onCancelAdd: () => void;
   /** Saves a new status for the item; the page shows any error. */
   onChangeStatus: (item: Project, status: ProjectStatus) => void;
+  /** Opens an item's panel; the page may ask about unsaved edits first. */
+  onOpen: (itemId: string) => void;
 }
 
 export function ProjectTree(props: TreeProps) {
-  const { roadmapId, role, myId, items, byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus } = props;
-  const navigate = useNavigate();
+  const { roadmapId, role, myId, items, byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus, onOpen } = props;
   const tree = buildTree(items);
 
   const menuItems = (item: Project): MenuItem[] => {
-    const entries: MenuItem[] = [{ label: 'Open', onSelect: () => void navigate(`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}`) }];
+    const entries: MenuItem[] = [{ label: 'Open', onSelect: () => onOpen(item.id) }];
     const add = addChildLabel(item.depth);
     if (add && can({ role, action: 'project.create', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
       entries.push({ label: add, onSelect: () => onStartAdd(item.id) });
@@ -126,7 +127,14 @@ export function ProjectTree(props: TreeProps) {
                 <span className="chevron-space" aria-hidden="true" />
               )}
               <span className="sr-only">{levelName(item.depth)}: </span>
-              <Link id={titleLinkId(item.id)} to={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}`} className="item-title">
+              <Link id={titleLinkId(item.id)} to={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}`} className="item-title"
+                onClick={(e) => {
+                  // Plain clicks go through the page; a new-tab click keeps its default.
+                  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  e.preventDefault();
+                  onOpen(item.id);
+                }}
+              >
                 {item.title}
               </Link>
               {warnings.length > 0 && <WarningIcon texts={warnings} />}

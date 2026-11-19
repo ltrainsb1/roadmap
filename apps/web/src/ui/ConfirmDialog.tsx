@@ -8,6 +8,8 @@ interface ConfirmDialogProps {
   /** What the person is about to do and what follows from it. */
   children: ReactNode;
   confirmLabel: string;
+  /** The dismiss button's text; "Cancel" unless the person is better served by another word. */
+  cancelLabel?: string;
   onConfirm: () => void;
   onClose: () => void;
   /** Shown above the buttons when the action failed. */
@@ -27,6 +29,7 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel,
+  cancelLabel = 'Cancel',
   onConfirm,
   onClose,
   error,
@@ -57,7 +60,7 @@ export function ConfirmDialog({
           {error && <Alert>{error}</Alert>}
           {children}
           <div className="dialog-actions">
-            <Button onClick={onClose}>{informOnly ? 'Close' : 'Cancel'}</Button>
+            <Button onClick={onClose}>{informOnly ? 'Close' : cancelLabel}</Button>
             {!informOnly && (
               <Button type="submit" variant={danger ? 'danger' : 'primary'}>
                 {confirmLabel}

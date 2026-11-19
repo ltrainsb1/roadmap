@@ -48,8 +48,10 @@ interface PanelProps {
   onClose: () => void;
   /** Refetches the list and gives back the fresh item, or undefined if it is gone. */
   onReload: () => Promise<Project | undefined>;
-  /** Called when "Back to projects" is chosen, so the page can hand focus back to the row. */
-  onBack: () => void;
+  /** The newest save of this item made from the row's status pill, if any; the form adopts it so Save does not conflict with it. */
+  ownStatusChange: { id: string; version: number; status: ProjectStatus; n: number } | undefined;
+  /** Tells the page whether the form has changes that are not saved. */
+  onDirtyChange: (dirty: boolean) => void;
 }
 
 /**
@@ -57,9 +59,12 @@ interface PanelProps {
  * opens (the page keys it by item id) and is not touched by later refetches, so nothing typed is lost. Save
  * sends the version the form was started from, so a change made by someone else is a conflict, never overwritten.
  */
-export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onClose, onReload, onBack }: PanelProps) {
+export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onClose, onReload, ownStatusChange, onDirtyChange }: PanelProps) {
   const update = useUpdateProject(roadmapId);
   const [values, setValues] = useState(() => valuesOf(item));
+  // What the form was last started or saved from, to tell whether anything is unsaved.
+  const [base, setBase] = useState(values);
+  const [reloaded, setReloaded] = useState(0);
   const [version, setVersion] = useState(item.version);
   const [saved, setSaved] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ title?: string; endDate?: string }>({});
@@ -75,6 +80,29 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
 
   // Opening the panel (or a different item) moves focus into it.
   useEffect(() => heading.current?.focus(), []);
+
+  const dirty = (Object.keys(values) as (keyof FormValues)[]).some((k) => values[k] !== base[k]);
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+  }, [dirty, onDirtyChange]);
+
+  // This browser's own change from the row pill: take its version and status, and keep everything else typed.
+  // Changes made elsewhere are deliberately not adopted, so Save still reports them as a conflict.
+  const adopted = useRef(ownStatusChange?.n);
+  useEffect(() => {
+    if (!ownStatusChange || ownStatusChange.n === adopted.current) return;
+    adopted.current = ownStatusChange.n;
+    if (ownStatusChange.id !== item.id) return;
+    setVersion(ownStatusChange.version);
+    setValues((v) => ({ ...v, status: ownStatusChange.status }));
+    setBase((b) => ({ ...b, status: ownStatusChange.status }));
+  }, [ownStatusChange, item.id]);
+
+  // After a reload the Reload button is gone, so focus goes to the first field.
+  useEffect(() => {
+    if (reloaded > 0) document.getElementById(`panel-${item.id}-title`)?.focus();
+  }, [reloaded, item.id]);
   useFocusFirstError(form, attempt);
 
   const change = (patch: Partial<FormValues>) => {
@@ -114,6 +142,7 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
     try {
       const next = await update.mutateAsync({ projectId: item.id, body: checked.data });
       setValues(valuesOf(next));
+      setBase(valuesOf(next));
       setVersion(next.version);
       setSaved(true);
     } catch (err) {
@@ -128,7 +157,9 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
       const fresh = await onReload();
       if (!fresh) return;
       setValues(valuesOf(fresh));
+      setBase(valuesOf(fresh));
       setVersion(fresh.version);
+      setReloaded((n) => n + 1);
       setFieldErrors({});
       setFormError(undefined);
       setSaved(false);
@@ -148,7 +179,14 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
 
   return (
     <section className="project-panel" aria-labelledby={headingId} onKeyDown={onKeyDown}>
-      <Link to={listPath} className="text-link panel-back" onClick={onBack}>
+      <Link
+        to={listPath}
+        className="text-link panel-back"
+        onClick={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+      >
         Back to projects
       </Link>
       <h2 id={headingId} ref={heading} tabIndex={-1}>

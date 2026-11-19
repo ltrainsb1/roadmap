@@ -123,6 +123,7 @@ test('Review focus 1: when someone else saved first, Save shows the conflict mes
   await expect(panelOf(page, 'Their title').getByLabel('Title', { exact: true })).toHaveValue('Their title');
   await expect(panelOf(page, 'Their title').getByLabel('Status', { exact: true })).toHaveValue('done');
   await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(panelOf(page, 'Their title').getByLabel('Title', { exact: true })).toBeFocused();
 
   // The reloaded form saves.
   await panelOf(page, 'Their title').getByLabel('Title', { exact: true }).fill('Merged title');
@@ -377,4 +378,146 @@ test('a background refetch does not wipe what is typed in the panel', async ({ p
   await expect(projectRow(page, 'Alpha')).toContainText('Done');
   await expect(panel.getByLabel('Description', { exact: true })).toHaveValue('Half written');
   await expect(panel.getByLabel('Status', { exact: true })).toHaveValue('not_started');
+
+  // A change made elsewhere is not adopted: Save reports the conflict instead of overwriting it.
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Someone else changed this at the same time. Reload and try again.');
+  const stored = await call<{ items: { id: string; status: string; description: string }[] }>('GET', `/api/roadmaps/${id}/projects`);
+  expect(stored.items.find((i) => i.id === itemId)).toMatchObject({ status: 'done', description: '' });
+});
+
+test('changing status from the row while the panel has unsaved edits keeps the edits, and Save succeeds', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'both');
+  const id = await createRoadmap(page, 'Both plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Alpha');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Alpha');
+  await panel.getByLabel('Title', { exact: true }).fill('Alpha, renamed');
+
+  await page.getByRole('button', { name: /^Status of Alpha/ }).click();
+  await page.getByRole('menuitemradio', { name: 'In progress' }).click();
+  await expect(projectRow(page, 'Alpha')).toContainText('In progress');
+  await expect(panel.getByLabel('Status', { exact: true })).toHaveValue('in_progress');
+  await expect(panel.getByLabel('Title', { exact: true })).toHaveValue('Alpha, renamed');
+
+  // A second change from the pill uses the newest version too.
+  await page.getByRole('button', { name: /^Status of Alpha/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Blocked' }).click();
+  await expect(projectRow(page, 'Alpha')).toContainText('Blocked');
+  await expect(panel.getByLabel('Status', { exact: true })).toHaveValue('blocked');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panelOf(page, 'Alpha, renamed').getByRole('status')).toHaveText('Saved.');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await page.reload();
+  const again = panelOf(page, 'Alpha, renamed');
+  await expect(again.getByLabel('Title', { exact: true })).toHaveValue('Alpha, renamed');
+  await expect(again.getByLabel('Status', { exact: true })).toHaveValue('blocked');
+});
+
+test('unsaved edits are not thrown away silently: Escape, Close, Back to projects and another row ask first', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'guard');
+  const id = await createRoadmap(page, 'Guard plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Alpha');
+  await seedProject(call, id, 'Beta');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Alpha');
+  const description = panel.getByLabel('Description', { exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Discard your unsaved changes to Alpha?' });
+
+  // A clean form closes at once.
+  await panel.focus();
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(`/r/${id}/projects`);
+  await expect(dialog).toHaveCount(0);
+
+  await openProject(page, 'Alpha');
+  await description.fill('Draft');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expectNoA11yViolations(page);
+  await dialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(projectUrl(id, itemId));
+  await expect(description).toHaveValue('Draft');
+  await expect(description).toBeFocused();
+
+  // The same question from Close, from another row, and from the row menu's Open.
+  await panel.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await page.getByRole('link', { name: 'Beta', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await expect(page).toHaveURL(projectUrl(id, itemId));
+  await page.getByRole('button', { name: 'Actions for Beta' }).click();
+  await page.getByRole('menuitem', { name: 'Open' }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await expect(description).toHaveValue('Draft');
+
+  // Discard goes where the person was going.
+  await page.getByRole('link', { name: 'Beta', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(panelOf(page, 'Beta')).toBeVisible();
+  await expect(panelOf(page, 'Beta').getByLabel('Description', { exact: true })).toHaveValue('');
+
+  // Discard on Escape closes the panel and returns focus to the row.
+  await panelOf(page, 'Beta').getByLabel('Description', { exact: true }).fill('More');
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog', { name: 'Discard your unsaved changes to Beta?' }).getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(page).toHaveURL(`/r/${id}/projects`);
+  await expect(page.getByRole('link', { name: 'Beta', exact: true })).toBeFocused();
+
+  // A saved form is clean again.
+  await openProject(page, 'Alpha');
+  await panelOf(page, 'Alpha').getByLabel('Description', { exact: true }).fill('Kept');
+  await panelOf(page, 'Alpha').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panelOf(page, 'Alpha').getByRole('status')).toHaveText('Saved.');
+  await panelOf(page, 'Alpha').getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page).toHaveURL(`/r/${id}/projects`);
+});
+
+test('Back to projects asks before discarding unsaved edits at 375 px', async ({ page }) => {
+  await createSignedInUser(page, 'guard2');
+  const id = await createRoadmap(page, 'Guard small');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Alpha');
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto(projectUrl(id, itemId));
+  await panelOf(page, 'Alpha').getByLabel('Description', { exact: true }).fill('Draft');
+  await page.getByRole('link', { name: 'Back to projects', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Discard your unsaved changes to Alpha?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await expect(page).toHaveURL(projectUrl(id, itemId));
+  await page.getByRole('link', { name: 'Back to projects', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(page).toHaveURL(`/r/${id}/projects`);
+  await expect(page.getByRole('link', { name: 'Alpha', exact: true })).toBeFocused();
+});
+
+test('New project is the primary button until an editable panel opens, then Save is', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'primary');
+  const id = await createRoadmap(page, 'Primary plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Alpha');
+  await page.goto(`/r/${id}/projects`);
+  const add = page.getByRole('button', { name: 'New project' });
+  await expect(add).toHaveClass(/btn-primary/);
+
+  await openProject(page, 'Alpha');
+  await expect(add).toHaveClass(/btn-secondary/);
+  await expect(panelOf(page, 'Alpha').getByRole('button', { name: 'Save', exact: true })).toHaveClass(/btn-primary/);
+
+  await page.keyboard.press('Escape');
+  await expect(add).toHaveClass(/btn-primary/);
+  expect(itemId).toBeTruthy();
 });

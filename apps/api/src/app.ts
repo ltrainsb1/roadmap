@@ -52,7 +52,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     global: true,
     max: 10,
     timeWindow: '1 minute',
-    allowList: (req) => !req.url.startsWith(AUTH_PREFIX),
+    // Match on the routed pattern: the raw URL can be percent-encoded (/api/%61uth/...).
+    allowList: (req) => !(req.routeOptions.url ?? '').startsWith(AUTH_PREFIX),
   });
   await app.register(cookie);
   await app.register(authPlugin, { db: deps.db, ...(deps.now ? { now: deps.now } : {}) });

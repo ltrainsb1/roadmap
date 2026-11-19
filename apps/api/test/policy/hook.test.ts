@@ -297,6 +297,16 @@ describe('security headers and rate limit', () => {
     expect(res.json()).toEqual({ error: 'rate_limited' });
   });
 
+  test('a percent-encoded /api/%61uth/ path is still rate limited on the 11th request', async () => {
+    const t = await setup(routes);
+    for (let i = 0; i < 10; i++) {
+      const r = await t.app.inject({ method: 'POST', url: '/api/%61uth/ping' });
+      expect(r.statusCode).toBe(200);
+    }
+    const res = await t.app.inject({ method: 'POST', url: '/api/%61uth/ping' });
+    expect(res.statusCode).toBe(429);
+  });
+
   test('routes outside /api/auth are not rate limited, and counts are per app', async () => {
     const t = await setup(routes);
     for (let i = 0; i < 15; i++) {

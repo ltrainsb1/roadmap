@@ -14,7 +14,7 @@ import type { UserDoc } from '../db/types.ts';
 import { unscoped } from '../db/unscoped.ts';
 import type { AuthConfig } from '../policy/hook.ts';
 import { HttpError } from '../errors.ts';
-import { isLocked, recordFailure, recordSuccess } from './lockout.ts';
+import { assertNotLocked, isLocked, recordFailure } from './lockout.ts';
 import { hashPassword, verifyPassword } from './passwords.ts';
 import { clearSessionCookie, setSessionCookie } from './sessions.ts';
 
@@ -59,10 +59,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const { email, password } = req.body;
       const now = deps.now();
       const user = await lookup.findUserByEmail(email);
-      const locked = user !== null && isLocked(user, now);
+      let locked = user !== null && isLocked(user, now);
       // Always run one argon2 verification; a locked account is not verified at all but still pays for the dummy.
       const hashToCheck = user?.passwordHash && !locked ? user.passwordHash : await getDummyHash();
       const ok = await verifyPassword(hashToCheck, password);
+      // Concurrent guesses may have locked the account since we read it: check the stored document again.
+      if (user && ok && !locked) locked = !(await assertNotLocked(scoped(deps.db, user.tenantId), user._id, now));
 
       if (!user || !ok || locked) {
         if (user) {
@@ -79,7 +81,6 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       }
 
       const s = scoped(deps.db, user.tenantId);
-      await recordSuccess(s, user._id);
       const f = factorsOf(user);
       const hasSecondFactor = f.hasTotp || f.passkeys.length > 0;
       const { token, session } = await app.sessions.create(

@@ -20,6 +20,22 @@ export async function recordFailure(s: ScopedDb, userId: string, now: Date = new
   }
 }
 
+/**
+ * Re-checks the lock against the stored document, not a copy read earlier in the request, so failures
+ * recorded by concurrent attempts are seen. False means locked (or no such user).
+ */
+export async function assertNotLocked(s: ScopedDb, userId: string, now: Date): Promise<boolean> {
+  const user = await s
+    .collection('users')
+    .findOne({ _id: userId, $or: [{ lockedUntil: null }, { lockedUntil: { $lte: now } }] });
+  return user !== null;
+}
+
+/**
+ * Clears the counter and any lock. Call it only when the whole sign-in has succeeded (second factor
+ * passed, or first-time enrollment confirmed). A correct password alone must not reset it, or an attacker
+ * who knows the password could alternate it with second-factor guesses.
+ */
 export async function recordSuccess(s: ScopedDb, userId: string): Promise<void> {
   await s.collection('users').updateOne({ _id: userId }, { $set: { failedLogins: 0, lockedUntil: null } });
 }

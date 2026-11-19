@@ -112,12 +112,26 @@ describe('POST /api/auth/login (FR-1)', () => {
     expect((await login(u.email, PASSWORD)).statusCode).toBe(200);
   });
 
-  test('4 failures do not lock, and a success resets the counter', async () => {
+  test('4 failures do not lock the account', async () => {
     const u = await newUser();
     for (let i = 0; i < 4; i++) await login(u.email, 'wrong password here');
     expect((await login(u.email, PASSWORD)).statusCode).toBe(200);
+  });
+
+  test('lockout: a correct password does not reset the failure counter', async () => {
+    const u = await newUser();
     for (let i = 0; i < 4; i++) await login(u.email, 'wrong password here');
-    expect((await login(u.email, PASSWORD)).statusCode).toBe(200);
+    expect((await login(u.email, PASSWORD)).statusCode).toBe(200); // password only: no completed sign-in
+    await login(u.email, 'wrong password here'); // the 5th consecutive failure
+    expect((await login(u.email, PASSWORD)).statusCode).toBe(401);
+  });
+
+  test('lockout: a parallel burst of wrong passwords locks the account and a correct password is then refused', async () => {
+    const u = await newUser();
+    const burst = await Promise.all(Array.from({ length: 10 }, () => login(u.email, 'wrong password here')));
+    for (const r of burst) expect(r.statusCode).toBe(401);
+    expect((await login(u.email, PASSWORD)).statusCode).toBe(401);
+    expect(await s.collection('sessions').countDocuments({ userId: u._id })).toBe(0);
   });
 
   test('after a lockout expires the user gets a fresh set of 5 attempts', async () => {
@@ -126,6 +140,7 @@ describe('POST /api/auth/login (FR-1)', () => {
     advance(15 * MIN);
     await login(u.email, 'wrong password here'); // failure 1 of a new run, not an instant re-lock
     expect((await login(u.email, PASSWORD)).statusCode).toBe(200);
+    expect((await t.db.collection<UserDoc>('users').findOne({ _id: u._id }))?.failedLogins).toBe(1);
   });
 
   test('Review focus 1: login email is case- and space-insensitive', async () => {

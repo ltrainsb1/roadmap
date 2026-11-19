@@ -41,8 +41,11 @@ const AUTH_PREFIX = '/api/auth/';
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const production = deps.config.nodeEnv === 'production';
-  // In production Caddy is the only client, so the real IP (for rate limiting) is in X-Forwarded-For.
-  const app = Fastify({ logger: production, trustProxy: production });
+  // In production Caddy is the single proxy in front of the API and appends the client address to
+  // X-Forwarded-For. Trust that one hop only: entries the client supplied sit further left and must not count.
+  // (A numeric trustProxy is not used: this Fastify version treats a bare hop count as "trust nobody".)
+  const trustOneHop = (_address: string, hop: number) => hop < 1;
+  const app = Fastify({ logger: production, trustProxy: production ? trustOneHop : false });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   registerErrorHandling(app);

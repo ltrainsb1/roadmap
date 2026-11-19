@@ -21,7 +21,7 @@ export async function listMemberships(db: ScopedDb, userId: string): Promise<Mem
     .sort((a, b) => a.roadmapName.localeCompare(b.roadmapName));
 }
 
-export function registerRoadmapRoutes(app: FastifyInstance): void {
+export function registerRoadmapRoutes(app: FastifyInstance, deps: { now: () => Date }): void {
   const r = app.withTypeProvider<ZodTypeProvider>();
   const audit = createAuditLog();
 
@@ -34,7 +34,7 @@ export function registerRoadmapRoutes(app: FastifyInstance): void {
     },
     async (req, reply) => {
       const actor = req.actor!;
-      const now = new Date();
+      const now = deps.now();
       const id = uuidv7();
       const description = req.body.description ?? '';
       await actor.db.withTransaction(async (s) => {

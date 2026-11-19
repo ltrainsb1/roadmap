@@ -87,3 +87,86 @@ export const acceptInviteResponseSchema = z.object({
   csrfToken: z.string().optional(),
 });
 export type AcceptInviteResponse = z.infer<typeof acceptInviteResponseSchema>;
+
+export const memberSchema = z.object({
+  userId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: z.enum(ROLES),
+});
+export const openInviteSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  role: z.enum(INVITE_ROLES),
+  expiresAt: z.iso.datetime(),
+});
+export const membersResponseSchema = z.object({
+  members: z.array(memberSchema),
+  invites: z.array(openInviteSchema),
+});
+export type MembersResponse = z.infer<typeof membersResponseSchema>;
+
+/** Owners are never a target role: ownership moves only by transfer. */
+export const changeRoleRequestSchema = z.object({ role: z.enum(INVITE_ROLES) });
+export type ChangeRoleRequest = z.infer<typeof changeRoleRequestSchema>;
+
+export const transferRequestSchema = z.object({ userId: z.string().min(1).max(100) });
+export type TransferRequest = z.infer<typeof transferRequestSchema>;
+
+export const deleteRoadmapRequestSchema = z.object({ confirmName: z.string().max(120) });
+export type DeleteRoadmapRequest = z.infer<typeof deleteRoadmapRequestSchema>;
+
+// Later plans add their own action strings here.
+export const AUDIT_ACTIONS = [
+  'auth.login.success',
+  'auth.login.failure',
+  'auth.mfa.failure',
+  'auth.logout',
+  'auth.logout_all',
+  'auth.password_reset',
+  'auth.totp.enrolled',
+  'auth.recovery.regenerated',
+  'auth.passkey.added',
+  'auth.passkey.removed',
+  'roadmap.create',
+  'roadmap.delete',
+  'roadmap.transfer',
+  'invite.create',
+  'invite.accept',
+  'invite.revoke',
+  'member.role_change',
+  'member.remove',
+] as const;
+export type AuditActionName = (typeof AUDIT_ACTIONS)[number];
+
+const isoInstant = z.union([z.iso.datetime({ offset: true }), z.iso.date()]);
+export const auditQuerySchema = z.object({
+  action: z.enum(AUDIT_ACTIONS).optional(),
+  actorId: z.string().min(1).max(100).optional(),
+  from: isoInstant.optional(),
+  to: isoInstant.optional(),
+  cursor: z.string().min(1).max(500).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+export type AuditQuery = z.infer<typeof auditQuerySchema>;
+
+export const auditEventSchema = z.object({
+  id: z.string(),
+  timestamp: z.iso.datetime(),
+  action: z.string(),
+  /** `name` is null when the user no longer exists. */
+  actor: z.object({
+    type: z.enum(['user', 'ai', 'system']),
+    userId: z.string().optional(),
+    name: z.string().nullable().optional(),
+  }),
+  target: z.object({ type: z.string(), id: z.string() }),
+  before: z.unknown().optional(),
+  after: z.unknown().optional(),
+  ip: z.string().nullable(),
+});
+export const auditPageSchema = z.object({
+  items: z.array(auditEventSchema),
+  nextCursor: z.string().nullable(),
+});
+export type AuditPage = z.infer<typeof auditPageSchema>;

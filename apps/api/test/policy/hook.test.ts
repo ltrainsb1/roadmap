@@ -320,9 +320,10 @@ describe('forbidden roles on ctx routes', () => {
 
   test('a ctx route reached with no role is refused with 403', async () => {
     const t = await setup((app) => {
-      app.addHook('onRequest', async (req) => {
+      app.addHook('onRequest', (req, _reply, done) => {
         // Runs after the auth hook (registered earlier): simulates a request whose role was never set.
         if (req.actor) req.actor.role = null;
+        done();
       });
       routes(app);
     });

@@ -1,8 +1,10 @@
 import cookie from '@fastify/cookie';
+import swagger from '@fastify/swagger';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
+  jsonSchemaTransform,
   serializerCompiler,
   validatorCompiler,
   type ZodTypeProvider,
@@ -16,6 +18,8 @@ import type { PasskeyVerifiers } from './auth/passkeys.ts';
 import { registerResetRoutes } from './auth/reset-routes.ts';
 import { registerAuthRoutes } from './auth/routes.ts';
 import { registerInviteRoutes } from './invites/routes.ts';
+import { registerAuditRoutes } from './audit/routes.ts';
+import { registerMemberRoutes } from './members/routes.ts';
 import { registerRoadmapRoutes } from './roadmaps/routes.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { authPlugin } from './policy/hook.ts';
@@ -68,6 +72,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     // Match on the routed pattern: the raw URL can be percent-encoded (/api/%61uth/...).
     allowList: (req) => !(req.routeOptions.url ?? '').startsWith(AUTH_PREFIX),
   });
+  await app.register(swagger, {
+    openapi: { info: { title: 'Roadmap API', version: '1.0.0' } },
+    transform: jsonSchemaTransform,
+  });
   await app.register(cookie);
   await app.register(authPlugin, { db: deps.db, ...(deps.now ? { now: deps.now } : {}) });
 
@@ -105,7 +113,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   });
 
-  registerRoadmapRoutes(app);
+  registerRoadmapRoutes(app, { now });
 
   registerInviteRoutes(app, {
     db: deps.db,
@@ -114,6 +122,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     now,
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   });
+
+  registerMemberRoutes(app, { now });
+  registerAuditRoutes(app);
+
+  app.get('/api/openapi.json', { config: { auth: { level: 'public' } } }, () => app.swagger());
 
   return app;
 }

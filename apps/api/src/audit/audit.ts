@@ -1,29 +1,11 @@
+import type { AuditActionName } from '@roadmap/shared';
 import { v7 as uuidv7 } from 'uuid';
 import type { ScopedDb } from '../db/scoped.ts';
 import type { AuditActorDoc, AuditEventDoc } from '../db/types.ts';
 
 export type AuditActor = AuditActorDoc;
 
-// Later plans add their own action strings here.
-export type AuditAction =
-  | 'auth.login.success'
-  | 'auth.login.failure'
-  | 'auth.mfa.failure'
-  | 'auth.logout'
-  | 'auth.logout_all'
-  | 'auth.password_reset'
-  | 'auth.totp.enrolled'
-  | 'auth.recovery.regenerated'
-  | 'auth.passkey.added'
-  | 'auth.passkey.removed'
-  | 'roadmap.create'
-  | 'roadmap.delete'
-  | 'roadmap.transfer'
-  | 'invite.create'
-  | 'invite.accept'
-  | 'invite.revoke'
-  | 'member.role_change'
-  | 'member.remove';
+export type AuditAction = AuditActionName;
 
 export interface AuditInput {
   action: AuditAction;

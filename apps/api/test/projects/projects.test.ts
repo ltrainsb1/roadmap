@@ -42,6 +42,17 @@ async function world(app: TestApp = t) {
 }
 
 describe('create and list', () => {
+  test('two concurrent creates under one parent get different ranks', async () => {
+    const w = await world();
+    const parent = await w.create('A', null);
+    for (let i = 0; i < 6; i++) {
+      const [r1, r2] = await Promise.all([w.call('A', 'POST', { parentId: parent, title: 'One' }), w.call('A', 'POST', { parentId: parent, title: 'Two' })]);
+      expect([r1.statusCode, r2.statusCode]).toEqual([201, 201]);
+    }
+    const kids = (await w.call('A', 'GET')).json<{ items: Array<{ parentId: string | null; rank: number }> }>().items.filter((x) => x.parentId === parent);
+    expect(kids.map((k) => k.rank).sort((a, b) => a - b)).toEqual(Array.from({ length: 12 }, (_, i) => i));
+  }, 30_000);
+
   test('FR-1.2: an Admin creates a project, a sub-project, a task and a sub-task, and the list returns all four with depth and path', async () => {
     const w = await world();
     const p = await w.create('A', null, 'Project');

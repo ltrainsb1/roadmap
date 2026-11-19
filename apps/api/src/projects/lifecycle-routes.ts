@@ -27,8 +27,8 @@ async function closeRankGap(s: ScopedDb, item: ProjectDoc): Promise<void> {
 
 // Every transaction that changes sibling order bumps the roadmap document, as the reorder route does, so two
 // concurrent order changes in one roadmap conflict and one retries against fresh data.
-const bumpOrderRevision = (s: ScopedDb, roadmapId: string) =>
-  s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { orderRevision: 1 } });
+const bumpOrderRevision = (s: ScopedDb, roadmapId: string, extra: { dependencyRevision?: 1 } = {}) =>
+  s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { orderRevision: 1, ...extra } });
 
 export function registerLifecycleRoutes(app: FastifyInstance): void {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -96,10 +96,11 @@ export function registerLifecycleRoutes(app: FastifyInstance): void {
       const ids = [item._id, ...(await descendantsOf(s, item)).map((x) => x._id)];
       const projects = s.collection('projects');
       const { deleted } = await projects.deleteMany({ roadmapId, _id: { $in: ids } });
-      const pulled = await projects.updateMany({ roadmapId, blockedBy: { $in: ids } }, { $pull: { blockedBy: { $in: ids } } });
+      await projects.updateMany({ roadmapId, blockedBy: { $in: ids } }, { $pull: { blockedBy: { $in: ids } } });
       await closeRankGap(s, item);
-      await bumpOrderRevision(s, roadmapId);
-      if (pulled.matched > 0) await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { dependencyRevision: 1 } });
+      // Always bump dependencyRevision, not only when the pull matched: an edit that adds this item as a blocker
+      // reads it before the delete commits, and the shared roadmap write is what makes that edit conflict and retry.
+      await bumpOrderRevision(s, roadmapId, { dependencyRevision: 1 });
       await audit.record(s, {
         action: 'project.delete',
         actor: { type: 'user', userId: actor.userId },

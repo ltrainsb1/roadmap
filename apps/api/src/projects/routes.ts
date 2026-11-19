@@ -75,6 +75,10 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
           throw new HttpError(422, 'too_many_items');
         }
         const [last] = await projects.find({ roadmapId, parentId }, { sort: { rank: -1 }, limit: 1 });
+        // A create appends to a sibling order, so it writes the same document as reorder, archive, unarchive and
+        // delete. A create that races one of them (or another create) conflicts and retries, re-reading the parent
+        // and the last rank: no live child under an archived parent, no orphan, no two siblings with one rank.
+        await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { orderRevision: 1 } });
         const now = deps.now();
         const doc = await projects.insertOne({
           _id: uuidv7(),

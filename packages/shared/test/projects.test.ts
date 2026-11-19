@@ -89,6 +89,24 @@ describe('shared project schemas', () => {
     expect(updateProjectRequestSchema.safeParse({ version: 1, status: 'nope' }).success).toBe(false);
   });
 
+  test('linkSchema rejects JavaScript: in any case or with leading space, and trims a padded https address', () => {
+    const link = (url: string) => linkSchema.safeParse({ id: 'l1', label: 'Spec', url });
+    expect(link('JavaScript:alert(1)').success).toBe(false);
+    expect(link(' javascript:alert(1)').success).toBe(false);
+    const padded = link(' https://a.io ');
+    expect(padded.success).toBe(true);
+    expect(padded.success && padded.data.url).toBe('https://a.io');
+  });
+
+  test('updateProjectRequestSchema rejects an empty blockedBy entry', () => {
+    expect(updateProjectRequestSchema.safeParse({ version: 1, blockedBy: [''] }).success).toBe(false);
+  });
+
+  test('updateProjectRequestSchema rejects 11 tags even when they would de-duplicate to 10', () => {
+    const tags = [...Array.from({ length: 10 }, (_, i) => `t${i}`), 't0'];
+    expect(updateProjectRequestSchema.safeParse({ version: 1, tags }).success).toBe(false);
+  });
+
   test('updateProjectRequestSchema rejects 11 tags, 11 links, 21 milestones and 21 blockedBy entries', () => {
     const tags = Array.from({ length: 11 }, (_, i) => `t${i}`);
     const links = Array.from({ length: 11 }, (_, i) => ({ label: 'l', url: `https://a.io/${i}` }));

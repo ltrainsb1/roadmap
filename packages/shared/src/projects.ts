@@ -44,7 +44,7 @@ const isHttpUrl = (value: string): boolean => {
     return false;
   }
 };
-const urlSchema = z.string().max(LIMITS.linkUrl).refine(isHttpUrl, 'invalid_url');
+const urlSchema = z.string().trim().max(LIMITS.linkUrl).refine(isHttpUrl, 'invalid_url');
 
 const unique = <T>(values: T[]): T[] => [...new Set(values)];
 
@@ -109,7 +109,7 @@ export const updateProjectRequestSchema = z
     milestones: z.array(milestoneInputSchema).max(LIMITS.milestones).optional(),
     tags: z.array(tagSchema).max(LIMITS.tags).transform(unique).optional(),
     links: z.array(linkInputSchema).max(LIMITS.links).optional(),
-    blockedBy: z.array(z.string()).max(LIMITS.blockedBy).transform(unique).optional(),
+    blockedBy: z.array(z.string().min(1)).max(LIMITS.blockedBy).transform(unique).optional(),
   })
   .superRefine((value, ctx) => {
     const { startDate, endDate } = value;

@@ -59,6 +59,18 @@ describe('api client', () => {
     await expect(api('/api/me')).rejects.toMatchObject({ status: 502, code: 'unknown' });
   });
 
+  test('a 429 without the API error body (from the proxy) is rate_limited', async () => {
+    fetchMock.mockResolvedValue(new Response('', { status: 429 }));
+    await expect(api('/api/auth/login', { method: 'POST', body: {} })).rejects.toMatchObject({ status: 429, code: 'rate_limited' });
+    fetchMock.mockResolvedValue(new Response('Too Many Requests', { status: 429 }));
+    await expect(api('/api/auth/login', { method: 'POST', body: {} })).rejects.toMatchObject({ status: 429, code: 'rate_limited' });
+  });
+
+  test('a 429 with the API error body keeps its code', async () => {
+    fetchMock.mockResolvedValue(json(429, { error: 'rate_limited' }));
+    await expect(api('/api/things', { method: 'POST', body: {} })).rejects.toMatchObject({ code: 'rate_limited' });
+  });
+
   test('redirects to sign in on a 401 from a non-auth call, and drops the token', async () => {
     const redirect = vi.fn();
     setUnauthorizedHandler(redirect);

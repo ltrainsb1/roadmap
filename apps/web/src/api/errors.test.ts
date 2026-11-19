@@ -17,6 +17,9 @@ describe('error messages', () => {
     ['last_factor', "You can't remove your only passkey. Set up your authenticator app first."],
     ['password_too_short', 'Use at least 12 characters.'],
     ['csrf', 'Your session changed. Reload the page and try again.'],
+    ['other_tenant', 'This email belongs to a different organization. Ask the person who invited you to use another address.'],
+    ['enroll_not_started', 'Start setting up your authenticator app again.'],
+    ['mfa_required', 'Finish signing in first.'],
     ['something_new', 'Something went wrong. Try again.'],
   ])('%s', (code, text) => {
     expect(errorMessage(code)).toBe(text);

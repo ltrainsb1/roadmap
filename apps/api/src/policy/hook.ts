@@ -9,6 +9,10 @@ import type { SessionDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
 import { can, canEver, type PolicyContext } from './policy.ts';
 
+/**
+ * What a route requires. A `public` route gets `req.actor` when a session cookie resolves, but the hook checks
+ * neither CSRF nor the session state for it: a public handler that acts on `req.actor` must check both itself.
+ */
 export type AuthConfig =
   | { level: 'public' }
   | { level: 'pending'; states: Array<SessionDoc['state']> }

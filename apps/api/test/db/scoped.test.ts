@@ -99,6 +99,15 @@ describe('scoped', () => {
     expect(await b.findOne({ tenantId: 'B' })).toBeNull();
   });
 
+  test('Tenant isolation: findOneAndUpdate rejects a filter or update that names another tenant', async () => {
+    await scoped(db, 'A').collection('users').insertOne(user('u1', 'a@x.com'));
+    const b = scoped(db, 'B').collection('users');
+    await expect(b.findOneAndUpdate({ tenantId: 'A' }, { $set: { name: 'Hacked' } })).rejects.toThrow(/tenantId/);
+    await expect(b.findOneAndUpdate({ $or: [{ tenantId: 'A' }] }, { $set: { name: 'Hacked' } })).rejects.toThrow(/tenantId/);
+    await expect(b.findOneAndUpdate({ _id: 'u1' }, { $set: { tenantId: 'A' } })).rejects.toThrow(/tenantId/);
+    expect(await scoped(db, 'A').collection('users').findOne({ _id: 'u1' })).toMatchObject({ name: 'N', tenantId: 'A' });
+  });
+
   test('audit collection exposes no update or delete', async () => {
     const audit = scoped(db, 'A').audit;
     expect('updateOne' in audit).toBe(false);

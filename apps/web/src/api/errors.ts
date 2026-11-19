@@ -49,6 +49,12 @@ export function errorMessage(code: string, ctx: ErrorContext = {}): string {
     case 'unauthenticated':
     case 'sign_in_required':
       return 'Your sign-in has expired. Sign in again.';
+    case 'other_tenant':
+      return 'This email belongs to a different organization. Ask the person who invited you to use another address.';
+    case 'enroll_not_started':
+      return 'Start setting up your authenticator app again.';
+    case 'mfa_required':
+      return 'Finish signing in first.';
     case 'rate_limited':
       return 'Too many attempts. Wait a minute and try again.';
     default:

@@ -44,6 +44,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // In production Caddy is the single proxy in front of the API and appends the client address to
   // X-Forwarded-For. Trust that one hop only: entries the client supplied sit further left and must not count.
   // (A numeric trustProxy is not used: this Fastify version treats a bare hop count as "trust nobody".)
+  // It trusts whatever peer is directly connected, whoever that is. That is safe only because the API port is
+  // not published: Caddy, on the Compose network, is the only thing that can connect.
   const trustOneHop = (_address: string, hop: number) => hop < 1;
   const app = Fastify({ logger: production, trustProxy: production ? trustOneHop : false });
   app.setValidatorCompiler(validatorCompiler);

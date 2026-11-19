@@ -41,7 +41,7 @@ export function MfaPage() {
     const code = formText(new FormData(e.currentTarget), 'code').trim();
     if (!code) {
       return setErrors({
-        fields: { code: recovery ? 'Enter a recovery code.' : 'Enter the 6-digit code from your app.' },
+        fields: { code: recovery ? 'Enter a recovery code.' : 'Enter the 6-digit code from your authenticator app.' },
       });
     }
     try {

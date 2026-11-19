@@ -121,6 +121,21 @@ describe('password reset confirm (FR-1)', () => {
     expect(old.json()).toEqual({ error: 'invalid_credentials' });
   });
 
+  test('leaves the second factors alone and sets no session cookie', async () => {
+    const { user, s } = await setup({ totp: true });
+    const passkey = { id: 'pk-r', credentialId: `cred-reset-${user._id}`, publicKey: 'pk', counter: 2, transports: [], name: 'Laptop', createdAt: new Date('2026-01-01T00:00:00Z') };
+    await s.collection('users').updateOne({ _id: user._id }, { $set: { passkeys: [passkey] } });
+    const before = (await s.collection('users').findOne({ _id: user._id }))!;
+    const res = await confirm(await requestedToken(user.email), NEW);
+    expect(res.statusCode).toBe(204);
+    expect(res.headers['set-cookie']).toBeUndefined();
+    const after = (await s.collection('users').findOne({ _id: user._id }))!;
+    expect(after.totp).toEqual(before.totp);
+    expect(after.passkeys).toEqual(before.passkeys);
+    expect(after.recoveryCodes).toEqual(before.recoveryCodes);
+    expect(await s.collection('sessions').countDocuments({ userId: user._id })).toBe(0);
+  });
+
   test('a token used twice returns 410 token_invalid the second time, and the password does not change again', async () => {
     const { user } = await setup();
     const token = await requestedToken(user.email);

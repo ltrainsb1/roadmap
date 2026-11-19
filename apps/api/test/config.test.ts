@@ -82,6 +82,20 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...valid, AUTH_RATE_LIMIT_PER_MIN: '0' })).toThrow(/AUTH_RATE_LIMIT_PER_MIN/);
   });
 
+  test('APP_ORIGIN keeps only the origin: a trailing slash or a path is dropped', () => {
+    expect(loadConfig({ ...valid, APP_ORIGIN: 'https://roadmap.example.com/' }).appOrigin).toBe('https://roadmap.example.com');
+    expect(loadConfig({ ...valid, APP_ORIGIN: 'https://roadmap.example.com:8443/app/x?y=1' }).appOrigin).toBe(
+      'https://roadmap.example.com:8443',
+    );
+    expect(loadConfig({ ...valid, APP_ORIGIN: 'http://localhost:5173' }).appOrigin).toBe('http://localhost:5173');
+  });
+
+  test('APP_ORIGIN must be http or https', () => {
+    for (const origin of ['ftp://roadmap.example.com', 'javascript:alert(1)', 'file:///etc/passwd', 'ws://roadmap.example.com']) {
+      expect(() => loadConfig({ ...valid, APP_ORIGIN: origin }), origin).toThrow(/APP_ORIGIN/);
+    }
+  });
+
   test('rejects invalid values', () => {
     expect(() => loadConfig({ ...valid, PORT: 'abc', MAILER: 'smoke', APP_ORIGIN: 'nope' })).toThrow(
       /PORT[\s\S]*MAILER|APP_ORIGIN/,

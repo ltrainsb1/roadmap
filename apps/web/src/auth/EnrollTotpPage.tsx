@@ -49,7 +49,7 @@ export function EnrollTotpPage() {
   const onConfirm = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const code = formText(new FormData(e.currentTarget), 'code').trim();
-    if (!code) return setErrors({ fields: { code: 'Enter the 6-digit code from your app.' } });
+    if (!code) return setErrors({ fields: { code: 'Enter the 6-digit code from your authenticator app.' } });
     try {
       const res = await api<{ recoveryCodes: string[] }>('/api/auth/totp/enroll/confirm', {
         method: 'POST',

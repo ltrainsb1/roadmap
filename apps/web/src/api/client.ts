@@ -63,7 +63,9 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const code = typeof (data as { error?: unknown } | undefined)?.error === 'string' ? (data as { error: string }).error : 'unknown';
+    const sent = (data as { error?: unknown } | undefined)?.error;
+    // Caddy's rate limiter answers 429 without the API's JSON body.
+    const code = typeof sent === 'string' ? sent : res.status === 429 ? 'rate_limited' : 'unknown';
     if (res.status === 401) {
       // A wrong second-step code is also a 401, but its pending session lives on and the retry needs the token.
       if (code === 'unauthenticated') csrfToken = null;

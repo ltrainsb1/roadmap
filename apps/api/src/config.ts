@@ -34,7 +34,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   MONGO_URI: z.string().min(1),
   MONGO_DB: z.string().min(1).default('roadmap'),
-  APP_ORIGIN: z.url(),
+  // Only the origin counts (WebAuthn and CORS-style checks compare origins): a trailing slash or path is dropped.
+  APP_ORIGIN: z.url({ protocol: /^https?$/ }).transform((v) => new URL(v).origin),
   WEBAUTHN_RP_ID: z.string().min(1).optional(),
   WEBAUTHN_RP_NAME: z.string().min(1).default('Roadmap'),
   TOTP_ENC_KEY: z.string().transform((v, ctx) => {

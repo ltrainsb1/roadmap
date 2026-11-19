@@ -156,7 +156,7 @@ describe('unscoped', () => {
     expect((await un.findInviteByTokenHash('ih'))?._id).toBe('i1');
     expect((await un.findResetByTokenHash('rh'))?._id).toBe('r1');
 
-    await un.insertChallenge({ _id: 'c1', expiresAt: exp });
+    await un.insertChallenge({ _id: 'c1', challenge: 'ch', expiresAt: exp });
     expect((await un.takeChallenge('c1'))?._id).toBe('c1');
     expect(await un.takeChallenge('c1')).toBeNull();
 

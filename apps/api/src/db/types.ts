@@ -24,8 +24,19 @@ export interface UserDoc {
   pendingTotpSecretEnc: string | null;
   /** SHA-256 hex of each code; `usedAt` is set when it is spent. */
   recoveryCodes: { hash: string; usedAt: Date | null }[];
-  /** Filled by the passkeys task. */
-  passkeys?: Array<{ credentialId: string; name: string; createdAt: Date }>;
+  /**
+   * Absent until the first passkey is added (the unique sparse index on `credentialId` needs that).
+   * `id` is ours, used in URLs; `credentialId` and `publicKey` are base64url.
+   */
+  passkeys?: Array<{
+    id: string;
+    credentialId: string;
+    publicKey: string;
+    counter: number;
+    transports: string[];
+    name: string;
+    createdAt: Date;
+  }>;
   createdAt: Date;
 }
 
@@ -58,7 +69,9 @@ export interface SessionDoc {
   expiresAt: Date;
   ip: string;
   userAgent: string;
+  /** Registration or second-factor challenge; cleared when read, so it works once. */
   webauthnChallenge?: string;
+  webauthnChallengeExpiresAt?: Date;
 }
 
 export interface InviteDoc {
@@ -79,6 +92,7 @@ export interface ResetTokenDoc {
 
 export interface WebauthnChallengeDoc {
   _id: string;
+  challenge: string;
   expiresAt: Date;
 }
 

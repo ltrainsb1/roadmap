@@ -11,6 +11,8 @@ import { z } from 'zod';
 import type { Config } from './config.ts';
 import type { Db } from './db/client.ts';
 import { registerErrorHandling } from './errors.ts';
+import { registerPasskeyRoutes } from './auth/passkey-routes.ts';
+import type { PasskeyVerifiers } from './auth/passkeys.ts';
 import { registerAuthRoutes } from './auth/routes.ts';
 import { authPlugin } from './policy/hook.ts';
 
@@ -21,6 +23,8 @@ export interface AppDeps {
   now?: () => Date;
   /** Replaces global fetch; used only by the breached-password check. */
   fetch?: typeof fetch;
+  /** Replaces the WebAuthn verifiers; tests stub them because real ceremonies need a browser. */
+  webauthn?: PasskeyVerifiers;
 }
 
 const AUTH_PREFIX = '/api/auth/';
@@ -75,6 +79,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     config: deps.config,
     now: deps.now ?? (() => new Date()),
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
+  });
+
+  registerPasskeyRoutes(app, {
+    db: deps.db,
+    config: deps.config,
+    now: deps.now ?? (() => new Date()),
+    ...(deps.webauthn ? { webauthn: deps.webauthn } : {}),
   });
 
   return app;

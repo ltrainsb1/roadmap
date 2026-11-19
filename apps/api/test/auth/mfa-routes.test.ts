@@ -318,7 +318,7 @@ describe('POST /api/auth/mfa/totp (FR-1)', () => {
     const p = await login(u.email);
     await t.db
       .collection<UserDoc>('users')
-      .updateOne({ _id: u._id }, { $set: { passkeys: [{ credentialId: 'c', name: 'k', createdAt: new Date() }] } });
+      .updateOne({ _id: u._id }, { $set: { passkeys: [{ id: 'p1', credentialId: 'c', publicKey: 'k', counter: 0, transports: [], name: 'k', createdAt: new Date() }] } });
     const pending = await s.collection('sessions').findOne({ userId: u._id });
     await s.collection('sessions').updateOne({ _id: pending!._id }, { $set: { state: 'pending_mfa' } });
     const res = await post('/api/auth/mfa/totp', p, { code: '123456' });

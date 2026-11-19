@@ -1,4 +1,4 @@
-import type { Db, Filter } from 'mongodb';
+import type { Db } from 'mongodb';
 import type {
   InviteDoc,
   ResetTokenDoc,
@@ -30,9 +30,8 @@ export function unscoped(db: Db) {
     },
     takeChallenge: (id: string): Promise<WebauthnChallengeDoc | null> =>
       challenges.findOneAndDelete({ _id: id }),
-    // The passkeys field is added by a later task, so it is not on UserDoc yet.
     findUserByCredentialId: (id: string): Promise<UserDoc | null> =>
-      users.findOne({ 'passkeys.credentialId': id } as Filter<UserDoc>),
+      users.findOne({ 'passkeys.credentialId': id }),
     async insertTenant(t: TenantDoc): Promise<void> {
       await tenants.insertOne(t);
     },

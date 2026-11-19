@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { v7 as uuidv7 } from 'uuid';
 import { inject } from 'vitest';
 import { authenticator } from 'otplib';
+import type { PasskeyVerifiers } from '../src/auth/passkeys.ts';
 import { encryptSecret } from '../src/auth/crypto.ts';
 import { generateRecoveryCodes } from '../src/auth/recovery.ts';
 import { buildApp } from '../src/app.ts';
@@ -54,6 +55,8 @@ export interface TestAppOptions {
   now?: () => Date;
   /** Replaces global fetch for the breached-password check. */
   fetch?: typeof fetch;
+  /** Replaces the WebAuthn verifiers (real ceremonies need a browser). */
+  webauthn?: PasskeyVerifiers;
   /** Environment overrides, e.g. `{ HIBP_ENABLED: 'true' }`. */
   env?: Record<string, string>;
 }
@@ -83,6 +86,7 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     db,
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
+    ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
   });
   opts.routes?.(app);
 

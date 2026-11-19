@@ -77,7 +77,7 @@ describe('POST /api/auth/login (FR-1)', () => {
     const u = await newUser();
     await t.db
       .collection<UserDoc>('users')
-      .updateOne({ _id: u._id }, { $set: { passkeys: [{ credentialId: 'c', name: 'k', createdAt: new Date() }] } });
+      .updateOne({ _id: u._id }, { $set: { passkeys: [{ id: 'p1', credentialId: 'c', publicKey: 'k', counter: 0, transports: [], name: 'k', createdAt: new Date() }] } });
     const res = await login(u.email, PASSWORD);
     expect(res.json()).toMatchObject({ next: 'mfa' });
   });
@@ -278,14 +278,14 @@ describe('GET /api/me (FR-1)', () => {
   test('hasTotp is true and passkeys are listed without secrets once the user has them', async () => {
     const u = await newUser({ totp: true });
     const created = new Date('2026-01-01T00:00:00Z');
-    const passkey = { credentialId: 'secret-cred', publicKey: 'pk', name: 'Laptop', createdAt: created };
+    const passkey = { id: 'pk-1', credentialId: 'secret-cred', publicKey: 'pk', counter: 0, transports: [], name: 'Laptop', createdAt: created };
     await t.db.collection<UserDoc>('users').updateOne({ _id: u._id }, { $set: { passkeys: [passkey] } });
     const { cookie } = await signInAs(t.app, t.db, u._id);
     const body = (await t.app.inject({ url: '/api/me', headers: { cookie } })).json<{
       user: { hasTotp: boolean; passkeys: unknown[] };
     }>();
     expect(body.user.hasTotp).toBe(true);
-    expect(body.user.passkeys).toEqual([{ id: 'secret-cred', name: 'Laptop', createdAt: created.toISOString() }]);
+    expect(body.user.passkeys).toEqual([{ id: 'pk-1', name: 'Laptop', createdAt: created.toISOString() }]);
     expect(JSON.stringify(body)).not.toContain('"pk"');
   });
 

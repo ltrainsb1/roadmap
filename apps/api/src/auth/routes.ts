@@ -4,7 +4,7 @@ import {
   meResponseSchema,
   type MeResponse,
 } from '@roadmap/shared';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { createAuditLog } from '../audit/audit.ts';
@@ -20,6 +20,7 @@ import { assertNotLocked, isLocked, recordFailure, recordSuccess } from './locko
 import { hashPassword, verifyPassword } from './passwords.ts';
 import { consumeRecoveryCode, generateRecoveryCodes } from './recovery.ts';
 import { claimTotpStep, generateTotpSecret, otpauthUrl, verifyTotp } from './totp.ts';
+import { completeSignIn } from './complete-sign-in.ts';
 import { clearSessionCookie, setSessionCookie } from './sessions.ts';
 
 export interface AuthRouteDeps {
@@ -33,12 +34,12 @@ export interface AuthRouteDeps {
 let dummyHash: Promise<string> | undefined;
 const getDummyHash = () => (dummyHash ??= hashPassword('dummy-password-for-timing'));
 
-/** Second factors the user has set up. The passkey task fills in `passkeys`. */
+/** Second factors the user has set up. */
 function factorsOf(user: UserDoc): { hasTotp: boolean; passkeys: MeResponse['user']['passkeys'] } {
   return {
     hasTotp: Boolean(user.totp),
     passkeys: (user.passkeys ?? []).map((p) => ({
-      id: p.credentialId,
+      id: p.id,
       name: p.name,
       createdAt: p.createdAt.toISOString(),
     })),
@@ -123,21 +124,6 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     throw invalidCode();
   };
 
-  /** The whole sign-in is done: clear the failure counter, rotate to a full session, audit. */
-  const completeSignIn = async (req: FastifyRequest, reply: FastifyReply) => {
-    const actor = req.actor!;
-    await recordSuccess(actor.db, actor.userId);
-    const { token, csrfToken } = await app.sessions.upgrade(actor.db, actor.sessionId, 'full');
-    setSessionCookie(reply, token);
-    await audit.record(actor.db, {
-      action: 'auth.login.success',
-      actor: { type: 'user', userId: actor.userId },
-      target: { type: 'user', id: actor.userId },
-      ip: req.ip,
-    });
-    return csrfToken;
-  };
-
   /** For a full session changing its own second factor: the current TOTP code must be valid and unused. */
   const requireCurrentTotp = async (user: UserDoc, code: string | undefined, db: ScopedDb): Promise<void> => {
     if (!user.totp || code === undefined) throw new HttpError(422, 'invalid_code');
@@ -219,7 +205,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const claimed = checked.ok && (await claimTotpStep(actor.db, user._id, checked.step));
       // Failures from concurrent guesses may have locked the account while we verified.
       if (!claimed || !(await assertNotLocked(actor.db, user._id, now))) return failSecondFactor(req, now);
-      return { csrfToken: await completeSignIn(req, reply) };
+      return { csrfToken: await completeSignIn(app.sessions, req, reply) };
     },
   );
 
@@ -231,7 +217,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const now = deps.now();
       if (!(await assertNotLocked(actor.db, actor.userId, now))) throw invalidCode();
       if (!(await consumeRecoveryCode(actor.db, actor.userId, req.body.code, now))) return failSecondFactor(req, now);
-      const csrfToken = await completeSignIn(req, reply);
+      const csrfToken = await completeSignIn(app.sessions, req, reply);
       const user = await loadUser(actor);
       return { csrfToken, remainingRecoveryCodes: user.recoveryCodes.filter((c) => c.usedAt === null).length };
     },

@@ -172,13 +172,28 @@ describe('TOTP enrollment (FR-1)', () => {
     expect(await userDoc(u._id)).toMatchObject({ failedLogins: 0, lockedUntil: null });
   });
 
-  test('a full session can re-enroll: the secret and codes are replaced and the session is unchanged', async () => {
+  test('re-enroll: a full session with TOTP cannot start enrollment without the current code', async () => {
+    const u = await newUser({ totp: true });
+    const full = await signInAs(t.app, t.db, u._id);
+    const none = await post('/api/auth/totp/enroll/start', full);
+    expect(none.statusCode).toBe(422);
+    expect(none.json()).toEqual({ error: 'invalid_code' });
+    const wrong = await post('/api/auth/totp/enroll/start', full, { code: wrongCode(u.totpSecret!) });
+    expect(wrong.statusCode).toBe(422);
+    expect(wrong.json()).toEqual({ error: 'invalid_code' });
+    const doc = await userDoc(u._id);
+    expect(doc.pendingTotpSecretEnc).toBeNull();
+    expect(doc.failedLogins).toBe(0);
+  });
+
+  test('re-enroll: with the current code, start then confirm replaces the secret and recovery codes', async () => {
     const u = await newUser({ totp: true });
     const old = await userDoc(u._id);
     const full = await signInAs(t.app, t.db, u._id);
-    const start = await post('/api/auth/totp/enroll/start', full);
+    const start = await post('/api/auth/totp/enroll/start', full, { code: codeFor(u.totpSecret!) });
     expect(start.statusCode).toBe(200);
     const { secret } = start.json<{ secret: string }>();
+    advanceSteps(1); // the new secret has no replay history; only the old step is spent
     const res = await post('/api/auth/totp/enroll/confirm', full, { code: codeFor(secret) });
     expect(res.statusCode).toBe(200);
     expect(res.json<{ recoveryCodes: string[]; csrfToken: string }>()).toMatchObject({ csrfToken: full.csrf });
@@ -188,6 +203,22 @@ describe('TOTP enrollment (FR-1)', () => {
     expect(decryptSecret(doc.totp!.secretEnc, TEST_TOTP_KEY)).toBe(secret);
     expect(doc.recoveryCodes.map((c) => c.hash)).not.toContain(old.recoveryCodes[0]!.hash);
     expect((await t.app.inject({ url: '/api/me', headers: { cookie: full.cookie } })).statusCode).toBe(200);
+  });
+
+  test('re-enroll: the code used to start cannot be replayed on recovery-codes', async () => {
+    const u = await newUser({ totp: true });
+    const full = await signInAs(t.app, t.db, u._id);
+    const code = codeFor(u.totpSecret!);
+    expect((await post('/api/auth/totp/enroll/start', full, { code })).statusCode).toBe(200);
+    const replay = await post('/api/auth/recovery-codes', full, { code });
+    expect(replay.statusCode).toBe(422);
+    expect(replay.json()).toEqual({ error: 'invalid_code' });
+  });
+
+  test('a full session whose user has no TOTP can start enrollment without a code', async () => {
+    const u = await newUser();
+    const full = await signInAs(t.app, t.db, u._id);
+    expect((await post('/api/auth/totp/enroll/start', full)).statusCode).toBe(200);
   });
 });
 

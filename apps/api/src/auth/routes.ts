@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { createAuditLog } from '../audit/audit.ts';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
-import { scoped } from '../db/scoped.ts';
+import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { UserDoc } from '../db/types.ts';
 import { unscoped } from '../db/unscoped.ts';
 import type { AuthConfig } from '../policy/hook.ts';
@@ -46,6 +46,8 @@ function factorsOf(user: UserDoc): { hasTotp: boolean; passkeys: MeResponse['use
 }
 
 const totpCodeBody = z.object({ code: z.string().regex(/^\d{6}$/) });
+// enroll/start takes a body only when replacing an existing factor; anything unparseable counts as no code.
+const optionalCodeBody = z.object({ code: z.string().max(32) });
 const recoveryCodeBody = z.object({ code: z.string().min(1).max(32) });
 const invalidCode = () => new HttpError(401, 'invalid_code');
 
@@ -136,12 +138,22 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     return csrfToken;
   };
 
+  /** For a full session changing its own second factor: the current TOTP code must be valid and unused. */
+  const requireCurrentTotp = async (user: UserDoc, code: string | undefined, db: ScopedDb): Promise<void> => {
+    if (!user.totp || code === undefined) throw new HttpError(422, 'invalid_code');
+    const checked = verifyTotp(decryptSecret(user.totp.secretEnc, deps.config.totpEncKey), code, user.totp.lastStep, deps.now());
+    if (!checked.ok || !(await claimTotpStep(db, user._id, checked.step))) throw new HttpError(422, 'invalid_code');
+  };
+
   r.post(
     '/api/auth/totp/enroll/start',
     { config: { auth: { level: 'pending', states: ['pending_enroll', 'full'] } } },
     async (req) => {
       const actor = req.actor!;
       const user = await loadUser(actor);
+      // Replacing an existing factor from a full session must prove the old one, or a stolen cookie could take it over.
+      const session = await actor.db.collection('sessions').findOne({ _id: actor.sessionId });
+      if (session?.state === 'full' && user.totp) await requireCurrentTotp(user, optionalCodeBody.safeParse(req.body).data?.code, actor.db);
       const secret = generateTotpSecret();
       await actor.db
         .collection('users')
@@ -231,9 +243,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     async (req) => {
       const actor = req.actor!;
       const user = await loadUser(actor);
-      if (!user.totp) throw new HttpError(422, 'invalid_code');
-      const checked = verifyTotp(decryptSecret(user.totp.secretEnc, deps.config.totpEncKey), req.body.code, user.totp.lastStep, deps.now());
-      if (!checked.ok || !(await claimTotpStep(actor.db, user._id, checked.step))) throw new HttpError(422, 'invalid_code');
+      await requireCurrentTotp(user, req.body.code, actor.db);
       const { codes, hashes } = generateRecoveryCodes();
       await actor.db
         .collection('users')

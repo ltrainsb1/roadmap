@@ -521,3 +521,36 @@ test('New project is the primary button until an editable panel opens, then Save
   await expect(add).toHaveClass(/btn-primary/);
   expect(itemId).toBeTruthy();
 });
+
+test("a status change from the row does not hide another session's edit", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'hidden');
+  const id = await createRoadmap(page, 'Hidden plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Alpha');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Alpha');
+  await panel.getByLabel('Title', { exact: true }).fill('Alpha, mine');
+
+  // Another session edits the description, and a refetch brings it into the list.
+  await call('PATCH', `/api/roadmaps/${id}/projects/${itemId}`, { version: 1, description: 'Theirs' });
+  const refetched = page.waitForResponse((r) => r.url().endsWith(`/api/roadmaps/${id}/projects`) && r.request().method() === 'GET');
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  await refetched;
+
+  await page.getByRole('button', { name: /^Status of Alpha/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Done' }).click();
+  await expect(projectRow(page, 'Alpha')).toContainText('Done');
+  // The form never saw their change, so it keeps its own status and version.
+  await expect(panel.getByLabel('Status', { exact: true })).toHaveValue('not_started');
+
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Someone else changed this at the same time. Reload and try again.');
+  const stored = await call<{ items: { id: string; title: string; description: string; status: string }[] }>('GET', `/api/roadmaps/${id}/projects`);
+  expect(stored.items.find((i) => i.id === itemId)).toMatchObject({ title: 'Alpha', description: 'Theirs', status: 'done' });
+
+  // Reload brings in both changes.
+  await page.getByRole('alert').getByRole('button', { name: 'Reload', exact: true }).click();
+  await expect(panelOf(page, 'Alpha').getByLabel('Description', { exact: true })).toHaveValue('Theirs');
+  await expect(panelOf(page, 'Alpha').getByLabel('Status', { exact: true })).toHaveValue('done');
+});

@@ -94,10 +94,12 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
     if (!ownStatusChange || ownStatusChange.n === adopted.current) return;
     adopted.current = ownStatusChange.n;
     if (ownStatusChange.id !== item.id) return;
+    // Only when nothing else landed in between: otherwise the form would save against a version it never saw.
+    if (ownStatusChange.version !== version + 1) return;
     setVersion(ownStatusChange.version);
     setValues((v) => ({ ...v, status: ownStatusChange.status }));
     setBase((b) => ({ ...b, status: ownStatusChange.status }));
-  }, [ownStatusChange, item.id]);
+  }, [ownStatusChange, item.id, version]);
 
   // After a reload the Reload button is gone, so focus goes to the first field.
   useEffect(() => {

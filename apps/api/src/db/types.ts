@@ -60,8 +60,20 @@ export interface WebauthnChallengeDoc {
   expiresAt: Date;
 }
 
+export type AuditActorDoc =
+  | { type: 'user'; userId: string }
+  | { type: 'ai'; onBehalfOf: string }
+  | { type: 'system' };
+
 export interface AuditEventDoc {
   _id: string;
   tenantId: string;
   timestamp: Date;
+  action: string;
+  actor: AuditActorDoc;
+  roadmapId?: string;
+  target: { type: string; id: string };
+  before?: unknown;
+  after?: unknown;
+  ip: string | null;
 }

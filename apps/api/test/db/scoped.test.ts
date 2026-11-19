@@ -100,7 +100,14 @@ describe('scoped', () => {
     expect('updateOne' in audit).toBe(false);
     expect('deleteOne' in audit).toBe(false);
     expect('deleteMany' in audit).toBe(false);
-    await audit.insertOne({ _id: 'e1', timestamp: new Date() });
+    await audit.insertOne({
+      _id: 'e1',
+      timestamp: new Date(),
+      action: 'roadmap.create',
+      actor: { type: 'system' },
+      target: { type: 'roadmap', id: 'r1' },
+      ip: null,
+    });
     await expect(audit.insertOne({ _id: 'e2', timestamp: new Date(), tenantId: 'B' } as never)).rejects.toThrow(
       /tenantId/,
     );

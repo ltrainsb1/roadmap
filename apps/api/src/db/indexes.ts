@@ -23,6 +23,7 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection('invites').createIndex({ tenantId: 1, email: 1 }),
     db.collection('resetTokens').createIndex({ tenantId: 1, userId: 1 }),
     db.collection('auditEvents').createIndex({ tenantId: 1, timestamp: -1 }),
+    db.collection('auditEvents').createIndex({ tenantId: 1, roadmapId: 1, timestamp: -1 }),
 
     // TTL indexes (single-field by necessity).
     db.collection('auditEvents').createIndex({ timestamp: 1 }, { expireAfterSeconds: AUDIT_TTL_SECONDS }),

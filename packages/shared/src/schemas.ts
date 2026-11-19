@@ -136,6 +136,14 @@ export const AUDIT_ACTIONS = [
   'invite.revoke',
   'member.role_change',
   'member.remove',
+  'project.create',
+  'project.update',
+  'project.delete',
+  'project.archive',
+  'project.unarchive',
+  'project.assign',
+  'project.reorder',
+  'project.priority_label',
 ] as const;
 export type AuditActionName = (typeof AUDIT_ACTIONS)[number];
 

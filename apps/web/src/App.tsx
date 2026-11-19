@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setUnauthorizedHandler } from './api/client.ts';
 import { EnrollTotpPage } from './auth/EnrollTotpPage.tsx';
 import { ForgotPage } from './auth/ForgotPage.tsx';
@@ -32,6 +32,12 @@ function SignInRedirect() {
   return null;
 }
 
+/** Keyed by roadmap, so collapsed items, an open add row and the like never carry over when the roadmap is switched. */
+function ProjectsRoute() {
+  const { roadmapId } = useParams();
+  return <ProjectsPage key={roadmapId} />;
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -61,7 +67,7 @@ export function App() {
             }
           >
             <Route index element={<RoadmapIndex />} />
-            <Route path="projects/:projectId?" element={<ProjectsPage />} />
+            <Route path="projects/:projectId?" element={<ProjectsRoute />} />
             <Route path="members" element={<MembersPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>

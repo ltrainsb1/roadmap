@@ -66,11 +66,30 @@ test('FR-1.2: an Owner adds a project, a sub-project, a task and a sub-task in p
   await expect(menuButton).toHaveAttribute('aria-haspopup', 'menu');
   await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('menuitem')).toHaveText(['Open']);
-  await page.keyboard.press('ArrowDown');
   await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(menuButton).toBeFocused();
+
+  // A two-item menu: ArrowDown on the closed button opens it, and the arrows, End and Home move between items.
+  const gamma = page.getByRole('button', { name: 'Actions for Gamma' });
+  await gamma.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Add sub-task' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.getByRole('menuitem', { name: 'Add sub-task' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(page.getByRole('menuitem', { name: 'Add sub-task' })).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(page.getByRole('menuitem', { name: 'Open' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(gamma).toBeFocused();
 
   // A project's menu offers Open, then the add item for its level.
   await page.getByRole('button', { name: 'Actions for Gamma' }).click();
@@ -143,6 +162,39 @@ test('the tree collapses and expands, and stays collapsed after a reload', async
   await addChild(page, 'Alpha', 'Epsilon');
   await expect(projectRow(page, 'Epsilon')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Collapse Alpha' })).toBeVisible();
+});
+
+test('collapsed state and an open add row do not carry over when the roadmap is switched from the picker', async ({ page }) => {
+  await createSignedInUser(page, 'switcher');
+  const a = await createRoadmap(page, 'First list');
+  const b = await createRoadmap(page, 'Second list');
+  const call = await apiAs(page);
+  for (const [id, parent, child] of [[a, 'Alpha', 'Beta'], [b, 'Gamma', 'Delta']] as const) {
+    await seedProject(call, id, child, await seedProject(call, id, parent));
+  }
+
+  // The second roadmap keeps its own item collapsed.
+  await page.goto(`/r/${b}/projects`);
+  await page.getByRole('button', { name: 'Collapse Gamma' }).click();
+  await expect(projectRow(page, 'Delta')).toHaveCount(0);
+
+  // The first roadmap: collapse an item and leave an add row open.
+  await page.goto(`/r/${a}/projects`);
+  await page.getByRole('button', { name: 'Collapse Alpha' }).click();
+  await page.getByRole('button', { name: 'New project' }).click();
+  await expect(page.getByRole('textbox', { name: 'Title of the new project' })).toBeVisible();
+
+  await page.getByLabel('Roadmap', { exact: true }).selectOption({ label: 'Second list' });
+  await expect(page).toHaveURL(`/r/${b}/projects`);
+  await expect(projectRow(page, 'Gamma')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Expand Gamma' })).toBeVisible();
+  await expect(projectRow(page, 'Delta')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: /^Title of the new / })).toHaveCount(0);
+
+  await page.getByLabel('Roadmap', { exact: true }).selectOption({ label: 'First list' });
+  await expect(page).toHaveURL(`/r/${a}/projects`);
+  await expect(page.getByRole('button', { name: 'Expand Alpha' })).toBeVisible();
+  await expect(projectRow(page, 'Beta')).toHaveCount(0);
 });
 
 test('an empty title shows "Enter a title." and Escape cancels the row', async ({ page }) => {

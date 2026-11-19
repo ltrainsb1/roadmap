@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { ACTIONS, ROLES, type Action, type Role } from '@roadmap/shared';
-import { can } from '../../src/policy/policy.ts';
+import { ACTIONS, ROLES, type Action, type Role } from '../src/roles.ts';
+import { can, canEver } from '../src/policy.ts';
 
 const ALL: readonly Role[] = ROLES;
 const everyone: Action[] = ['roadmap.view', 'idea.submit', 'vote.cast', 'comment.create', 'ai.use'];
@@ -104,5 +104,16 @@ describe('Permissions table (PRD Users and roles)', () => {
 
   test('an unknown action is denied', () => {
     expect(can({ role: 'owner', action: 'nope' as Action })).toBe(false);
+  });
+});
+
+describe('canEver', () => {
+  test('is true when some context lets the role act, false when none can', () => {
+    expect(canEver('contributor', 'project.edit')).toBe(true); // when assigned
+    expect(canEver('contributor', 'member.invite')).toBe(false);
+    expect(canEver('admin', 'member.changeRole')).toBe(true);
+    expect(canEver('admin', 'roadmap.delete')).toBe(false);
+    expect(canEver('owner', 'roadmap.transfer')).toBe(true);
+    expect(canEver(null, 'roadmap.view')).toBe(false);
   });
 });

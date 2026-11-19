@@ -10,8 +10,12 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/rate-limit": "^11.2.2",
     "@roadmap/shared": "workspace:*",
     "fastify": "^5.12.8",
+    "fastify-plugin": "^6.0.1",
     "fastify-type-provider-zod": "^7.0.0",
     "mongodb": "^7.9.0",
     "uuid": "^14.0.3",

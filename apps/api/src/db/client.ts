@@ -1,5 +1,7 @@
 import { MongoClient, type Db } from 'mongodb';
 
+export type { Db };
+
 export async function connectDb(
   uri: string,
   dbName: string,

@@ -1,3 +1,5 @@
+import type { Role } from '@roadmap/shared';
+
 // _id is a UUID v7 string. Every doc except TenantDoc and WebauthnChallengeDoc carries tenantId.
 // Later tasks add their fields to these types.
 
@@ -22,6 +24,7 @@ export interface MembershipDoc {
   tenantId: string;
   roadmapId: string;
   userId: string;
+  role: Role;
 }
 
 export interface RoadmapDoc {
@@ -36,7 +39,14 @@ export interface SessionDoc {
   tenantId: string;
   userId: string;
   tokenHash: string;
+  state: 'pending_mfa' | 'pending_enroll' | 'full';
+  csrfToken: string;
+  createdAt: Date;
+  lastSeenAt: Date;
   expiresAt: Date;
+  ip: string;
+  userAgent: string;
+  webauthnChallenge?: string;
 }
 
 export interface InviteDoc {

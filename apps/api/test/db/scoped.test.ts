@@ -142,7 +142,10 @@ describe('unscoped', () => {
     expect(await un.findUserByEmail('none@x.com')).toBeNull();
 
     const exp = new Date(Date.now() + 60_000);
-    await scoped(db, 'A').collection('sessions').insertOne({ _id: 's1', userId: 'u1', tokenHash: 'sh', expiresAt: exp });
+    await scoped(db, 'A').collection('sessions').insertOne({
+      _id: 's1', userId: 'u1', tokenHash: 'sh', state: 'full', csrfToken: 'c', createdAt: new Date(),
+      lastSeenAt: new Date(), expiresAt: exp, ip: '127.0.0.1', userAgent: 'vitest',
+    });
     await scoped(db, 'A').collection('invites').insertOne({ _id: 'i1', email: 'n@x.com', tokenHash: 'ih', expiresAt: exp });
     await scoped(db, 'A').collection('resetTokens').insertOne({ _id: 'r1', userId: 'u1', tokenHash: 'rh', expiresAt: exp });
     expect((await un.findSessionByTokenHash('sh'))?._id).toBe('s1');

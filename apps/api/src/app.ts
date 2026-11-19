@@ -1,3 +1,6 @@
+import cookie from '@fastify/cookie';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
   serializerCompiler,
@@ -5,20 +8,61 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import type { Config } from './config.ts';
+import type { Db } from './db/client.ts';
+import { registerErrorHandling } from './errors.ts';
+import { authPlugin } from './policy/hook.ts';
 
-// Later tasks add fields (database handle, config, clock, ...).
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export type AppDeps = {};
+export interface AppDeps {
+  config: Config;
+  db: Db;
+  /** Clock for session lifetimes; tests replace it. */
+  now?: () => Date;
+}
+
+const AUTH_PREFIX = '/api/auth/';
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  void deps;
-  const app = Fastify();
+  const production = deps.config.nodeEnv === 'production';
+  // In production Caddy is the only client, so the real IP (for rate limiting) is in X-Forwarded-For.
+  const app = Fastify({ logger: production, trustProxy: production });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+  registerErrorHandling(app);
+
+  await app.register(helmet, {
+    global: true,
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+      },
+    },
+    hsts: { maxAge: 31536000, includeSubDomains: true },
+  });
+  // Default in-memory store: one per app instance. Only sign-in style endpoints are limited.
+  await app.register(rateLimit, {
+    global: true,
+    max: 10,
+    timeWindow: '1 minute',
+    allowList: (req) => !req.url.startsWith(AUTH_PREFIX),
+  });
+  await app.register(cookie);
+  await app.register(authPlugin, { db: deps.db, ...(deps.now ? { now: deps.now } : {}) });
 
   app.withTypeProvider<ZodTypeProvider>().get(
     '/api/health',
-    { schema: { response: { 200: z.object({ status: z.literal('ok') }) } } },
+    {
+      config: { auth: { level: 'public' } },
+      schema: { response: { 200: z.object({ status: z.literal('ok') }) } },
+    },
     () => ({ status: 'ok' as const }),
   );
 

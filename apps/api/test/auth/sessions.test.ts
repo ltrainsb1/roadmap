@@ -16,7 +16,12 @@ let userId: string;
 const store = () => t.app.sessions;
 
 beforeAll(async () => {
-  t = await makeTestApp({ now: () => clock });
+  t = await makeTestApp({
+    now: () => clock,
+    routes: (app) => {
+      app.post('/api/t/csrf', { config: { auth: { level: 'full' } } }, () => ({ ok: true }));
+    },
+  });
   const tenant = await t.seed.tenant();
   s = scoped(t.db, tenant._id);
   userId = (await t.seed.user(tenant._id))._id;
@@ -106,7 +111,29 @@ describe('upgrade, revoke (FR-1)', () => {
     const after = await store().resolve(up.token);
     expect(after?.state).toBe('full');
     expect(after?.expiresAt.getTime()).toBe(clock.getTime() + 12 * HOUR);
-    expect(after?.csrfToken).toBe(session.csrfToken);
+  });
+
+  test('upgrade rotates the CSRF token: the one from before the upgrade is rejected after it', async () => {
+    const { token, session } = await store().create(s, userId, 'pending_mfa', meta);
+    const up = await store().upgrade(s, session._id, 'full');
+    expect(up.csrfToken).not.toBe(session.csrfToken);
+    expect(up.csrfToken).toHaveLength(43);
+    const after = await store().resolve(up.token);
+    expect(after?.csrfToken).toBe(up.csrfToken);
+    expect(await store().resolve(token)).toBeNull();
+    const old = await t.app.inject({
+      method: 'POST',
+      url: '/api/t/csrf',
+      headers: { cookie: `__Host-sid=${up.token}`, 'x-csrf-token': session.csrfToken },
+    });
+    expect(old.statusCode).toBe(403);
+    expect(old.json()).toEqual({ error: 'csrf' });
+    const fresh = await t.app.inject({
+      method: 'POST',
+      url: '/api/t/csrf',
+      headers: { cookie: `__Host-sid=${up.token}`, 'x-csrf-token': up.csrfToken },
+    });
+    expect(fresh.statusCode).toBe(200);
   });
 
   test('upgrade to pending_enroll gets a pending lifetime', async () => {

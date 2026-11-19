@@ -60,19 +60,21 @@ export function createSessionStore(db: Db, opts: { now?: () => Date } = {}) {
       return { ...session, lastSeenAt: t };
     },
 
-    /** Rotates the token so a token seen before the privilege change is worthless (session fixation). */
+    /** Rotates the session token and the CSRF token, so nothing seen before the privilege change is worth keeping. */
     async upgrade(
       s: ScopedDb,
       sessionId: string,
       state: 'full' | 'pending_enroll',
-    ): Promise<{ token: string }> {
+    ): Promise<{ token: string; csrfToken: string }> {
       const { token, hash } = newToken();
+      const csrfToken = newToken().token;
       const t = now();
       const { matched } = await s.collection('sessions').updateOne(
         { _id: sessionId },
         {
           $set: {
             tokenHash: hash,
+            csrfToken,
             state,
             lastSeenAt: t,
             expiresAt: new Date(t.getTime() + lifetimeFor(state)),
@@ -80,7 +82,7 @@ export function createSessionStore(db: Db, opts: { now?: () => Date } = {}) {
         },
       );
       if (matched === 0) throw new Error('session_not_found');
-      return { token };
+      return { token, csrfToken };
     },
 
     async revoke(s: ScopedDb, sessionId: string): Promise<void> {

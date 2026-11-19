@@ -4,8 +4,9 @@ import {
   meResponseSchema,
   type MeResponse,
 } from '@roadmap/shared';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { z } from 'zod';
 import { createAuditLog } from '../audit/audit.ts';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
@@ -14,8 +15,11 @@ import type { UserDoc } from '../db/types.ts';
 import { unscoped } from '../db/unscoped.ts';
 import type { AuthConfig } from '../policy/hook.ts';
 import { HttpError } from '../errors.ts';
-import { assertNotLocked, isLocked, recordFailure } from './lockout.ts';
+import { decryptSecret, encryptSecret } from './crypto.ts';
+import { assertNotLocked, isLocked, recordFailure, recordSuccess } from './lockout.ts';
 import { hashPassword, verifyPassword } from './passwords.ts';
+import { consumeRecoveryCode, generateRecoveryCodes } from './recovery.ts';
+import { claimTotpStep, generateTotpSecret, otpauthUrl, verifyTotp } from './totp.ts';
 import { clearSessionCookie, setSessionCookie } from './sessions.ts';
 
 export interface AuthRouteDeps {
@@ -29,7 +33,7 @@ export interface AuthRouteDeps {
 let dummyHash: Promise<string> | undefined;
 const getDummyHash = () => (dummyHash ??= hashPassword('dummy-password-for-timing'));
 
-/** Second factors the user has set up. The TOTP and passkey tasks only fill these in. */
+/** Second factors the user has set up. The passkey task fills in `passkeys`. */
 function factorsOf(user: UserDoc): { hasTotp: boolean; passkeys: MeResponse['user']['passkeys'] } {
   return {
     hasTotp: Boolean(user.totp),
@@ -40,6 +44,10 @@ function factorsOf(user: UserDoc): { hasTotp: boolean; passkeys: MeResponse['use
     })),
   };
 }
+
+const totpCodeBody = z.object({ code: z.string().regex(/^\d{6}$/) });
+const recoveryCodeBody = z.object({ code: z.string().min(1).max(32) });
+const invalidCode = () => new HttpError(401, 'invalid_code');
 
 const requestMeta = (req: FastifyRequest) => ({ ip: req.ip, userAgent: req.headers['user-agent'] ?? '' });
 
@@ -91,6 +99,152 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       );
       setSessionCookie(reply, token);
       return { next: hasSecondFactor ? ('mfa' as const) : ('enroll' as const), csrfToken: session.csrfToken };
+    },
+  );
+
+  const loadUser = async (actor: NonNullable<FastifyRequest['actor']>): Promise<UserDoc> => {
+    const user = await actor.db.collection('users').findOne({ _id: actor.userId });
+    if (!user) throw new HttpError(401, 'unauthenticated');
+    return user;
+  };
+
+  /** Second-factor failure: counts toward the lock, is audited, and always answers the same 401. */
+  const failSecondFactor = async (req: FastifyRequest, now: Date): Promise<never> => {
+    const actor = req.actor!;
+    await recordFailure(actor.db, actor.userId, now);
+    await audit.record(actor.db, {
+      action: 'auth.mfa.failure',
+      actor: { type: 'system' },
+      target: { type: 'user', id: actor.userId },
+      ip: req.ip,
+    });
+    throw invalidCode();
+  };
+
+  /** The whole sign-in is done: clear the failure counter, rotate to a full session, audit. */
+  const completeSignIn = async (req: FastifyRequest, reply: FastifyReply) => {
+    const actor = req.actor!;
+    await recordSuccess(actor.db, actor.userId);
+    const { token, csrfToken } = await app.sessions.upgrade(actor.db, actor.sessionId, 'full');
+    setSessionCookie(reply, token);
+    await audit.record(actor.db, {
+      action: 'auth.login.success',
+      actor: { type: 'user', userId: actor.userId },
+      target: { type: 'user', id: actor.userId },
+      ip: req.ip,
+    });
+    return csrfToken;
+  };
+
+  r.post(
+    '/api/auth/totp/enroll/start',
+    { config: { auth: { level: 'pending', states: ['pending_enroll', 'full'] } } },
+    async (req) => {
+      const actor = req.actor!;
+      const user = await loadUser(actor);
+      const secret = generateTotpSecret();
+      await actor.db
+        .collection('users')
+        .updateOne({ _id: user._id }, { $set: { pendingTotpSecretEnc: encryptSecret(secret, deps.config.totpEncKey) } });
+      return { secret, otpauthUrl: otpauthUrl(user.email, deps.config.webauthnRpName, secret) };
+    },
+  );
+
+  r.post(
+    '/api/auth/totp/enroll/confirm',
+    {
+      config: { auth: { level: 'pending', states: ['pending_enroll', 'full'] } },
+      schema: { body: totpCodeBody },
+    },
+    async (req, reply) => {
+      const actor = req.actor!;
+      const user = await loadUser(actor);
+      const pending = user.pendingTotpSecretEnc;
+      if (!pending) throw new HttpError(409, 'enroll_not_started');
+      const now = deps.now();
+      const checked = verifyTotp(decryptSecret(pending, deps.config.totpEncKey), req.body.code, 0, now);
+      if (!checked.ok) throw new HttpError(422, 'invalid_code');
+
+      const { codes, hashes } = generateRecoveryCodes();
+      // Conditional on the pending secret we just verified, so a second enroll/start in between cannot be confirmed with the old code.
+      const { matched } = await actor.db.collection('users').updateOne(
+        { _id: user._id, pendingTotpSecretEnc: pending },
+        {
+          $set: {
+            totp: { secretEnc: pending, lastStep: checked.step },
+            pendingTotpSecretEnc: null,
+            recoveryCodes: hashes.map((hash) => ({ hash, usedAt: null })),
+          },
+        },
+      );
+      if (matched === 0) throw new HttpError(422, 'invalid_code');
+      await audit.record(actor.db, {
+        action: 'auth.totp.enrolled',
+        actor: { type: 'user', userId: user._id },
+        target: { type: 'user', id: user._id },
+        ip: req.ip,
+      });
+
+      const session = await actor.db.collection('sessions').findOne({ _id: actor.sessionId });
+      if (session?.state !== 'pending_enroll') return { recoveryCodes: codes, csrfToken: actor.csrfToken };
+      await recordSuccess(actor.db, user._id);
+      const upgraded = await app.sessions.upgrade(actor.db, actor.sessionId, 'full');
+      setSessionCookie(reply, upgraded.token);
+      return { recoveryCodes: codes, csrfToken: upgraded.csrfToken };
+    },
+  );
+
+  r.post(
+    '/api/auth/mfa/totp',
+    { config: { auth: { level: 'pending', states: ['pending_mfa'] } }, schema: { body: totpCodeBody } },
+    async (req, reply) => {
+      const actor = req.actor!;
+      const now = deps.now();
+      if (!(await assertNotLocked(actor.db, actor.userId, now))) throw invalidCode();
+      const user = await loadUser(actor);
+      if (!user.totp) throw invalidCode();
+      const checked = verifyTotp(decryptSecret(user.totp.secretEnc, deps.config.totpEncKey), req.body.code, user.totp.lastStep, now);
+      const claimed = checked.ok && (await claimTotpStep(actor.db, user._id, checked.step));
+      // Failures from concurrent guesses may have locked the account while we verified.
+      if (!claimed || !(await assertNotLocked(actor.db, user._id, now))) return failSecondFactor(req, now);
+      return { csrfToken: await completeSignIn(req, reply) };
+    },
+  );
+
+  r.post(
+    '/api/auth/mfa/recovery',
+    { config: { auth: { level: 'pending', states: ['pending_mfa'] } }, schema: { body: recoveryCodeBody } },
+    async (req, reply) => {
+      const actor = req.actor!;
+      const now = deps.now();
+      if (!(await assertNotLocked(actor.db, actor.userId, now))) throw invalidCode();
+      if (!(await consumeRecoveryCode(actor.db, actor.userId, req.body.code, now))) return failSecondFactor(req, now);
+      const csrfToken = await completeSignIn(req, reply);
+      const user = await loadUser(actor);
+      return { csrfToken, remainingRecoveryCodes: user.recoveryCodes.filter((c) => c.usedAt === null).length };
+    },
+  );
+
+  r.post(
+    '/api/auth/recovery-codes',
+    { config: { auth: { level: 'full' } }, schema: { body: totpCodeBody } },
+    async (req) => {
+      const actor = req.actor!;
+      const user = await loadUser(actor);
+      if (!user.totp) throw new HttpError(422, 'invalid_code');
+      const checked = verifyTotp(decryptSecret(user.totp.secretEnc, deps.config.totpEncKey), req.body.code, user.totp.lastStep, deps.now());
+      if (!checked.ok || !(await claimTotpStep(actor.db, user._id, checked.step))) throw new HttpError(422, 'invalid_code');
+      const { codes, hashes } = generateRecoveryCodes();
+      await actor.db
+        .collection('users')
+        .updateOne({ _id: user._id }, { $set: { recoveryCodes: hashes.map((hash) => ({ hash, usedAt: null })) } });
+      await audit.record(actor.db, {
+        action: 'auth.recovery.regenerated',
+        actor: { type: 'user', userId: user._id },
+        target: { type: 'user', id: user._id },
+        ip: req.ip,
+      });
+      return { recoveryCodes: codes };
     },
   );
 

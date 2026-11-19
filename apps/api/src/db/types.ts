@@ -18,8 +18,12 @@ export interface UserDoc {
   passwordHash: string | null;
   failedLogins: number;
   lockedUntil: Date | null;
-  /** Set by the TOTP task; absent until the user has enrolled. */
-  totp?: { secretEnc: string } | null;
+  /** Null until the user has confirmed enrollment. `lastStep` is the newest 30 s step accepted (replay guard). */
+  totp: { secretEnc: string; lastStep: number } | null;
+  /** Secret from enroll/start, waiting for the first valid code. */
+  pendingTotpSecretEnc: string | null;
+  /** SHA-256 hex of each code; `usedAt` is set when it is spent. */
+  recoveryCodes: { hash: string; usedAt: Date | null }[];
   /** Filled by the passkeys task. */
   passkeys?: Array<{ credentialId: string; name: string; createdAt: Date }>;
   createdAt: Date;

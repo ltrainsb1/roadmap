@@ -4,6 +4,9 @@ import { hash } from '@node-rs/argon2';
 import type { FastifyInstance } from 'fastify';
 import { v7 as uuidv7 } from 'uuid';
 import { inject } from 'vitest';
+import { authenticator } from 'otplib';
+import { encryptSecret } from '../src/auth/crypto.ts';
+import { generateRecoveryCodes } from '../src/auth/recovery.ts';
 import { buildApp } from '../src/app.ts';
 import { loadConfig, type Config } from '../src/config.ts';
 import { connectDb, type Db } from '../src/db/client.ts';
@@ -26,7 +29,7 @@ export interface Seeder {
   user(
     tenantId: string,
     o?: { email?: string; password?: string; totp?: boolean },
-  ): Promise<UserDoc & { totpSecret?: string }>;
+  ): Promise<UserDoc & { totpSecret?: string; plainRecoveryCodes?: string[] }>;
   /** Creates the roadmap and the owner's membership. */
   roadmap(tenantId: string, ownerId: string, name?: string): Promise<RoadmapDoc>;
   member(
@@ -58,11 +61,13 @@ export interface TestAppOptions {
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
 const SEED_HASH_PARAMS = { memoryCost: 8, timeCost: 1, parallelism: 1 } as const;
 
+export const TEST_TOTP_KEY = Buffer.alloc(32, 7);
+
 const TEST_ENV = {
   NODE_ENV: 'test',
   MONGO_URI: 'mongodb://unused',
   APP_ORIGIN: 'http://localhost:5173',
-  TOTP_ENC_KEY: Buffer.alloc(32, 7).toString('base64'),
+  TOTP_ENC_KEY: TEST_TOTP_KEY.toString('base64'),
   MAILER: 'memory',
   HIBP_ENABLED: 'false',
 };
@@ -90,7 +95,9 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     },
     async user(tenantId, o = {}) {
       const id = uuidv7();
-      return scoped(db, tenantId).collection('users').insertOne({
+      const totpSecret = o.totp ? authenticator.generateSecret(20) : undefined;
+      const recovery = o.totp ? generateRecoveryCodes() : undefined;
+      const doc = await scoped(db, tenantId).collection('users').insertOne({
         _id: id,
         email: o.email ?? `user-${id}@example.com`,
         name: 'Test User',
@@ -99,10 +106,16 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
         passwordHash: o.password === undefined ? null : await hash(o.password, SEED_HASH_PARAMS),
         failedLogins: 0,
         lockedUntil: null,
-        // The TOTP task replaces this marker with a real encrypted secret.
-        ...(o.totp ? { totp: { secretEnc: 'seeded' } } : {}),
+        totp: totpSecret ? { secretEnc: encryptSecret(totpSecret, TEST_TOTP_KEY), lastStep: 0 } : null,
+        pendingTotpSecretEnc: null,
+        recoveryCodes: (recovery?.hashes ?? []).map((hash) => ({ hash, usedAt: null })),
         createdAt: new Date(),
       });
+      return {
+        ...doc,
+        ...(totpSecret ? { totpSecret } : {}),
+        ...(recovery ? { plainRecoveryCodes: recovery.codes } : {}),
+      };
     },
     async roadmap(tenantId, ownerId, name = 'Roadmap') {
       const s = scoped(db, tenantId);

@@ -31,6 +31,9 @@ const user = (id: string, email: string) => ({
   passwordHash: null,
   failedLogins: 0,
   lockedUntil: null,
+  totp: null,
+  pendingTotpSecretEnc: null,
+  recoveryCodes: [],
   createdAt: new Date(),
 });
 

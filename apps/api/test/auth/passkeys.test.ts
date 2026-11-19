@@ -289,6 +289,18 @@ describe('removing a passkey (FR-1)', () => {
     expect((await userDoc(u._id)).passkeys).toHaveLength(1);
   });
 
+  test('two concurrent deletes without TOTP: exactly one succeeds and one passkey stays', async () => {
+    const u = await newUser();
+    const a = await givePasskey(u._id);
+    const b = await givePasskey(u._id);
+    const sess = await signInAs(t.app, t.db, u._id);
+    const [r1, r2] = await Promise.all([del(a.id, sess), del(b.id, sess)]);
+    expect([r1.statusCode, r2.statusCode].sort()).toEqual([204, 409]);
+    const failed = r1.statusCode === 409 ? r1 : r2;
+    expect(failed.json()).toEqual({ error: 'last_factor' });
+    expect((await userDoc(u._id)).passkeys).toHaveLength(1);
+  });
+
   test('without TOTP, one of two passkeys can go', async () => {
     const u = await newUser();
     const a = await givePasskey(u._id);
@@ -553,6 +565,26 @@ describe('passkey as second factor (FR-1)', () => {
     expect((await userDoc(v._id)).passkeys![0]!.counter).toBe(3);
     expect(await auditFor(u._id, 'auth.mfa.failure')).toHaveLength(1);
     // still pending
+    expect((await t.app.inject({ url: '/api/me', headers: { cookie: pending.cookie } })).statusCode).toBe(403);
+  });
+
+  test('a missing or wrong x-csrf-token is 403 csrf, and the pending session stays pending', async () => {
+    const u = await newUser({ totp: true });
+    const { credentialId } = await givePasskey(u._id);
+    authOk(credentialId);
+    const { pending } = await pendingWithOptions(u);
+    for (const headers of [{ cookie: pending.cookie }, { cookie: pending.cookie, 'x-csrf-token': 'wrong' }]) {
+      const res = await t.app.inject({
+        method: 'POST',
+        url: '/api/auth/passkeys/login/verify',
+        remoteAddress: ip(),
+        headers,
+        payload: assertion(credentialId),
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toEqual({ error: 'csrf' });
+    }
+    expect(verifyAuth).not.toHaveBeenCalled();
     expect((await t.app.inject({ url: '/api/me', headers: { cookie: pending.cookie } })).statusCode).toBe(403);
   });
 

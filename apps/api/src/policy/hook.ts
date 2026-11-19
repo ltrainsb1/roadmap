@@ -43,7 +43,7 @@ declare module 'fastify' {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 
-function csrfMatches(sent: unknown, expected: string): boolean {
+export function csrfMatches(sent: unknown, expected: string): boolean {
   if (typeof sent !== 'string') return false;
   const a = Buffer.from(sent);
   const b = Buffer.from(expected);

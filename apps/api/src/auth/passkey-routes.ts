@@ -9,6 +9,7 @@ import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { UserDoc } from '../db/types.ts';
 import { unscoped } from '../db/unscoped.ts';
 import { HttpError } from '../errors.ts';
+import { csrfMatches } from '../policy/hook.ts';
 import { completeSignIn } from './complete-sign-in.ts';
 import { assertNotLocked, isLocked, recordFailure, recordSuccess } from './lockout.ts';
 import { CHALLENGE_TTL_MS, createPasskeys, realVerifiers, type PasskeyVerifiers } from './passkeys.ts';
@@ -123,11 +124,21 @@ export function registerPasskeyRoutes(app: FastifyInstance, deps: PasskeyRouteDe
       if (!user.totp && all.length === 1) throw new HttpError(409, 'last_factor');
 
       // Dropping the field with the last entry keeps users without passkeys out of the sparse unique index.
+      // The last-factor guard is repeated in the filter, so two concurrent deletes cannot both pass it.
       const { matched } = await actor.db.collection('users').updateOne(
-        { _id: user._id, 'passkeys.id': req.params.id },
+        {
+          _id: user._id,
+          'passkeys.id': req.params.id,
+          $or: [{ totp: { $ne: null } }, { 'passkeys.1': { $exists: true } }],
+        },
         all.length === 1 ? { $unset: { passkeys: '' } } : { $pull: { passkeys: { id: req.params.id } } },
       );
-      if (matched === 0) throw new HttpError(404, 'not_found');
+      if (matched === 0) {
+        const current = await loadUser(actor.db, actor.userId);
+        throw current.passkeys?.some((p) => p.id === req.params.id)
+          ? new HttpError(409, 'last_factor')
+          : new HttpError(404, 'not_found');
+      }
       await audit.record(actor.db, {
         action: 'auth.passkey.removed',
         actor: { type: 'user', userId: actor.userId },
@@ -184,6 +195,8 @@ export function registerPasskeyRoutes(app: FastifyInstance, deps: PasskeyRouteDe
       if ((await sessionStateOf(req)) === 'pending_mfa') {
         // Second factor: the pending session's user is already known, and only their passkeys count.
         const actor = req.actor!;
+        // The route is public, so the hook skipped CSRF; this branch upgrades a session and must check it.
+        if (!csrfMatches(req.headers['x-csrf-token'], actor.csrfToken)) throw new HttpError(403, 'csrf');
         if (!(await assertNotLocked(actor.db, actor.userId, now))) throw invalidCredentials();
         const user = await loadUser(actor.db, actor.userId);
         const challenge = await takeSessionChallenge(actor.db, actor.sessionId);

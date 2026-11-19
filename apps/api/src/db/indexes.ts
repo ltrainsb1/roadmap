@@ -1,36 +1,47 @@
-import type { Db } from 'mongodb';
+import type { Db, IndexDescription } from 'mongodb';
 
 const AUDIT_TTL_SECONDS = 2592000; // 30 days
 
-export async function ensureIndexes(db: Db): Promise<void> {
-  await Promise.all([
+// One createIndexes call per collection: each call is one round of index-build bookkeeping on the server,
+// so a fresh database (every test file makes one) costs 9 builds rather than 19.
+const INDEXES: Record<string, IndexDescription[]> = {
+  users: [
     // Pre-auth lookups (not tenant-first by design).
-    db.collection('users').createIndex({ email: 1 }, { unique: true }),
-    db.collection('users').createIndex({ 'passkeys.credentialId': 1 }, { unique: true, sparse: true }),
-    db.collection('sessions').createIndex({ tokenHash: 1 }, { unique: true }),
-    db.collection('invites').createIndex({ tokenHash: 1 }, { unique: true }),
-    db.collection('resetTokens').createIndex({ tokenHash: 1 }, { unique: true }),
+    { key: { email: 1 }, unique: true },
+    { key: { 'passkeys.credentialId': 1 }, unique: true, sparse: true },
+    { key: { tenantId: 1, email: 1 } },
+  ],
+  sessions: [
+    { key: { tokenHash: 1 }, unique: true },
+    { key: { tenantId: 1, userId: 1 } },
+    // TTL indexes are single-field by necessity.
+    { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+  ],
+  invites: [{ key: { tokenHash: 1 }, unique: true }, { key: { tenantId: 1, email: 1 } }],
+  resetTokens: [
+    { key: { tokenHash: 1 }, unique: true },
+    { key: { tenantId: 1, userId: 1 } },
+    { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+  ],
+  memberships: [
+    { key: { tenantId: 1, roadmapId: 1, userId: 1 }, unique: true },
+    { key: { tenantId: 1, userId: 1 } },
+  ],
+  roadmaps: [{ key: { tenantId: 1, createdAt: -1 } }],
+  projects: [
+    { key: { tenantId: 1, roadmapId: 1, parentId: 1, rank: 1 } },
+    { key: { tenantId: 1, roadmapId: 1, path: 1 } },
+  ],
+  auditEvents: [
+    { key: { tenantId: 1, timestamp: -1 } },
+    { key: { tenantId: 1, roadmapId: 1, timestamp: -1 } },
+    { key: { timestamp: 1 }, expireAfterSeconds: AUDIT_TTL_SECONDS },
+  ],
+  webauthnChallenges: [{ key: { expiresAt: 1 }, expireAfterSeconds: 0 }],
+};
 
-    // Tenant-first indexes.
-    db.collection('users').createIndex({ tenantId: 1, email: 1 }),
-    db.collection('memberships').createIndex(
-      { tenantId: 1, roadmapId: 1, userId: 1 },
-      { unique: true },
-    ),
-    db.collection('memberships').createIndex({ tenantId: 1, userId: 1 }),
-    db.collection('roadmaps').createIndex({ tenantId: 1, createdAt: -1 }),
-    db.collection('projects').createIndex({ tenantId: 1, roadmapId: 1, parentId: 1, rank: 1 }),
-    db.collection('projects').createIndex({ tenantId: 1, roadmapId: 1, path: 1 }),
-    db.collection('sessions').createIndex({ tenantId: 1, userId: 1 }),
-    db.collection('invites').createIndex({ tenantId: 1, email: 1 }),
-    db.collection('resetTokens').createIndex({ tenantId: 1, userId: 1 }),
-    db.collection('auditEvents').createIndex({ tenantId: 1, timestamp: -1 }),
-    db.collection('auditEvents').createIndex({ tenantId: 1, roadmapId: 1, timestamp: -1 }),
-
-    // TTL indexes (single-field by necessity).
-    db.collection('auditEvents').createIndex({ timestamp: 1 }, { expireAfterSeconds: AUDIT_TTL_SECONDS }),
-    db.collection('sessions').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    db.collection('resetTokens').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    db.collection('webauthnChallenges').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-  ]);
+export async function ensureIndexes(db: Db): Promise<void> {
+  await Promise.all(
+    Object.entries(INDEXES).map(([name, specs]) => db.collection(name).createIndexes(specs)),
+  );
 }

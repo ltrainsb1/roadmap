@@ -47,8 +47,10 @@ export function ProjectsPage() {
   };
 
   const canAddTop = can({ role, action: 'project.create', ctx: { isAssigned: false } });
-  const loading = projects.isPending || members.isPending;
-  const failure = projects.error ?? members.error;
+  // The list shows whenever its data is there: a failed refresh must not unmount the rows, an open add row or focus.
+  // The members only name the assignees, so a slow or failed members list leaves the names out and nothing more.
+  const hasList = projects.data !== undefined;
+  const refreshFailed = hasList && projects.isRefetchError;
 
   return (
     <>
@@ -61,10 +63,16 @@ export function ProjectsPage() {
         )}
       </div>
 
-      {failure && <Alert>{messageFor(failure)}</Alert>}
-      {loading && !failure && <p role="status">Loading</p>}
+      {!hasList && projects.isError && <Alert>{messageFor(projects.error)}</Alert>}
+      {!hasList && projects.isPending && <p role="status">Loading</p>}
+      {refreshFailed && (
+        <Alert>
+          <p>Couldn't refresh the list. Try again.</p>
+          <Button onClick={() => void projects.refetch()}>Try again</Button>
+        </Alert>
+      )}
 
-      {projects.isSuccess && members.isSuccess && (
+      {hasList && (
         <div className={selected ? 'projects-layout has-panel' : 'projects-layout'}>
           <div className="projects-list">
             {shown.length === 0 && adding === null && (
@@ -83,7 +91,11 @@ export function ProjectsPage() {
                 onToggle={toggle}
                 adding={adding}
                 onStartAdd={startAdd}
-                onAdd={(parentId, title) => create.mutateAsync({ parentId, title })}
+                onAdd={async (parentId, title) => {
+                  await create.mutateAsync({ parentId, title });
+                  // The parent may have been collapsed while the row was open; the new item must show.
+                  if (parentId) expand(parentId);
+                }}
                 onCancelAdd={cancelAdd}
               />
             )}

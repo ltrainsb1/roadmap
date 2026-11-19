@@ -355,3 +355,58 @@ test('Projects screens pass axe, with rows and with the add row open', async ({ 
   await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible();
   await expectNoA11yViolations(page);
 });
+
+test('a failed background refresh keeps the rows and an open add row with its text, and "Try again" brings the list back', async ({ page }) => {
+  await createSignedInUser(page, 'flaky');
+  const id = await createRoadmap(page, 'Flaky plan');
+  const call = await apiAs(page);
+  await seedProject(call, id, 'Alpha');
+  await page.reload();
+  await expect(projectRow(page, 'Alpha')).toBeVisible();
+
+  await page.getByRole('button', { name: 'New project' }).click();
+  const input = page.getByRole('textbox', { name: 'Title of the new project' });
+  await input.fill('Half typed');
+
+  let failing = true;
+  await page.route('**/api/roadmaps/*/projects', (route) =>
+    failing && route.request().method() === 'GET' ? route.fulfill({ status: 500, json: { error: 'server_error' } }) : route.continue(),
+  );
+  // Coming back to the tab makes the list refetch; the request fails (and is retried) before the alert shows.
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  await expect(page.getByText("Couldn't refresh the list. Try again.", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(projectRow(page, 'Alpha')).toBeVisible();
+  await expect(input).toHaveValue('Half typed');
+
+  failing = false;
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(page.getByText("Couldn't refresh the list. Try again.", { exact: true })).toHaveCount(0);
+  await expect(projectRow(page, 'Alpha')).toBeVisible();
+  await expect(input).toHaveValue('Half typed');
+});
+
+test('an item added under a parent that was collapsed while the add row was open shows up, with its parent open', async ({ page }) => {
+  await createSignedInUser(page, 'folder2');
+  const id = await createRoadmap(page, 'Fold again');
+  const call = await apiAs(page);
+  const alpha = await seedProject(call, id, 'Alpha');
+  await seedProject(call, id, 'Beta', alpha);
+  await page.reload();
+
+  await page.getByRole('button', { name: 'Actions for Alpha' }).click();
+  // The menu names its button; it points at it instead of repeating the label.
+  const menu = page.getByRole('menu', { name: 'Actions for Alpha' });
+  await expect(menu).toHaveAttribute('aria-labelledby', /.+/);
+  await expect(menu).not.toHaveAttribute('aria-label');
+  await page.getByRole('menuitem', { name: 'Add sub-project' }).click();
+  const input = page.getByRole('textbox', { name: 'Title of the new sub-project' });
+  await expect(input).toBeFocused();
+
+  await page.getByRole('button', { name: 'Collapse Alpha' }).click();
+  await expect(projectRow(page, 'Beta')).toHaveCount(0);
+  await input.fill('Gamma');
+  await input.press('Enter');
+  await expect(projectRow(page, 'Gamma')).toBeVisible();
+  await expect(projectRow(page, 'Beta')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Collapse Alpha' })).toBeVisible();
+});

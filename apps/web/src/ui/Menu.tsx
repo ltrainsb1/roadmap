@@ -23,6 +23,8 @@ export function Menu({ label, items, buttonId }: MenuProps) {
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const listId = useId();
+  const ownButtonId = useId();
+  const triggerId = buttonId ?? ownButtonId;
 
   const entries = () => Array.from(list.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
 
@@ -67,7 +69,7 @@ export function Menu({ label, items, buttonId }: MenuProps) {
     <div className="menu" ref={wrapper}>
       <button
         ref={button}
-        id={buttonId}
+        id={triggerId}
         type="button"
         className="icon-btn"
         aria-label={label}
@@ -89,7 +91,7 @@ export function Menu({ label, items, buttonId }: MenuProps) {
         </svg>
       </button>
       {open && (
-        <div id={listId} ref={list} role="menu" aria-label={label} className="menu-list" onKeyDown={onListKeyDown}>
+        <div id={listId} ref={list} role="menu" aria-labelledby={triggerId} className="menu-list" onKeyDown={onListKeyDown}>
           {items.map((item) => (
             <button
               key={item.label}

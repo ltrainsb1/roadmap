@@ -1,3 +1,4 @@
+import { authenticator } from 'otplib';
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { SESSION_COOKIE } from '../../src/auth/sessions.ts';
 import { scoped, type ScopedDb } from '../../src/db/scoped.ts';
@@ -132,7 +133,7 @@ describe('passkey registration (FR-1)', () => {
   test('options ask for a resident key and user verification, and keep the challenge on the session', async () => {
     const u = await newUser({ totp: true });
     const { cookie, csrf } = await signInAs(t.app, t.db, u._id);
-    const res = await post('/api/auth/passkeys/register/options', { cookie, csrf });
+    const res = await post('/api/auth/passkeys/register/options', { cookie, csrf }, { code: u.plainRecoveryCodes![0]! });
     expect(res.statusCode).toBe(200);
     const o = res.json<Opts>();
     expect(o.rp).toEqual({ id: 'localhost', name: 'Roadmap' });
@@ -146,13 +147,14 @@ describe('passkey registration (FR-1)', () => {
     const u = await newUser({ totp: true });
     const { credentialId } = await givePasskey(u._id);
     const { cookie, csrf } = await signInAs(t.app, t.db, u._id);
-    const o = (await post('/api/auth/passkeys/register/options', { cookie, csrf })).json<Opts>();
+    const o = (await post('/api/auth/passkeys/register/options', { cookie, csrf }, { code: u.plainRecoveryCodes![0]! })).json<Opts>();
     expect(o.excludeCredentials.map((c: { id: string }) => c.id)).toEqual([credentialId]);
   });
 
-  async function startRegistration(userId: string) {
-    const sess = await signInAs(t.app, t.db, userId);
-    const o = (await post('/api/auth/passkeys/register/options', sess)).json<Opts>();
+  /** Signs in and asks for options, stepping up with recovery code `i` of a TOTP user. */
+  async function startRegistration(u: { _id: string; plainRecoveryCodes?: string[] }, i = 0) {
+    const sess = await signInAs(t.app, t.db, u._id);
+    const o = (await post('/api/auth/passkeys/register/options', sess, { code: u.plainRecoveryCodes![i]! })).json<Opts>();
     return { sess, challenge: o.challenge };
   }
   const regOk = (credentialId: string) =>
@@ -165,7 +167,7 @@ describe('passkey registration (FR-1)', () => {
 
   test('verify stores the passkey, checks the stored challenge, returns the id and audits', async () => {
     const u = await newUser({ totp: true });
-    const { sess, challenge } = await startRegistration(u._id);
+    const { sess, challenge } = await startRegistration(u);
     const credentialId = newCred();
     regOk(credentialId);
     const res = await post('/api/auth/passkeys/register/verify', sess, { response: assertion(credentialId).response, name: 'My phone' });
@@ -197,7 +199,7 @@ describe('passkey registration (FR-1)', () => {
 
   test('the challenge is single use', async () => {
     const u = await newUser({ totp: true });
-    const { sess } = await startRegistration(u._id);
+    const { sess } = await startRegistration(u);
     const credentialId = newCred();
     regOk(credentialId);
     const body = { response: assertion(credentialId).response, name: 'One' };
@@ -219,7 +221,7 @@ describe('passkey registration (FR-1)', () => {
 
   test('a challenge older than 5 minutes is refused', async () => {
     const u = await newUser({ totp: true });
-    const { sess } = await startRegistration(u._id);
+    const { sess } = await startRegistration(u);
     clock = new Date(clock.getTime() + 5 * MIN + 1000);
     regOk(newCred());
     const res = await post('/api/auth/passkeys/register/verify', sess, { response: {}, name: 'x' });
@@ -229,10 +231,10 @@ describe('passkey registration (FR-1)', () => {
 
   test('a failed or throwing verification stores nothing', async () => {
     const u = await newUser({ totp: true });
-    let { sess } = await startRegistration(u._id);
+    let { sess } = await startRegistration(u);
     verifyReg.mockResolvedValue({ verified: false });
     expect((await post('/api/auth/passkeys/register/verify', sess, { response: {}, name: 'x' })).statusCode).toBe(422);
-    ({ sess } = await startRegistration(u._id));
+    ({ sess } = await startRegistration(u, 1));
     verifyReg.mockRejectedValue(new Error('bad attestation'));
     expect((await post('/api/auth/passkeys/register/verify', sess, { response: {}, name: 'x' })).statusCode).toBe(422);
     expect((await userDoc(u._id)).passkeys ?? []).toHaveLength(0);
@@ -240,7 +242,7 @@ describe('passkey registration (FR-1)', () => {
 
   test('the name must be 1 to 60 characters', async () => {
     const u = await newUser({ totp: true });
-    const { sess } = await startRegistration(u._id);
+    const { sess } = await startRegistration(u);
     regOk(newCred());
     for (const name of ['', 'x'.repeat(61)]) {
       expect((await post('/api/auth/passkeys/register/verify', sess, { response: {}, name })).statusCode).toBe(400);
@@ -248,11 +250,50 @@ describe('passkey registration (FR-1)', () => {
     expect(verifyReg).not.toHaveBeenCalled();
   });
 
+  const totpNow = (secret: string) => authenticator.clone({ epoch: clock.getTime() }).generate(secret);
+
+  test('R18 step-up: options for a TOTP user need a code: missing or wrong is 422 invalid_code and sets no challenge', async () => {
+    const u = await newUser({ totp: true });
+    const sess = await signInAs(t.app, t.db, u._id);
+    for (const payload of [undefined, { code: '' }, { code: totpNow(u.totpSecret!) === '000000' ? '000001' : '000000' }, { code: 'AAAAA-AAAAA' }]) {
+      const res = await post('/api/auth/passkeys/register/options', sess, payload);
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toEqual({ error: 'invalid_code' });
+    }
+    expect((await s.collection('sessions').findOne({ userId: u._id }))?.webauthnChallenge).toBeUndefined();
+    expect((await userDoc(u._id)).failedLogins).toBe(0);
+  });
+
+  test('R18 step-up: the current TOTP code unlocks options once; the same code is then refused', async () => {
+    const u = await newUser({ totp: true });
+    const sess = await signInAs(t.app, t.db, u._id);
+    const code = totpNow(u.totpSecret!);
+    expect((await post('/api/auth/passkeys/register/options', sess, { code })).statusCode).toBe(200);
+    expect((await post('/api/auth/passkeys/register/options', sess, { code })).statusCode).toBe(422);
+  });
+
+  test('R18 step-up: a recovery code unlocks options, is spent, and cannot be used again', async () => {
+    const u = await newUser({ totp: true });
+    const sess = await signInAs(t.app, t.db, u._id);
+    const code = u.plainRecoveryCodes![0]!;
+    expect((await post('/api/auth/passkeys/register/options', sess, { code })).statusCode).toBe(200);
+    expect((await userDoc(u._id)).recoveryCodes.filter((c) => c.usedAt !== null)).toHaveLength(1);
+    const again = await post('/api/auth/passkeys/register/options', sess, { code });
+    expect(again.statusCode).toBe(422);
+    expect(again.json()).toEqual({ error: 'invalid_code' });
+  });
+
+  test('R18 step-up: a user without TOTP needs no code for options', async () => {
+    const u = await newUser();
+    const sess = await signInAs(t.app, t.db, u._id);
+    expect((await post('/api/auth/passkeys/register/options', sess)).statusCode).toBe(200);
+  });
+
   test('a credential already registered to someone is refused', async () => {
     const other = await newUser({ totp: true });
     const { credentialId } = await givePasskey(other._id);
     const u = await newUser({ totp: true });
-    const { sess } = await startRegistration(u._id);
+    const { sess } = await startRegistration(u);
     regOk(credentialId);
     const res = await post('/api/auth/passkeys/register/verify', sess, { response: {}, name: 'dup' });
     expect(res.statusCode).toBe(409);

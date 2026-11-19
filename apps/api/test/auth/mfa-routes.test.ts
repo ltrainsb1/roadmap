@@ -530,3 +530,45 @@ describe('POST /api/auth/recovery-codes (FR-1)', () => {
     expect((await post('/api/auth/recovery-codes', p, { code: codeFor(u.totpSecret!) })).statusCode).toBe(403);
   });
 });
+
+describe('R18 step-up with a recovery code (FR-1)', () => {
+  test('re-enroll start accepts an unused recovery code and spends it; reusing it is 422', async () => {
+    const u = await newUser({ totp: true });
+    const full = await signInAs(t.app, t.db, u._id);
+    const code = u.plainRecoveryCodes![0]!;
+    expect((await post('/api/auth/totp/enroll/start', full, { code })).statusCode).toBe(200);
+    expect((await userDoc(u._id)).recoveryCodes.filter((c) => c.usedAt !== null)).toHaveLength(1);
+    const again = await post('/api/auth/totp/enroll/start', full, { code });
+    expect(again.statusCode).toBe(422);
+    expect(again.json()).toEqual({ error: 'invalid_code' });
+  });
+
+  test('re-enroll start accepts the recovery code lowercase and without the dash', async () => {
+    const u = await newUser({ totp: true });
+    const full = await signInAs(t.app, t.db, u._id);
+    const code = u.plainRecoveryCodes![1]!.replace('-', '').toLowerCase();
+    expect((await post('/api/auth/totp/enroll/start', full, { code })).statusCode).toBe(200);
+  });
+
+  test('recovery-codes accepts an unused recovery code instead of the TOTP code', async () => {
+    const u = await newUser({ totp: true });
+    const full = await signInAs(t.app, t.db, u._id);
+    const res = await post('/api/auth/recovery-codes', full, { code: u.plainRecoveryCodes![0]! });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ recoveryCodes: string[] }>().recoveryCodes).toHaveLength(10);
+  });
+
+  test('recovery-codes refuses a spent recovery code, an unknown one, and a missing code with 422, counting nothing', async () => {
+    const u = await newUser({ totp: true });
+    const full = await signInAs(t.app, t.db, u._id);
+    const spent = u.plainRecoveryCodes![2]!;
+    expect((await post('/api/auth/totp/enroll/start', full, { code: spent })).statusCode).toBe(200);
+    for (const payload of [{ code: spent }, { code: 'AAAAA-AAAAA' }, {}, undefined]) {
+      const res = await post('/api/auth/recovery-codes', full, payload);
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toEqual({ error: 'invalid_code' });
+    }
+    expect(await auditFor(u._id, 'auth.recovery.regenerated')).toHaveLength(0);
+    expect((await userDoc(u._id)).failedLogins).toBe(0);
+  });
+});

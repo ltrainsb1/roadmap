@@ -65,19 +65,22 @@ test('Sign out in the header shows the sign-in screen', async ({ page }) => {
   await expect(page).toHaveURL(/\/login/);
 });
 
-test('Security: new recovery codes need the authenticator code, show once, and replace the old ones', async ({ page }) => {
+test('Security: new recovery codes need the authenticator code, show once, and replace the old ones (R18)', async ({ page }) => {
   const user = await createEnrolledUser(page, 'codes');
   await signInWithRecoveryCode(page, user.email, user.recoveryCodes[0]!);
   await page.getByRole('link', { name: 'Security' }).click();
   await expect(page.getByText('Your old codes stop working.')).toBeVisible();
 
+  await expect(field(page, '6-digit code or recovery code')).toHaveAccessibleDescription(
+    'Use a recovery code if you lost your authenticator app.',
+  );
   await page.getByRole('button', { name: 'Make new codes' }).click();
   await expect(page.getByText('Enter the 6-digit code from your authenticator app.')).toBeVisible();
-  await field(page, '6-digit code').fill('000000');
+  await field(page, '6-digit code or recovery code').fill('000000');
   await page.getByRole('button', { name: 'Make new codes' }).click();
   await expect(page.getByText("That code didn't work. Try the next one your app shows.")).toBeVisible();
 
-  await field(page, '6-digit code').fill(totpFor(user.secret, 1));
+  await field(page, '6-digit code or recovery code').fill(totpFor(user.secret, 1));
   await page.getByRole('button', { name: 'Make new codes' }).click();
   await expect(page.getByRole('heading', { name: 'Save your recovery codes' })).toBeVisible();
   const fresh = await page.getByTestId('recovery-codes').getByRole('listitem').allInnerTexts();
@@ -103,7 +106,7 @@ test('Security: new recovery codes need the authenticator code, show once, and r
   await expect(page).toHaveURL('/');
 });
 
-test('Security: add and remove a passkey', async ({ page, browserName }) => {
+test('Security: adding a passkey asks for a code first, and a recovery code works (R18)', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium');
   await addVirtualAuthenticator(page);
   const user = await createEnrolledUser(page, 'keys');
@@ -112,8 +115,19 @@ test('Security: add and remove a passkey', async ({ page, browserName }) => {
   await expect(page.getByText('You have no passkeys yet.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Add a passkey' }).click();
+  const section = page.getByRole('region', { name: 'Passkeys' });
+  const code = section.getByLabel('6-digit code or recovery code', { exact: true });
+  await expect(code).toBeFocused();
+  await expect(code).toHaveAccessibleDescription('Use a recovery code if you lost your authenticator app.');
+  await expectNoA11yViolations(page);
+  await code.fill('AAAAA-AAAAA');
+  await section.getByRole('button', { name: 'Continue' }).click();
+  await expect(section.getByText("That recovery code didn't work. Check it and try again.")).toBeVisible();
+  await code.fill(user.recoveryCodes[0]!);
+  await section.getByRole('button', { name: 'Continue' }).click();
   const list = page.getByRole('list', { name: 'Passkeys' });
   await expect(list.getByRole('listitem')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Add a passkey' })).toBeVisible();
 
   const remove = list.getByRole('button', { name: /^Remove passkey/ });
   await expect(remove).toHaveClass(/btn-danger/);

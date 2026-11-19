@@ -11,6 +11,7 @@ import {
   readLastMail,
   setPassword,
   signIn,
+  signInWithRecoveryCode,
   signInWithTotp,
   totpFor,
   uniqueEmail,
@@ -142,11 +143,14 @@ test('Auth: add a passkey in settings, sign out, sign in passwordless with it', 
   // Chromium only: the virtual authenticator is a CDP feature. Nothing is stubbed: the credential the API stores must verify in a real ceremony.
   test.skip(browserName !== 'chromium');
   await addVirtualAuthenticator(page);
-  const { email, secret } = await createEnrolledUser(page, 'passkey');
-  await signInWithTotp(page, email, secret);
-  await expect(page).toHaveURL('/');
+  const { email, secret, recoveryCodes } = await createEnrolledUser(page, 'passkey');
+  // A recovery code signs in, so the authenticator app's next code is still free for the step-up (R18).
+  await signInWithRecoveryCode(page, email, recoveryCodes[0]!);
   await page.goto('/settings/security');
   await page.getByRole('button', { name: 'Add a passkey' }).click();
+  const passkeys = page.getByRole('region', { name: 'Passkeys' });
+  await passkeys.getByLabel('6-digit code or recovery code', { exact: true }).fill(totpFor(secret, 1));
+  await passkeys.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByRole('list', { name: 'Passkeys' }).getByRole('listitem')).toHaveCount(1);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible();

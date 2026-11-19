@@ -21,6 +21,7 @@ import { decryptSecret, encryptSecret } from './crypto.ts';
 import { assertNotLocked, isLocked, recordFailure } from './lockout.ts';
 import { hashPassword, verifyPassword } from './passwords.ts';
 import { consumeRecoveryCode, generateRecoveryCodes } from './recovery.ts';
+import { requireStepUp, stepUpCodeOf } from './step-up.ts';
 import { claimTotpStep, generateTotpSecret, otpauthUrl, verifyTotp } from './totp.ts';
 import { completeSignIn } from './complete-sign-in.ts';
 import { clearSessionCookie, setSessionCookie } from './sessions.ts';
@@ -45,8 +46,6 @@ function factorsOf(user: UserDoc): { hasTotp: boolean; passkeys: MeResponse['use
 }
 
 const totpCodeBody = z.object({ code: z.string().regex(/^\d{6}$/) });
-// enroll/start takes a body only when replacing an existing factor; anything unparseable counts as no code.
-const optionalCodeBody = z.object({ code: z.string().max(32) });
 const recoveryCodeBody = z.object({ code: z.string().min(1).max(32) });
 const invalidCode = () => new HttpError(401, 'invalid_code');
 
@@ -126,12 +125,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     throw invalidCode();
   };
 
-  /** For a full session changing its own second factor: the current TOTP code must be valid and unused. */
-  const requireCurrentTotp = async (user: UserDoc, code: string | undefined, db: ScopedDb): Promise<void> => {
-    if (!user.totp || code === undefined) throw new HttpError(422, 'invalid_code');
-    const checked = verifyTotp(decryptSecret(user.totp.secretEnc, deps.config.totpEncKey), code, user.totp.lastStep, deps.now());
-    if (!checked.ok || !(await claimTotpStep(db, user._id, checked.step))) throw new HttpError(422, 'invalid_code');
-  };
+  /** For a full session changing its own second factor: a current TOTP code or an unused recovery code. */
+  const requireCurrentFactor = (user: UserDoc, body: unknown, db: ScopedDb): Promise<void> =>
+    requireStepUp(db, user, stepUpCodeOf(body), { totpEncKey: deps.config.totpEncKey, now: deps.now() });
 
   /**
    * The current session's state. A pending_enroll session exists only to set up a first factor: once the user
@@ -152,7 +148,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const user = await loadUser(actor);
       // Replacing an existing factor from a full session must prove the old one, or a stolen cookie could take it over.
       const state = await enrollingState(actor, user);
-      if (state === 'full' && user.totp) await requireCurrentTotp(user, optionalCodeBody.safeParse(req.body).data?.code, actor.db);
+      if (state === 'full' && user.totp) await requireCurrentFactor(user, req.body, actor.db);
       const secret = generateTotpSecret();
       await actor.db
         .collection('users')
@@ -243,11 +239,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
 
   r.post(
     '/api/auth/recovery-codes',
-    { config: { auth: { level: 'full' } }, schema: { body: totpCodeBody } },
+    { config: { auth: { level: 'full' } } },
     async (req) => {
       const actor = req.actor!;
       const user = await loadUser(actor);
-      await requireCurrentTotp(user, req.body.code, actor.db);
+      await requireCurrentFactor(user, req.body, actor.db);
       const { codes, hashes } = generateRecoveryCodes();
       await actor.db
         .collection('users')

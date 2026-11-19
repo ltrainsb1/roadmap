@@ -1,6 +1,6 @@
 import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.ts';
 import { messageFor } from '../api/errors.ts';
@@ -19,11 +19,21 @@ type Passkey = { id: string; name: string; createdAt: string };
 
 const dateOf = (iso: string) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(iso));
 
+// Changing a factor needs the authenticator app's code, or a recovery code when the app is lost.
+const STEP_UP_LABEL = '6-digit code or recovery code';
+const STEP_UP_HINT = 'Use a recovery code if you lost your authenticator app.';
+const EMPTY_CODE = 'Enter the 6-digit code from your authenticator app.';
+/** The server tells the two apart by shape, so the error copy does too. */
+const stepUpMessage = (err: unknown, code: string) => messageFor(err, { recovery: !/^\d{6}$/.test(code) });
+
 export function SecurityPage() {
   const me = useMe();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [passkeyError, setPasskeyError] = useState<string | undefined>();
+  const [askingPasskeyCode, setAskingPasskeyCode] = useState(false);
+  const [passkeyCodeError, setPasskeyCodeError] = useState<string | undefined>();
+  const passkeyCodeInput = useRef<HTMLInputElement>(null);
   const [removing, setRemoving] = useState<Passkey | null>(null);
   const [removeError, setRemoveError] = useState<string | undefined>();
   const [codeError, setCodeError] = useState<string | undefined>();
@@ -35,12 +45,26 @@ export function SecurityPage() {
   const passkeys = me.data?.user.passkeys ?? [];
   const refreshMe = () => queryClient.invalidateQueries({ queryKey: ME_KEY });
 
-  const addPasskey = async () => {
+  useEffect(() => {
+    if (askingPasskeyCode) passkeyCodeInput.current?.focus();
+  }, [askingPasskeyCode]);
+
+  /** Runs the browser ceremony once the server has accepted the step-up code (if one was needed). */
+  const registerPasskey = async (code: string | undefined) => {
     setPasskeyError(undefined);
+    setPasskeyCodeError(undefined);
+    let optionsJSON: PublicKeyCredentialCreationOptionsJSON;
     try {
-      const optionsJSON = await api<PublicKeyCredentialCreationOptionsJSON>('/api/auth/passkeys/register/options', {
+      optionsJSON = await api<PublicKeyCredentialCreationOptionsJSON>('/api/auth/passkeys/register/options', {
         method: 'POST',
+        ...(code === undefined ? {} : { body: { code } }),
       });
+    } catch (err) {
+      if (code !== undefined) return setPasskeyCodeError(stepUpMessage(err, code));
+      return setPasskeyError(messageFor(err));
+    }
+    setAskingPasskeyCode(false);
+    try {
       const response = await startRegistration({ optionsJSON });
       const name = `Passkey ${passkeys.length + 1}`;
       await api('/api/auth/passkeys/register/verify', { body: { response, name } });
@@ -48,6 +72,18 @@ export function SecurityPage() {
     } catch (err) {
       setPasskeyError(passkeyErrorMessage(err));
     }
+  };
+
+  const addPasskey = () => {
+    if (me.data?.user.hasTotp) return setAskingPasskeyCode(true);
+    void registerPasskey(undefined);
+  };
+
+  const submitPasskeyCode = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const code = formText(new FormData(e.currentTarget), 'code').trim();
+    if (!code) return setPasskeyCodeError(EMPTY_CODE);
+    void registerPasskey(code);
   };
 
   const removePasskey = async () => {
@@ -65,13 +101,13 @@ export function SecurityPage() {
   const makeCodes = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const code = formText(new FormData(e.currentTarget), 'code').trim();
-    if (!code) return setCodeError('Enter the 6-digit code from your authenticator app.');
+    if (!code) return setCodeError(EMPTY_CODE);
     try {
       const res = await api<{ recoveryCodes: string[] }>('/api/auth/recovery-codes', { body: { code } });
       setCodeError(undefined);
       setNewCodes(res.recoveryCodes);
     } catch (err) {
-      setCodeError(messageFor(err));
+      setCodeError(stepUpMessage(err, code));
     }
   };
 
@@ -107,7 +143,24 @@ export function SecurityPage() {
             ))}
           </ul>
         )}
-        <Button onClick={() => void addPasskey()}>Add a passkey</Button>
+        {askingPasskeyCode ? (
+          <form onSubmit={submitPasskeyCode} noValidate>
+            <Field
+              id="passkey-code"
+              name="code"
+              label={STEP_UP_LABEL}
+              hint={STEP_UP_HINT}
+              autoComplete="one-time-code"
+              autoCapitalize="characters"
+              spellCheck={false}
+              ref={passkeyCodeInput}
+              error={passkeyCodeError}
+            />
+            <Button type="submit">Continue</Button>
+          </form>
+        ) : (
+          <Button onClick={addPasskey}>Add a passkey</Button>
+        )}
       </section>
 
       <section aria-labelledby="codes-heading">
@@ -130,9 +183,11 @@ export function SecurityPage() {
               <Field
                 id="code"
                 name="code"
-                label="6-digit code"
-                inputMode="numeric"
+                label={STEP_UP_LABEL}
+                hint={STEP_UP_HINT}
                 autoComplete="one-time-code"
+                autoCapitalize="characters"
+                spellCheck={false}
                 error={codeError}
               />
               <Button type="submit">Make new codes</Button>

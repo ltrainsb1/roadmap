@@ -14,6 +14,7 @@ import { completeSignIn } from './complete-sign-in.ts';
 import { assertNotLocked, isLocked, recordFailure, recordSuccess } from './lockout.ts';
 import { CHALLENGE_TTL_MS, createPasskeys, realVerifiers, type PasskeyVerifiers } from './passkeys.ts';
 import { setSessionCookie } from './sessions.ts';
+import { requireStepUp, stepUpCodeOf } from './step-up.ts';
 import { newToken } from './tokens.ts';
 
 export interface PasskeyRouteDeps {
@@ -76,7 +77,12 @@ export function registerPasskeyRoutes(app: FastifyInstance, deps: PasskeyRouteDe
 
   r.post('/api/auth/passkeys/register/options', { config: { auth: { level: 'full' } } }, async (req) => {
     const actor = req.actor!;
-    const options = await passkeys.registrationOptions(await loadUser(actor.db, actor.userId));
+    const user = await loadUser(actor.db, actor.userId);
+    // Adding a factor proves the existing one, or a stolen cookie could plant its own passkey.
+    if (user.totp) {
+      await requireStepUp(actor.db, user, stepUpCodeOf(req.body), { totpEncKey: deps.config.totpEncKey, now: deps.now() });
+    }
+    const options = await passkeys.registrationOptions(user);
     await putSessionChallenge(actor.db, actor.sessionId, options.challenge);
     return options;
   });

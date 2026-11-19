@@ -31,14 +31,13 @@ export function registerAssignRoutes(app: FastifyInstance, deps: AssignRouteDeps
       const wanted = [...new Set(req.body.userIds)];
       return actor.db.withTransaction(async (s) => {
         const current = await loadProject(s, roadmapId, projectId);
-        // Read inside this transaction: if a member is removed meanwhile, the removal also rewrites the items that
-        // name them, so a write here that overlaps it conflicts and retries against the new membership list.
         if (wanted.length > 0) {
+          // The guard against a concurrent member removal is the membershipRevision increment after this read: removal writes the
+          // same roadmap document, so one of the two transactions conflicts and retries against the new membership list.
           const members = await s.collection('memberships').find({ roadmapId, userId: { $in: wanted } });
           if (members.length !== wanted.length) throw new HttpError(422, 'not_a_member');
+          await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { membershipRevision: 1 } });
         }
-        // Serialises this assignment against a member removal: both write this document, so one retries.
-        if (wanted.length > 0) await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { membershipRevision: 1 } });
         const same = wanted.length === current.assigneeIds.length && wanted.every((id) => current.assigneeIds.includes(id));
         if (same) return toProjectDto(current);
 

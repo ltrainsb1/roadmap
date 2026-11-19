@@ -18,7 +18,7 @@ import type { AuthConfig } from '../policy/hook.ts';
 import { HttpError } from '../errors.ts';
 import { listMemberships } from '../roadmaps/routes.ts';
 import { decryptSecret, encryptSecret } from './crypto.ts';
-import { assertNotLocked, isLocked, recordFailure, recordSuccess } from './lockout.ts';
+import { assertNotLocked, isLocked, recordFailure } from './lockout.ts';
 import { hashPassword, verifyPassword } from './passwords.ts';
 import { consumeRecoveryCode, generateRecoveryCodes } from './recovery.ts';
 import { claimTotpStep, generateTotpSecret, otpauthUrl, verifyTotp } from './totp.ts';
@@ -133,6 +133,17 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     if (!checked.ok || !(await claimTotpStep(db, user._id, checked.step))) throw new HttpError(422, 'invalid_code');
   };
 
+  /**
+   * The current session's state. A pending_enroll session exists only to set up a first factor: once the user
+   * has any factor (enrolled from another session, say), it may not enroll again or upgrade itself.
+   */
+  const enrollingState = async (actor: NonNullable<FastifyRequest['actor']>, user: UserDoc) => {
+    const state = (await actor.db.collection('sessions').findOne({ _id: actor.sessionId }))?.state;
+    const f = factorsOf(user);
+    if (state === 'pending_enroll' && (f.hasTotp || f.passkeys.length > 0)) throw new HttpError(403, 'mfa_required');
+    return state;
+  };
+
   r.post(
     '/api/auth/totp/enroll/start',
     { config: { auth: { level: 'pending', states: ['pending_enroll', 'full'] } } },
@@ -140,8 +151,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const actor = req.actor!;
       const user = await loadUser(actor);
       // Replacing an existing factor from a full session must prove the old one, or a stolen cookie could take it over.
-      const session = await actor.db.collection('sessions').findOne({ _id: actor.sessionId });
-      if (session?.state === 'full' && user.totp) await requireCurrentTotp(user, optionalCodeBody.safeParse(req.body).data?.code, actor.db);
+      const state = await enrollingState(actor, user);
+      if (state === 'full' && user.totp) await requireCurrentTotp(user, optionalCodeBody.safeParse(req.body).data?.code, actor.db);
       const secret = generateTotpSecret();
       await actor.db
         .collection('users')
@@ -159,16 +170,21 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     async (req, reply) => {
       const actor = req.actor!;
       const user = await loadUser(actor);
+      const firstSignIn = (await enrollingState(actor, user)) === 'pending_enroll';
       const pending = user.pendingTotpSecretEnc;
       if (!pending) throw new HttpError(409, 'enroll_not_started');
       const now = deps.now();
       const checked = verifyTotp(decryptSecret(pending, deps.config.totpEncKey), req.body.code, 0, now);
       if (!checked.ok) throw new HttpError(422, 'invalid_code');
+      // First enrollment completes a sign-in, so a lock set since the password check (by concurrent guesses) stops it
+      // here, before anything is written.
+      if (firstSignIn && !(await assertNotLocked(actor.db, user._id, now))) throw invalidCode();
 
       const { codes, hashes } = generateRecoveryCodes();
-      // Conditional on the pending secret we just verified, so a second enroll/start in between cannot be confirmed with the old code.
+      // Conditional on the pending secret we just verified, so a second enroll/start in between cannot be confirmed with
+      // the old code; on first enrollment also on there being no TOTP yet, so two first enrollments cannot both win.
       const { matched } = await actor.db.collection('users').updateOne(
-        { _id: user._id, pendingTotpSecretEnc: pending },
+        { _id: user._id, pendingTotpSecretEnc: pending, ...(firstSignIn ? { totp: null } : {}) },
         {
           $set: {
             totp: { secretEnc: pending, lastStep: checked.step },
@@ -185,12 +201,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         ip: req.ip,
       });
 
-      const session = await actor.db.collection('sessions').findOne({ _id: actor.sessionId });
-      if (session?.state !== 'pending_enroll') return { recoveryCodes: codes, csrfToken: actor.csrfToken };
-      await recordSuccess(actor.db, user._id);
-      const upgraded = await app.sessions.upgrade(actor.db, actor.sessionId, 'full');
-      setSessionCookie(reply, upgraded.token);
-      return { recoveryCodes: codes, csrfToken: upgraded.csrfToken };
+      if (!firstSignIn) return { recoveryCodes: codes, csrfToken: actor.csrfToken };
+      // Other password-only sessions were opened to set up a factor that now exists; none of them may finish.
+      await actor.db
+        .collection('sessions')
+        .deleteMany({ userId: user._id, state: { $ne: 'full' }, _id: { $ne: actor.sessionId } });
+      return { recoveryCodes: codes, csrfToken: await completeSignIn(app.sessions, req, reply) };
     },
   );
 

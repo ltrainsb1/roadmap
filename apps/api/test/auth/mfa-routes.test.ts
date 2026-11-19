@@ -172,6 +172,73 @@ describe('TOTP enrollment (FR-1)', () => {
     expect(await userDoc(u._id)).toMatchObject({ failedLogins: 0, lockedUntil: null });
   });
 
+  test('FR-1 security: after one pending_enroll session enrolls, a second one is refused on start and confirm and is closed', async () => {
+    const u = await newUser();
+    const stale = await login(u.email);
+    // The stale session starts first, so it would hold a pending secret if it were not closed.
+    expect((await post('/api/auth/totp/enroll/start', stale)).statusCode).toBe(200);
+    const { res } = await enroll(u.email);
+    expect(res.statusCode).toBe(200);
+    expect((await userDoc(u._id)).totp).not.toBeNull();
+
+    // The first enrollment deleted this session, so the hook no longer resolves its cookie: 401 before any 403.
+    const start = await post('/api/auth/totp/enroll/start', stale);
+    expect(start.statusCode).toBe(401);
+    expect(start.json()).toEqual({ error: 'unauthenticated' });
+    const confirm = await post('/api/auth/totp/enroll/confirm', stale, { code: '123456' });
+    expect(confirm.statusCode).toBe(401);
+    expect(await s.collection('sessions').countDocuments({ userId: u._id, state: { $ne: 'full' } })).toBe(0);
+    const resolved = await t.app.inject({ method: 'POST', url: '/api/auth/logout', headers: { cookie: stale.cookie, 'x-csrf-token': stale.csrf } });
+    expect(resolved.statusCode).toBe(401);
+  });
+
+  test('FR-1 security: a pending_enroll session whose user already has a factor gets 403 mfa_required on start and confirm', async () => {
+    const u = await newUser();
+    const stale = await login(u.email);
+    // The user gained TOTP somewhere this session never saw (the other session's cleanup is bypassed here).
+    await s.collection('users').updateOne(
+      { _id: u._id },
+      { $set: { totp: { secretEnc: 'x', lastStep: 0 }, pendingTotpSecretEnc: 'still-here' } },
+    );
+    const start = await post('/api/auth/totp/enroll/start', stale);
+    expect(start.statusCode).toBe(403);
+    expect(start.json()).toEqual({ error: 'mfa_required' });
+    const confirm = await post('/api/auth/totp/enroll/confirm', stale, { code: '123456' });
+    expect(confirm.statusCode).toBe(403);
+    expect(confirm.json()).toEqual({ error: 'mfa_required' });
+    expect((await userDoc(u._id)).pendingTotpSecretEnc).toBe('still-here');
+  });
+
+  test('FR-1 security: a pending_enroll session whose user has a passkey gets 403 mfa_required', async () => {
+    const u = await newUser();
+    const stale = await login(u.email);
+    await t.db
+      .collection<UserDoc>('users')
+      .updateOne({ _id: u._id }, { $set: { passkeys: [{ id: 'p1', credentialId: 'c-enroll', publicKey: 'k', counter: 0, transports: [], name: 'k', createdAt: new Date() }] } });
+    expect((await post('/api/auth/totp/enroll/start', stale)).statusCode).toBe(403);
+    expect((await post('/api/auth/totp/enroll/confirm', stale, { code: '123456' })).statusCode).toBe(403);
+  });
+
+  test('FR-1 audit: first enrollment records both auth.totp.enrolled and auth.login.success', async () => {
+    const u = await newUser();
+    await enroll(u.email);
+    expect(await auditFor(u._id, 'auth.totp.enrolled')).toHaveLength(1);
+    expect(await auditFor(u._id, 'auth.login.success')).toHaveLength(1);
+  });
+
+  test('FR-1 lockout: a locked account cannot complete enrollment', async () => {
+    const u = await newUser();
+    const p = await login(u.email);
+    const { secret } = (await post('/api/auth/totp/enroll/start', p)).json<{ secret: string }>();
+    await s.collection('users').updateOne({ _id: u._id }, { $set: { lockedUntil: new Date(clock.getTime() + 15 * 60_000) } });
+    const res = await post('/api/auth/totp/enroll/confirm', p, { code: codeFor(secret) });
+    expect(res.statusCode).toBe(401);
+    expect(cookieOf(res)).toBeUndefined();
+    expect(await s.collection('sessions').findOne({ userId: u._id, state: 'full' })).toBeNull();
+    expect((await userDoc(u._id)).totp).toBeNull();
+    expect(await auditFor(u._id, 'auth.login.success')).toHaveLength(0);
+  });
+
   test('re-enroll: a full session with TOTP cannot start enrollment without the current code', async () => {
     const u = await newUser({ totp: true });
     const full = await signInAs(t.app, t.db, u._id);

@@ -75,7 +75,7 @@ describe('row menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Move up' }));
     expect(handlers.onReorder).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Move down' }));
-    expect(handlers.onReorder).toHaveBeenCalledWith(null, ['2', '1', '3']);
+    expect(handlers.onReorder).toHaveBeenCalledWith(null, ['2', '1', '3'], 'Moved Item 1 to position 2 of 3.');
   });
 
   test('FR-1.3: a Contributor assigned to an item gets Archive and Delete but no drag handle or Move items', () => {

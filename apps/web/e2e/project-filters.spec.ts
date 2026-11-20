@@ -147,6 +147,28 @@ test('no match shows "No projects match these filters." with a working "Clear fi
   await expect(page.getByText('No projects match these filters.')).toHaveCount(0);
   await expect(projectRow(page, 'Standalone')).toBeVisible();
   await expect(search(page)).toHaveValue('');
+  // The button went with the message; focus goes to the search field, not the page body.
+  await expect(search(page)).toBeFocused();
+});
+
+test('an item added while filters are on that does not match them is announced, not shown', async ({ page }) => {
+  await seeded(page, 'hidden');
+  await openFilters(page);
+  await panel(page).getByLabel('In progress', { exact: true }).check();
+  await expect.poll(() => titles(page)).toEqual(['Season', 'Opening']);
+  await panel(page).getByRole('button', { name: 'Done', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Actions for Opening' }).click();
+  await page.getByRole('menuitem', { name: 'Add task' }).click();
+  const input = page.getByRole('textbox', { name: 'Title of the new task' });
+  await input.fill('Hidden task');
+  await input.press('Enter');
+  await expect(page.getByRole('status').filter({ hasText: 'Added Hidden task.' })).toHaveText(
+    "Added Hidden task. It doesn't match the filters, so it isn't shown.",
+  );
+  await expect(projectRow(page, 'Hidden task')).toHaveCount(0);
+  await input.press('Escape');
+  await expect.poll(() => titles(page)).toEqual(['Season', 'Opening']);
 });
 
 test('the filtered address can be opened in a new tab and shows the same list', async ({ page }) => {

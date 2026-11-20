@@ -181,8 +181,11 @@ interface TreeProps {
   onChangeStatus: (item: Project, status: ProjectStatus) => void;
   /** Opens an item's panel; the page may ask about unsaved edits first. */
   onOpen: (itemId: string) => void;
-  /** Saves the order of the non-archived items under `parentId` (null for the top level); the page shows any error. */
-  onReorder: (parentId: string | null, orderedIds: string[]) => void;
+  /**
+   * Saves the order of the non-archived items under `parentId` (null for the top level); the page shows any error.
+   * `announce` is said once the order is saved (a drag announces through dnd-kit instead).
+   */
+  onReorder: (parentId: string | null, orderedIds: string[], announce?: string) => void;
   /** The page asks about unsaved edits, then archives, unarchives or asks to delete. */
   onArchive: (item: Project) => void;
   onUnarchive: (item: Project) => void;
@@ -243,7 +246,8 @@ export function ProjectTree(props: TreeProps) {
     if (!item.archived && canReorder) {
       const ids = group.filter((n) => !n.item.archived).map((n) => n.item.id);
       const at = ids.indexOf(item.id);
-      const move = (by: number) => () => onReorder(item.parentId, arrayMove(ids, at, at + by));
+      const move = (by: number) => () =>
+        onReorder(item.parentId, arrayMove(ids, at, at + by), `Moved ${item.title} to position ${at + by + 1} of ${ids.length}.`);
       entries.push({ label: 'Move up', onSelect: move(-1), disabled: at <= 0 }, { label: 'Move down', onSelect: move(1), disabled: at >= ids.length - 1 });
     }
     if (can({ role, action: 'project.delete', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
@@ -294,6 +298,7 @@ export function ProjectTree(props: TreeProps) {
               )}
               <span className="sr-only">{levelName(item.depth)}: </span>
               <Link id={titleLinkId(item.id)} to={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}${search}`} className="item-title"
+                aria-current={item.id === selectedId ? 'true' : undefined}
                 onClick={(e) => {
                   // Plain clicks go through the page; a new-tab click keeps its default.
                   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -367,6 +372,8 @@ export function ProjectTree(props: TreeProps) {
         sensors={sensors}
         collisionDetection={sameGroupOnly}
         accessibility={{
+          // Outside the table: dnd-kit's instructions and live region are divs, which a <table> may not hold.
+          container: document.body,
           announcements,
           screenReaderInstructions: {
             draggable: 'To reorder, press Space. Move with the arrow keys, then press Space to drop. Press Escape to cancel.',

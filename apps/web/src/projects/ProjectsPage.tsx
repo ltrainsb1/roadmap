@@ -1,4 +1,13 @@
-import { activeFilterCount, can, filterProjects, type PriorityLabel, type Project, type ProjectList, type ProjectStatus } from '@roadmap/shared';
+import {
+  activeFilterCount,
+  can,
+  filterProjects,
+  type PriorityLabel,
+  type Project,
+  type ProjectFilters,
+  type ProjectList,
+  type ProjectStatus,
+} from '@roadmap/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -37,6 +46,16 @@ import {
 
 const NONE: ReadonlySet<string> = new Set();
 const FILTERS_BUTTON_ID = 'filters-button';
+const SEARCH_ID = 'project-search';
+
+/** The items the list shows, and those shown only for context, for these filters. */
+function viewOf(items: readonly Project[], filters: ProjectFilters, myId: string | undefined) {
+  if (!hasNarrowing(filters) && !filters.showArchived) return { items: items.filter((i) => !i.archived), context: NONE };
+  // "Assigned to me" is the reader, whoever wrote the address.
+  const mine = filters.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id));
+  const { matches, context } = filterProjects(items, { ...filters, assigneeIds: mine });
+  return { items: items.filter((i) => matches.has(i.id) || context.has(i.id)), context };
+}
 
 export function ProjectsPage() {
   const { roadmapId, role } = useRoadmap();
@@ -89,13 +108,7 @@ export function ProjectsPage() {
 
   const narrowing = hasNarrowing(filters);
   const filtered = narrowing || filters.showArchived;
-  const view = useMemo(() => {
-    if (!filtered) return { items: projects.items.filter((i) => !i.archived), context: NONE };
-    // "Assigned to me" is the reader, whoever wrote the address.
-    const mine = filters.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id));
-    const { matches, context } = filterProjects(projects.items, { ...filters, assigneeIds: mine });
-    return { items: projects.items.filter((i) => matches.has(i.id) || context.has(i.id)), context };
-  }, [filtered, filters, projects.items, myId]);
+  const view = useMemo(() => viewOf(projects.items, filters, myId), [filters, projects.items, myId]);
   const shown = view.items;
   const tagsInUse = useMemo(() => [...new Set(projects.items.filter((i) => !i.archived).flatMap((i) => i.tags))].sort(), [projects.items]);
   const search = params.toString() === '' ? '' : `?${params.toString()}`;
@@ -199,10 +212,29 @@ export function ProjectsPage() {
   const changePriorityLabel = (itemId: string, label: PriorityLabel | null) =>
     runOwnChange(itemId, (current) => (current.priorityLabel === label ? undefined : setPriorityLabel.mutateAsync({ projectId: itemId, label })));
 
-  const reorderItems = (parentId: string | null, orderedIds: string[]) => {
+  const reorderItems = (parentId: string | null, orderedIds: string[], announce?: string) => {
     setNotice('');
     setActionError(undefined);
-    reorder.mutate({ parentId, orderedIds }, { onError: failAction });
+    reorder.mutate({ parentId, orderedIds }, { onSuccess: () => announce && setNotice(announce), onError: failAction });
+  };
+
+  const addItem = async (parentId: string | null, title: string) => {
+    const { id } = await create.mutateAsync({ parentId, title });
+    // The parent may have been collapsed while the row was open; the new item must show.
+    if (parentId) expand(parentId);
+    if (!filtered) return;
+    // The list has been refetched by now; say so when the filters hide what was just added.
+    const items = queryClient.getQueryData<ProjectList>(PROJECTS_KEY(roadmapId))?.items ?? [];
+    const added = items.find((i) => i.id === id);
+    if (added && !viewOf(items, filters, myId).items.includes(added)) {
+      setNotice(`Added ${added.title}. It doesn't match the filters, so it isn't shown.`);
+    }
+  };
+
+  const clearFiltersFromNoMatch = () => {
+    clearFilters();
+    // The button goes with the message; the search field is where the person is likely to go next.
+    document.getElementById(SEARCH_ID)?.focus();
   };
 
   /** Whether the open panel is for `item` or something under it, so it goes when `item` does. */
@@ -303,7 +335,7 @@ export function ProjectsPage() {
           <div className="projects-list">
             <div className="list-toolbar">
               <Field
-                id="project-search"
+                id={SEARCH_ID}
                 label="Search projects"
                 type="search"
                 value={filters.text}
@@ -339,7 +371,7 @@ export function ProjectsPage() {
                       ? 'No projects yet.'
                       : 'No projects yet. An Admin adds the first one.'}
                 </p>
-                {filtered && projects.items.length > 0 && <Button onClick={clearFilters}>Clear filters</Button>}
+                {filtered && projects.items.length > 0 && <Button onClick={clearFiltersFromNoMatch}>Clear filters</Button>}
               </>
             )}
             {(shown.length > 0 || adding !== null) && (
@@ -365,11 +397,7 @@ export function ProjectsPage() {
                 onToggle={toggle}
                 adding={adding}
                 onStartAdd={startAdd}
-                onAdd={async (parentId, title) => {
-                  await create.mutateAsync({ parentId, title });
-                  // The parent may have been collapsed while the row was open; the new item must show.
-                  if (parentId) expand(parentId);
-                }}
+                onAdd={addItem}
                 onCancelAdd={cancelAdd}
               />
             )}

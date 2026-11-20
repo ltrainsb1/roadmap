@@ -310,6 +310,9 @@ test('opening the panel\'s address directly shows the item, and an unknown id sa
   await expect(panelOf(page, 'Beta')).toBeVisible();
   await expect(panelOf(page, 'Beta').getByText('Sub-project in Alpha', { exact: true })).toBeVisible();
   await expect(projectRow(page, 'Alpha')).toBeVisible();
+  // The open item's title in the list is marked as the current one.
+  await expect(page.getByRole('link', { name: 'Beta', exact: true })).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByRole('link', { name: 'Alpha', exact: true })).not.toHaveAttribute('aria-current', /.*/);
 
   await page.goto(projectUrl(id, 'nope'));
   await expect(page.getByText("This item no longer exists, or you don't have access to it.", { exact: true })).toBeVisible();

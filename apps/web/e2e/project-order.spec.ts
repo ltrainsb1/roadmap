@@ -67,6 +67,15 @@ test('FR-1.3: an Admin moves a sub-project up with the row menu, and the order s
   await page.getByRole('menuitem', { name: 'Move up' }).click();
 
   await expect.poll(() => titles(page)).toEqual(['Season', 'Closing', 'Opening']);
+  // The move is announced in the same words a keyboard drag uses.
+  await expect(page.getByRole('status').filter({ hasText: 'Moved Closing' })).toHaveText('Moved Closing to position 1 of 2.');
+  await page.getByRole('button', { name: 'Actions for Closing' }).click();
+  await page.getByRole('menuitem', { name: 'Move down' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Moved Closing' })).toHaveText('Moved Closing to position 2 of 2.');
+  await expect.poll(() => titles(page)).toEqual(['Season', 'Opening', 'Closing']);
+  await page.getByRole('button', { name: 'Actions for Closing' }).click();
+  await page.getByRole('menuitem', { name: 'Move up' }).click();
+  await expect.poll(() => titles(page)).toEqual(['Season', 'Closing', 'Opening']);
   await expect(projectRow(page, 'Closing').getByRole('cell', { name: '1', exact: true })).toBeVisible();
   await page.reload();
   await expect.poll(() => titles(page)).toEqual(['Season', 'Closing', 'Opening']);
@@ -78,6 +87,8 @@ test('FR-1.3: an Admin reorders with the keyboard on the drag handle', async ({ 
   await handle.focus();
   await page.keyboard.press('Space');
   await expect(page.getByText('Picked up One.', { exact: true })).toBeAttached();
+  // dnd-kit's instructions and live region sit outside the table, which may hold only table parts.
+  await expect(page.locator('table [aria-live], table [id^="DndDescribedBy"]')).toHaveCount(0);
   await pressUntilAnnounced(page, 'ArrowDown', 'Moved One to position 2 of 3.');
   await expectNoA11yViolations(page);
   await page.keyboard.press('Space');

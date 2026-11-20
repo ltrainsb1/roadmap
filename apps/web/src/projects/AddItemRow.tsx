@@ -75,7 +75,7 @@ export function AddItemRow({ depth, onAdd, onCancel }: AddItemRowProps) {
               Press Enter to save
             </p>
             {error && (
-              <p id={errorId} className="field-error">
+              <p id={errorId} className="field-error" role="alert">
                 <svg className="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
                   <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
                   <path d="M8 4.5v4M8 10.5v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

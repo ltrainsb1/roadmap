@@ -185,6 +185,27 @@ test('archiving shows "Archived {title}." and removes the item and its children 
   expect(stored.find((i) => i.title === 'Keeper')!.archived).toBe(false);
 });
 
+test('archiving an item another session deleted says it no longer exists, and the row goes', async ({ page, browser }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'late');
+  const id = await createRoadmap(page, 'Late plan');
+  const other = await inviteAndJoin(page, browser, testInfo, 'Late plan', 'quick', 'Admin');
+  const call = await apiAs(page);
+  const gone = await seedProject(call, id, 'Gone already');
+  await seedProject(call, id, 'Still here');
+  await page.goto(`/r/${id}/projects`);
+  await expect(projectRow(page, 'Gone already')).toBeVisible();
+
+  // A second session deletes it; this page has not refetched, so the row is still there.
+  await (await apiAs(other.page))('DELETE', `/api/roadmaps/${id}/projects/${gone}`);
+  await page.getByRole('button', { name: 'Actions for Gone already' }).click();
+  await page.getByRole('menuitem', { name: 'Archive' }).click();
+  await expect(page.getByRole('alert')).toHaveText('That item no longer exists. Reload and try again.');
+  await expect(projectRow(page, 'Gone already')).toHaveCount(0);
+  await expect(projectRow(page, 'Still here')).toBeVisible();
+  await other.context.close();
+});
+
 test('Review focus 2: deleting an item with two children names the count in the dialog, and Cancel keeps it', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await createSignedInUser(page, 'deleter');

@@ -298,7 +298,7 @@ test('the panel is a side panel at 1280 px and a full screen with "Back to proje
   await expect(page.getByRole('link', { name: 'Alpha', exact: true })).toBeFocused();
 });
 
-test('opening the panel\'s address directly shows the item, and an unknown id shows the roadmap\'s not-found message', async ({ page }) => {
+test('opening the panel\'s address directly shows the item, and an unknown id says the item no longer exists', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await createSignedInUser(page, 'direct');
   const id = await createRoadmap(page, 'Direct plan');
@@ -312,11 +312,11 @@ test('opening the panel\'s address directly shows the item, and an unknown id sh
   await expect(projectRow(page, 'Alpha')).toBeVisible();
 
   await page.goto(projectUrl(id, 'nope'));
-  await expect(page.getByText("This roadmap doesn't exist, or you don't have access to it.", { exact: true })).toBeVisible();
+  await expect(page.getByText("This item no longer exists, or you don't have access to it.", { exact: true })).toBeVisible();
   await expect(projectRow(page, 'Alpha')).toBeVisible();
   await page.getByRole('link', { name: 'Back to projects', exact: true }).click();
   await expect(page).toHaveURL(`/r/${id}/projects`);
-  await expect(page.getByText("This roadmap doesn't exist, or you don't have access to it.")).toHaveCount(0);
+  await expect(page.getByText("This item no longer exists, or you don't have access to it.")).toHaveCount(0);
 });
 
 test('focus moves into the panel and back to the row on Close and on Escape; the panel passes axe', async ({ page }) => {

@@ -2,10 +2,10 @@ import { activeFilterCount, can, filterProjects, type PriorityLabel, type Projec
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { errorCode, messageFor } from '../api/errors.ts';
+import { errorCode, itemActionMessage, messageFor } from '../api/errors.ts';
 import { useMe } from '../auth/useMe.ts';
 import { useMembers } from '../members/useMembers.ts';
-import { ROADMAP_NOT_FOUND, useRoadmap } from '../roadmaps/RoadmapLayout.tsx';
+import { useRoadmap } from '../roadmaps/RoadmapLayout.tsx';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
@@ -150,6 +150,17 @@ export function ProjectsPage() {
   }, [hasPanel]);
 
   /**
+   * The message for a failed row or panel action. The list is refetched, so a row someone else deleted, or one the
+   * person can no longer change, shows as it now is; a refused assignee also refetches the members.
+   */
+  const recoverFrom = async (err: unknown): Promise<string> => {
+    if (errorCode(err) === 'not_a_member') void members.refetch();
+    await projects.refetch();
+    return itemActionMessage(err);
+  };
+  const failAction = (err: unknown) => void recoverFrom(err).then(setActionError);
+
+  /**
    * Runs one of this browser's own saves for an item after the ones before it, from the item as the list last
    * saw it, and tells the open panel about it. `save` gives back nothing when there is nothing to change.
    */
@@ -163,9 +174,8 @@ export function ProjectsPage() {
         setActionError(undefined);
         setOwnChange((last) => ({ id: saved.id, version: saved.version, ...(status && { status: saved.status }), n: (last?.n ?? 0) + 1 }));
       } catch (err) {
-        setActionError(messageFor(err));
-        // Someone else changed it first: the list shows what they saved.
-        if (errorCode(err) === 'conflict') await projects.refetch();
+        // Awaited, so the next queued save starts from what the server now holds.
+        setActionError(await recoverFrom(err));
       }
     });
   };
@@ -192,7 +202,7 @@ export function ProjectsPage() {
   const reorderItems = (parentId: string | null, orderedIds: string[]) => {
     setNotice('');
     setActionError(undefined);
-    reorder.mutate({ parentId, orderedIds }, { onError: (err) => setActionError(messageFor(err)) });
+    reorder.mutate({ parentId, orderedIds }, { onError: failAction });
   };
 
   /** Whether the open panel is for `item` or something under it, so it goes when `item` does. */
@@ -212,7 +222,7 @@ export function ProjectsPage() {
           setNotice(`Archived ${item.title}.`);
           leavePanelOf(item);
         },
-        onError: (err) => setActionError(messageFor(err)),
+        onError: failAction,
       });
     });
 
@@ -220,7 +230,7 @@ export function ProjectsPage() {
     setActionError(undefined);
     unarchive.mutate(item.id, {
       onSuccess: () => setNotice(`Unarchived ${item.title}.`),
-      onError: (err) => setActionError(messageFor(err)),
+      onError: failAction,
     });
   };
 
@@ -238,7 +248,7 @@ export function ProjectsPage() {
         setNotice('');
         leavePanelOf(item);
       },
-      onError: (err) => setDeleteError(messageFor(err)),
+      onError: (err) => void recoverFrom(err).then(setDeleteError),
     });
   };
   const underDeleting = deleting ? projects.items.filter((i) => i.path.includes(deleting.id)).length : 0;
@@ -384,7 +394,7 @@ export function ProjectsPage() {
           )}
           {hasPanel && !selected && (
             <section className="project-panel" aria-label="Details">
-              <Alert>{ROADMAP_NOT_FOUND}</Alert>
+              <Alert>This item no longer exists, or you don't have access to it.</Alert>
               <Link to={listUrl} className="text-link">
                 Back to projects
               </Link>

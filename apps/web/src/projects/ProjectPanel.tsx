@@ -12,7 +12,7 @@ import {
 } from '@roadmap/shared';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { errorCode, errorMessage, GENERIC_ERROR, messageFor } from '../api/errors.ts';
+import { errorCode, errorMessage, GENERIC_ERROR, ITEM_READ_ONLY, messageFor } from '../api/errors.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
@@ -244,7 +244,7 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
         </ul>
       )}
 
-      {!editable && <p>Only people assigned to this item, Owners and Admins can change it.</p>}
+      {!editable && <p>{ITEM_READ_ONLY}</p>}
 
       {formError && (
         <Alert>

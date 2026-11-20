@@ -80,3 +80,14 @@ export const errorCode = (err: unknown): string => (err instanceof ApiError ? er
 
 /** The message for whatever a screen caught. */
 export const messageFor = (err: unknown, ctx?: ErrorContext): string => errorMessage(errorCode(err), ctx);
+
+/** Read-only copy for an item the person may not change, also shown when the server refuses a change with `forbidden`. */
+export const ITEM_READ_ONLY = 'Only people assigned to this item, Owners and Admins can change it.';
+
+/** The message for a failed action on a project item: a gone item and a refused one get sentences about the item. */
+export const itemActionMessage = (err: unknown): string => {
+  const code = errorCode(err);
+  if (code === 'not_found') return errorMessage('unknown_item');
+  if (code === 'forbidden') return ITEM_READ_ONLY;
+  return messageFor(err);
+};

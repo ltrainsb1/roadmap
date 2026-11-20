@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { ApiError } from './client.ts';
-import { errorMessage, GENERIC_ERROR, messageFor } from './errors.ts';
+import { errorMessage, GENERIC_ERROR, itemActionMessage, messageFor } from './errors.ts';
 
 describe('error messages', () => {
   test.each([
@@ -39,5 +39,21 @@ describe('error messages', () => {
   test('an error that is not an ApiError gets the generic message', () => {
     expect(messageFor(new TypeError('network'))).toBe(GENERIC_ERROR);
     expect(messageFor(new ApiError(401, 'invalid_credentials'))).toBe('Email or password is incorrect.');
+  });
+});
+
+describe('messages for an action on an item', () => {
+  test('an item that is gone says so, as an unknown item does', () => {
+    expect(itemActionMessage(new ApiError(404, 'not_found'))).toBe('That item no longer exists. Reload and try again.');
+  });
+
+  test('a refused action names who may change the item', () => {
+    expect(itemActionMessage(new ApiError(403, 'forbidden'))).toBe('Only people assigned to this item, Owners and Admins can change it.');
+  });
+
+  test('every other error keeps its own message', () => {
+    expect(itemActionMessage(new ApiError(409, 'conflict'))).toBe('Someone else changed this at the same time. Reload and try again.');
+    expect(itemActionMessage(new ApiError(422, 'not_a_member'))).toBe("That person isn't a member of this roadmap.");
+    expect(itemActionMessage(new TypeError('network'))).toBe(GENERIC_ERROR);
   });
 });

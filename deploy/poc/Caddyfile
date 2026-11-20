@@ -1,0 +1,39 @@
+{
+	order rate_limit before basicauth
+}
+
+{$DOMAIN} {
+	header {
+		# The same policy the API sends (apps/api/src/app.ts).
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	handle /api/* {
+		rate_limit {
+			zone api {
+				key {remote_host}
+				events 100
+				window 1m
+			}
+			zone auth {
+				match {
+					path /api/auth/*
+				}
+				key {remote_host}
+				events 10
+				window 1m
+			}
+		}
+		reverse_proxy api:3000
+	}
+
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}

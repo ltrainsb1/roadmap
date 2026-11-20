@@ -1,0 +1,38 @@
+{
+  "name": "@roadmap/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --experimental-strip-types src/server.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "bootstrap": "node --experimental-strip-types src/cli/bootstrap.ts",
+    "build": "esbuild src/server.ts --bundle --alias:@roadmap/shared=../../packages/shared/src/index.ts --platform=node --format=esm --target=node24 --packages=external --outfile=dist/server.js && pnpm build:cli",
+    "build:cli": "esbuild src/cli/bootstrap.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outfile=dist/cli/bootstrap.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.1172.0",
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/rate-limit": "^11.2.2",
+    "@fastify/swagger": "^9.9.5",
+    "@node-rs/argon2": "^2.2.2",
+    "@roadmap/shared": "workspace:*",
+    "@simplewebauthn/server": "^14.1.0",
+    "fastify": "^5.12.8",
+    "fastify-plugin": "^6.0.1",
+    "fastify-type-provider-zod": "^7.0.0",
+    "mongodb": "^7.9.0",
+    "otplib": "^12.0.1",
+    "uuid": "^14.0.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@testcontainers/mongodb": "^12.2.1",
+    "esbuild": "^0.28.2",
+    "mongodb-memory-server": "^11.3.0",
+    "testcontainers": "^12.2.1"
+  }
+}

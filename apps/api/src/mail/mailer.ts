@@ -1,0 +1,74 @@
+import { appendFile } from 'node:fs/promises';
+import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
+import type { Config } from '../config.ts';
+
+export interface MailMessage {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}
+
+export interface Mailer {
+  send(m: MailMessage): Promise<void>;
+}
+
+/** API tests: keeps what was sent. */
+export class MemoryMailer implements Mailer {
+  readonly sent: MailMessage[] = [];
+  send(m: MailMessage): Promise<void> {
+    this.sent.push(m);
+    return Promise.resolve();
+  }
+}
+
+/** End-to-end runs: one JSON object per line, so a test can read the mail a flow produced. */
+export class FileMailer implements Mailer {
+  readonly #path: string;
+  constructor(path: string) {
+    this.#path = path;
+  }
+  async send(m: MailMessage): Promise<void> {
+    await appendFile(this.#path, `${JSON.stringify(m)}\n`, 'utf8');
+  }
+}
+
+/** The part of the SESv2 client we use, so tests can stand in for it. */
+export interface SesLikeClient {
+  send(command: SendEmailCommand): Promise<unknown>;
+}
+
+export class SesMailer implements Mailer {
+  readonly #client: SesLikeClient;
+  readonly #from: string;
+  constructor(client: SesLikeClient, from: string) {
+    this.#client = client;
+    this.#from = from;
+  }
+  async send(m: MailMessage): Promise<void> {
+    await this.#client.send(
+      new SendEmailCommand({
+        FromEmailAddress: this.#from,
+        Destination: { ToAddresses: [m.to] },
+        Content: {
+          Simple: {
+            Subject: { Data: m.subject, Charset: 'UTF-8' },
+            Body: { Text: { Data: m.text, Charset: 'UTF-8' }, Html: { Data: m.html, Charset: 'UTF-8' } },
+          },
+        },
+      }),
+    );
+  }
+}
+
+export function createMailer(config: Pick<Config, 'mailer' | 'mailFrom' | 'mailOutboxFile' | 'awsRegion'>): Mailer {
+  switch (config.mailer) {
+    case 'memory':
+      return new MemoryMailer();
+    case 'file':
+      if (!config.mailOutboxFile) throw new Error('MAILER=file needs MAIL_OUTBOX_FILE');
+      return new FileMailer(config.mailOutboxFile);
+    case 'ses':
+      return new SesMailer(new SESv2Client({ region: config.awsRegion }), config.mailFrom);
+  }
+}

@@ -1,0 +1,100 @@
+# Run from the repository root:
+#   docker compose -f deploy/poc/docker-compose.yml up -d --build
+# Needs deploy/poc/.env (copy .env.example and replace the placeholders).
+name: roadmap-poc
+
+services:
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    # Auth plus a replica set needs a key file. One node has no peers to share it with, so a fresh
+    # random key on every start is enough (it lives on tmpfs).
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        head -c 512 /dev/urandom | base64 -w0 > /keys/replica.key
+        chown mongodb:mongodb /keys/replica.key
+        chmod 400 /keys/replica.key
+        exec docker-entrypoint.sh "$$@"
+      - --
+    command: ["mongod", "--replSet", "rs0", "--keyFile", "/keys/replica.key", "--bind_ip_all"]
+    tmpfs:
+      - /keys
+    volumes:
+      - ${MONGO_DATA:-/srv/mongo}:/data/db
+    healthcheck:
+      # Runs rs.initiate once (the first time it finds no primary); healthy once this node is primary.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet -u "$$MONGO_INITDB_ROOT_USERNAME" -p "$$MONGO_INITDB_ROOT_PASSWORD"
+          --authenticationDatabase admin --eval
+          "if (db.hello().isWritablePrimary) quit(0);
+          try { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo:27017'}]}) } catch (e) {}
+          quit(1)"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    image: roadmap-api:poc
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      mongo:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # Healthy once the API has connected to MongoDB and is listening, not merely started. The image has
+      # no curl or wget, so node makes the request.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  caddy:
+    build:
+      context: ../..
+      dockerfile: deploy/poc/caddy.Dockerfile
+    image: roadmap-caddy:poc
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy_data:
+  caddy_config:

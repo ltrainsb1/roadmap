@@ -1,0 +1,228 @@
+import { randomUUID } from 'node:crypto';
+import type { ProjectStatus, Role } from '@roadmap/shared';
+import { hash } from '@node-rs/argon2';
+import type { FastifyInstance } from 'fastify';
+import { v7 as uuidv7 } from 'uuid';
+import { inject } from 'vitest';
+import { authenticator } from 'otplib';
+import type { PasskeyVerifiers } from '../src/auth/passkeys.ts';
+import { encryptSecret } from '../src/auth/crypto.ts';
+import { generateRecoveryCodes } from '../src/auth/recovery.ts';
+import { buildApp } from '../src/app.ts';
+import { loadConfig, type Config } from '../src/config.ts';
+import { connectDb, type Db } from '../src/db/client.ts';
+import { ensureIndexes } from '../src/db/indexes.ts';
+import { scoped } from '../src/db/scoped.ts';
+import type { MembershipDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
+import { MemoryMailer } from '../src/mail/mailer.ts';
+import { unscoped } from '../src/db/unscoped.ts';
+
+export interface TestMongo {
+  uri: string;
+}
+
+/** The MongoDB that global-setup started for this run (container or in-process); shared by every test file. */
+export function startMongo(): TestMongo {
+  return { uri: inject('mongoUri') };
+}
+
+export interface Seeder {
+  tenant(name?: string): Promise<TenantDoc>;
+  user(
+    tenantId: string,
+    o?: { email?: string; password?: string; totp?: boolean },
+  ): Promise<UserDoc & { totpSecret?: string; plainRecoveryCodes?: string[] }>;
+  /** Creates the roadmap and the owner's membership. */
+  roadmap(tenantId: string, ownerId: string, name?: string): Promise<RoadmapDoc>;
+  member(
+    tenantId: string,
+    roadmapId: string,
+    userId: string,
+    role: Role,
+  ): Promise<MembershipDoc>;
+  /** Goes through the scoped collection; computes depth, path and rank the way the create route does. */
+  project(
+    tenantId: string,
+    roadmapId: string,
+    o?: {
+      parentId?: string;
+      title?: string;
+      assigneeIds?: string[];
+      status?: ProjectStatus;
+      startDate?: string;
+      endDate?: string;
+      archived?: boolean;
+    },
+  ): Promise<ProjectDoc>;
+}
+
+export interface TestApp {
+  app: FastifyInstance;
+  db: Db;
+  config: Config;
+  /** What the app emailed. */
+  mail: MemoryMailer;
+  seed: Seeder;
+  close(): Promise<void>;
+}
+
+export interface TestAppOptions {
+  /** Registers extra routes before the app is ready. */
+  routes?: (app: FastifyInstance) => void;
+  /** Clock for the session store. */
+  now?: () => Date;
+  /** Replaces global fetch for the breached-password check. */
+  fetch?: typeof fetch;
+  /** Replaces the WebAuthn verifiers (real ceremonies need a browser). */
+  webauthn?: PasskeyVerifiers;
+  /** Environment overrides, e.g. `{ HIBP_ENABLED: 'true' }`. */
+  env?: Record<string, string>;
+  /** Replaces the per-roadmap item limit. */
+  maxProjectItems?: number;
+}
+
+// Argon2id (the default algorithm) at the minimum cost the library accepts.
+const SEED_HASH_PARAMS = { memoryCost: 8, timeCost: 1, parallelism: 1 } as const;
+
+export const TEST_TOTP_KEY = Buffer.alloc(32, 7);
+
+export const TEST_ENV = {
+  NODE_ENV: 'test',
+  MONGO_URI: 'mongodb://unused',
+  APP_ORIGIN: 'http://localhost:5173',
+  TOTP_ENC_KEY: TEST_TOTP_KEY.toString('base64'),
+  MAILER: 'memory',
+  HIBP_ENABLED: 'false',
+};
+
+export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
+  const mongo = startMongo();
+  const dbName = `test_${randomUUID().replaceAll('-', '')}`;
+  const config: Config = loadConfig({ ...TEST_ENV, ...opts.env, MONGO_URI: mongo.uri, MONGO_DB: dbName });
+  const { client, db } = await connectDb(mongo.uri, dbName);
+  await ensureIndexes(db);
+  const mail = new MemoryMailer();
+  const app = await buildApp({
+    config,
+    db,
+    mailer: mail,
+    ...(opts.now ? { now: opts.now } : {}),
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
+    ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
+    ...(opts.maxProjectItems !== undefined ? { maxProjectItems: opts.maxProjectItems } : {}),
+  });
+  opts.routes?.(app);
+
+  const un = unscoped(db);
+  const seed: Seeder = {
+    async tenant(name = 'Acme') {
+      const t: TenantDoc = { _id: uuidv7(), name, createdAt: new Date() };
+      await un.insertTenant(t);
+      return t;
+    },
+    async user(tenantId, o = {}) {
+      const id = uuidv7();
+      const totpSecret = o.totp ? authenticator.generateSecret(20) : undefined;
+      const recovery = o.totp ? generateRecoveryCodes() : undefined;
+      const doc = await scoped(db, tenantId).collection('users').insertOne({
+        _id: id,
+        email: o.email ?? `user-${id}@example.com`,
+        name: 'Test User',
+        timezone: 'UTC',
+        // Real argon2id, but cheap: production cost would make every seeded user take ~50 ms.
+        passwordHash: o.password === undefined ? null : await hash(o.password, SEED_HASH_PARAMS),
+        failedLogins: 0,
+        lockedUntil: null,
+        totp: totpSecret ? { secretEnc: encryptSecret(totpSecret, TEST_TOTP_KEY), lastStep: 0 } : null,
+        pendingTotpSecretEnc: null,
+        recoveryCodes: (recovery?.hashes ?? []).map((hash) => ({ hash, usedAt: null })),
+        createdAt: new Date(),
+      });
+      return {
+        ...doc,
+        ...(totpSecret ? { totpSecret } : {}),
+        ...(recovery ? { plainRecoveryCodes: recovery.codes } : {}),
+      };
+    },
+    async roadmap(tenantId, ownerId, name = 'Roadmap') {
+      const s = scoped(db, tenantId);
+      const r = await s.collection('roadmaps').insertOne({
+        _id: uuidv7(),
+        name,
+        description: '',
+        ownerId,
+        archived: false,
+        createdAt: new Date(),
+      });
+      await s
+        .collection('memberships')
+        .insertOne({ _id: uuidv7(), roadmapId: r._id, userId: ownerId, role: 'owner', createdAt: new Date() });
+      return r;
+    },
+    member: (tenantId, roadmapId, userId, role) =>
+      scoped(db, tenantId)
+        .collection('memberships')
+        .insertOne({ _id: uuidv7(), roadmapId, userId, role, createdAt: new Date() }),
+    async project(tenantId, roadmapId, o = {}) {
+      const s = scoped(db, tenantId);
+      const parent = o.parentId ? await s.collection('projects').findOne({ _id: o.parentId, roadmapId }) : null;
+      if (o.parentId && !parent) throw new Error(`seed.project: no parent ${o.parentId}`);
+      const siblings = await s.collection('projects').find({ roadmapId, parentId: parent?._id ?? null });
+      const now = new Date();
+      return s.collection('projects').insertOne({
+        _id: uuidv7(),
+        roadmapId,
+        parentId: parent?._id ?? null,
+        depth: ((parent?.depth ?? 0) + 1) as ProjectDoc['depth'],
+        path: parent ? [...parent.path, parent._id] : [],
+        title: o.title ?? 'Item',
+        description: '',
+        status: o.status ?? 'not_started',
+        startDate: o.startDate ?? null,
+        endDate: o.endDate ?? null,
+        milestones: [],
+        tags: [],
+        links: [],
+        blockedBy: [],
+        assigneeIds: o.assigneeIds ?? [],
+        rank: siblings.reduce((max, x) => Math.max(max, x.rank + 1), 0),
+        priorityLabel: null,
+        archived: o.archived ?? false,
+        version: 1,
+        createdBy: 'seed',
+        createdAt: now,
+        updatedAt: now,
+      });
+    },
+  };
+
+  return {
+    app,
+    db,
+    config,
+    mail,
+    seed,
+    async close() {
+      await app.close();
+      await db.dropDatabase();
+      await client.close();
+    },
+  };
+}
+
+/** Creates a full session straight through the session store; returns headers' values for requests. */
+export async function signInAs(
+  app: FastifyInstance,
+  db: Db,
+  userId: string,
+): Promise<{ cookie: string; csrf: string }> {
+  const user = await db.collection<UserDoc>('users').findOne({ _id: userId });
+  if (!user) throw new Error(`signInAs: no user ${userId}`);
+  const { token, session } = await app.sessions.create(
+    scoped(db, user.tenantId),
+    userId,
+    'full',
+    { ip: '127.0.0.1', userAgent: 'vitest' },
+  );
+  return { cookie: `__Host-sid=${token}`, csrf: session.csrfToken };
+}

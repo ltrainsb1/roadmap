@@ -12,7 +12,7 @@ import {
 } from '@roadmap/shared';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { errorCode, errorMessage, GENERIC_ERROR, ITEM_READ_ONLY, messageFor } from '../api/errors.ts';
+import { errorCode, errorMessage, GENERIC_ERROR, ITEM_READ_ONLY, itemActionMessage, messageFor } from '../api/errors.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
@@ -181,8 +181,11 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
       setSaved(true);
     } catch (err) {
       const code = errorCode(err);
-      if (code === 'date_order') fail({ endDate: messageFor(err) });
-      else fail({}, { code, message: messageFor(err) });
+      if (code === 'date_order') return fail({ endDate: messageFor(err) });
+      fail({}, { code, message: itemActionMessage(err) });
+      // Gone, or no longer theirs to change: the refetched list replaces a gone item's panel with the missing-item
+      // message and turns a forbidden one read-only. The form keeps what was typed, and the alert says why.
+      if (code === 'not_found' || code === 'forbidden') void onReload().catch(() => undefined);
     }
   };
 
@@ -244,7 +247,8 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
         </ul>
       )}
 
-      {!editable && <p>{ITEM_READ_ONLY}</p>}
+      {/* After a refused Save the alert already says this. */}
+      {!editable && formError?.code !== 'forbidden' && <p>{ITEM_READ_ONLY}</p>}
 
       {formError && (
         <Alert>

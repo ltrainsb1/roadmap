@@ -322,6 +322,54 @@ test('opening the panel\'s address directly shows the item, and an unknown id sa
   await expect(page.getByText("This item no longer exists, or you don't have access to it.")).toHaveCount(0);
 });
 
+test('saving an item that another session deleted explains it and shows the missing-item panel', async ({ page, browser }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'vanish');
+  const id = await createRoadmap(page, 'Vanish plan');
+  const other = await inviteAndJoin(page, browser, testInfo, 'Vanish plan', 'remover', 'Admin');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Doomed draft');
+  await seedProject(call, id, 'Survivor');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Doomed draft');
+  await panel.getByLabel('Description', { exact: true }).fill('Typed before it went');
+
+  // A second session deletes it; this page has not refetched.
+  await (await apiAs(other.page))('DELETE', `/api/roadmaps/${id}/projects/${itemId}`);
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByText("This item no longer exists, or you don't have access to it.", { exact: true })).toBeVisible();
+  await expect(projectRow(page, 'Doomed draft')).toHaveCount(0);
+  await expect(projectRow(page, 'Survivor')).toBeVisible();
+  await expect(page.getByText('Something went wrong. Try again.')).toHaveCount(0);
+  await other.context.close();
+});
+
+test('saving after being unassigned explains it', async ({ page, browser }, testInfo) => {
+  await createSignedInUser(page, 'unassigner');
+  const id = await createRoadmap(page, 'Unassign plan');
+  const guest = await inviteAndJoin(page, browser, testInfo, 'Unassign plan', 'dropped', 'Contributor');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Was mine');
+  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.email)!;
+  await call('PUT', `/api/roadmaps/${id}/projects/${itemId}/assignees`, { userIds: [helper.userId] });
+
+  const p = guest.page;
+  await p.setViewportSize({ width: 1280, height: 800 });
+  await p.goto(projectUrl(id, itemId));
+  const panel = panelOf(p, 'Was mine');
+  await panel.getByLabel('Description', { exact: true }).fill('My unsaved notes');
+
+  // An Admin unassigns them; their page has not refetched.
+  await call('PUT', `/api/roadmaps/${id}/projects/${itemId}/assignees`, { userIds: [] });
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('alert')).toHaveText('Only people assigned to this item, Owners and Admins can change it.');
+  // The form turns read-only once the list is refetched, and what they typed is still there to copy.
+  await expect(panel.getByLabel('Description', { exact: true })).not.toBeEditable();
+  await expect(panel.getByLabel('Description', { exact: true })).toHaveValue('My unsaved notes');
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+  await guest.context.close();
+});
+
 test('focus moves into the panel and back to the row on Close and on Escape; the panel passes axe', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await createSignedInUser(page, 'focus');

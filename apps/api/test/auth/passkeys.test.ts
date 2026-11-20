@@ -659,14 +659,19 @@ describe('passkey as second factor (FR-1)', () => {
     const res = await verify(pending, credentialId);
     expect(res.statusCode).toBe(401);
     expect(verifyAuth).not.toHaveBeenCalled();
+    // A prompt left open too long is not a wrong guess.
+    expect((await userDoc(u._id)).failedLogins).toBe(0);
   });
 
-  test('verify without asking for options first is a 401', async () => {
+  test('verify without asking for options first is a 401 and does not count toward the lock', async () => {
     const u = await newUser({ totp: true });
     const { credentialId } = await givePasskey(u._id);
     authOk(credentialId);
     const pending = await pendingLogin(u.email);
-    expect((await verify(pending, credentialId)).statusCode).toBe(401);
+    for (let i = 0; i < 6; i++) expect((await verify(pending, credentialId)).statusCode).toBe(401);
+    const after = await userDoc(u._id);
+    expect(after.failedLogins).toBe(0);
+    expect(after.lockedUntil).toBeNull();
   });
 
   test('a locked user cannot finish with a passkey', async () => {

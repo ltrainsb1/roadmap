@@ -25,6 +25,7 @@ import { requireStepUp, stepUpCodeOf } from './step-up.ts';
 import { claimTotpStep, generateTotpSecret, otpauthUrl, verifyTotp } from './totp.ts';
 import { completeSignIn } from './complete-sign-in.ts';
 import { clearSessionCookie, setSessionCookie } from './sessions.ts';
+import { loadUser } from './load-user.ts';
 
 export interface AuthRouteDeps {
   db: Db;
@@ -106,12 +107,6 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     },
   );
 
-  const loadUser = async (actor: NonNullable<FastifyRequest['actor']>): Promise<UserDoc> => {
-    const user = await actor.db.collection('users').findOne({ _id: actor.userId });
-    if (!user) throw new HttpError(401, 'unauthenticated');
-    return user;
-  };
-
   /** Second-factor failure: counts toward the lock, is audited, and always answers the same 401. */
   const failSecondFactor = async (req: FastifyRequest, now: Date): Promise<never> => {
     const actor = req.actor!;
@@ -145,7 +140,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     { config: { auth: { level: 'pending', states: ['pending_enroll', 'full'] } } },
     async (req) => {
       const actor = req.actor!;
-      const user = await loadUser(actor);
+      const user = await loadUser(actor.db, actor.userId);
       // Replacing an existing factor from a full session must prove the old one, or a stolen cookie could take it over.
       const state = await enrollingState(actor, user);
       if (state === 'full' && user.totp) await requireCurrentFactor(user, req.body, actor.db);
@@ -165,7 +160,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     },
     async (req, reply) => {
       const actor = req.actor!;
-      const user = await loadUser(actor);
+      const user = await loadUser(actor.db, actor.userId);
       const firstSignIn = (await enrollingState(actor, user)) === 'pending_enroll';
       const pending = user.pendingTotpSecretEnc;
       if (!pending) throw new HttpError(409, 'enroll_not_started');
@@ -213,7 +208,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       const actor = req.actor!;
       const now = deps.now();
       if (!(await assertNotLocked(actor.db, actor.userId, now))) throw invalidCode();
-      const user = await loadUser(actor);
+      const user = await loadUser(actor.db, actor.userId);
       if (!user.totp) throw invalidCode();
       const checked = verifyTotp(decryptSecret(user.totp.secretEnc, deps.config.totpEncKey), req.body.code, user.totp.lastStep, now);
       const claimed = checked.ok && (await claimTotpStep(actor.db, user._id, checked.step));
@@ -232,7 +227,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       if (!(await assertNotLocked(actor.db, actor.userId, now))) throw invalidCode();
       if (!(await consumeRecoveryCode(actor.db, actor.userId, req.body.code, now))) return failSecondFactor(req, now);
       const csrfToken = await completeSignIn(app.sessions, req, reply);
-      const user = await loadUser(actor);
+      const user = await loadUser(actor.db, actor.userId);
       return { csrfToken, remainingRecoveryCodes: user.recoveryCodes.filter((c) => c.usedAt === null).length };
     },
   );
@@ -242,7 +237,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     { config: { auth: { level: 'full' } } },
     async (req) => {
       const actor = req.actor!;
-      const user = await loadUser(actor);
+      const user = await loadUser(actor.db, actor.userId);
       await requireCurrentFactor(user, req.body, actor.db);
       const { codes, hashes } = generateRecoveryCodes();
       await actor.db

@@ -1,17 +1,15 @@
 import { priorityLabelRequestSchema, projectSchema, reorderRequestSchema } from '@roadmap/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { z } from 'zod';
 import { createAuditLog } from '../audit/audit.ts';
 import { HttpError } from '../errors.ts';
 import { loadProject, toProjectDto } from './access.ts';
+import { projectParams, roadmapParams } from '../params.ts';
 
 export interface PriorityRouteDeps {
   now: () => Date;
 }
 
-const roadmapParams = z.object({ roadmapId: z.string().min(1).max(100) });
-const projectParams = roadmapParams.extend({ projectId: z.string().min(1).max(100) });
 
 export function registerPriorityRoutes(app: FastifyInstance, deps: PriorityRouteDeps): void {
   const r = app.withTypeProvider<ZodTypeProvider>();

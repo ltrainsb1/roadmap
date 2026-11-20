@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { authenticator } from 'otplib';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { scoped } from '../../src/db/scoped.ts';
 import { hashToken } from '../../src/auth/tokens.ts';
 import { unscoped } from '../../src/db/unscoped.ts';
@@ -349,6 +349,30 @@ describe('accepting (FR-1.1)', () => {
     expect([a.statusCode, b.statusCode].sort()).toEqual([200, 410]);
     const user = (await unscoped(t.db).findUserByEmail('race@example.com'))!;
     expect(await s.collection('memberships').countDocuments({ roadmapId: roadmap._id, userId: user._id })).toBe(1);
+  });
+
+  test('two invites for one address sent at the same moment leave exactly one open link', async () => {
+    const { roadmap, sess } = await setup();
+    const payload = { email: 'twice@example.com', role: 'contributor' };
+    const results = await Promise.all([invite(roadmap._id, sess, payload), invite(roadmap._id, sess, payload), invite(roadmap._id, sess, payload)]);
+    expect(results.map((r) => r.statusCode)).toEqual([201, 201, 201]);
+    const all = await s.collection('invites').find({ roadmapId: roadmap._id, email: 'twice@example.com' });
+    expect(all).toHaveLength(3);
+    expect(all.filter((i) => i.revokedAt === null)).toHaveLength(1);
+  }, 30_000);
+
+  test('a failure after the account and membership are stored does not reopen the link', async () => {
+    const { roadmap, sess } = await setup();
+    const { token, id } = await invited(roadmap._id, sess, 'granted@example.com');
+    const create = vi.spyOn(t.app.sessions, 'create').mockRejectedValueOnce(new Error('session store down'));
+    const res = await accept(token, null, { name: 'Granted', password: PASSWORD });
+    create.mockRestore();
+    expect(res.statusCode).toBe(500);
+    const user = (await unscoped(t.db).findUserByEmail('granted@example.com'))!;
+    expect(await s.collection('memberships').countDocuments({ roadmapId: roadmap._id, userId: user._id })).toBe(1);
+    // The link did its work, so it stays used.
+    expect((await stored(id))!.acceptedAt).not.toBeNull();
+    expect((await info(token)).statusCode).toBe(410);
   });
 
   test('Review focus 2: a user who became a member after the invite cannot accept it: 409 already_member', async () => {

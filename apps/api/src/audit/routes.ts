@@ -1,11 +1,15 @@
 import { auditPageSchema, auditQuerySchema, type AuditPage } from '@roadmap/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { z } from 'zod';
 import { HttpError } from '../errors.ts';
 import { createAuditLog } from './audit.ts';
+import { roadmapParams } from '../params.ts';
 
-const roadmapParams = z.object({ roadmapId: z.string().min(1).max(100) });
+
+const DAY_MS = 24 * 60 * 60_000;
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+/** The last instant `to` covers: a date with no time means that whole day (UTC), not its first millisecond. */
+const endOf = (to: string): Date => (DATE_ONLY.test(to) ? new Date(new Date(to).getTime() + DAY_MS - 1) : new Date(to));
 
 export function registerAuditRoutes(app: FastifyInstance): void {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -26,7 +30,7 @@ export function registerAuditRoutes(app: FastifyInstance): void {
           roadmapId: req.params.roadmapId,
           ...rest,
           ...(from !== undefined && { from: new Date(from) }),
-          ...(to !== undefined && { to: new Date(to) }),
+          ...(to !== undefined && { to: endOf(to) }),
         });
       } catch (err) {
         if (err instanceof Error && err.message === 'invalid_cursor') throw new HttpError(400, 'invalid_cursor');

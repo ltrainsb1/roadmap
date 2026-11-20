@@ -14,6 +14,7 @@ import { LIMITS } from '@roadmap/shared';
 import type { Config } from './config.ts';
 import type { Db } from './db/client.ts';
 import { registerErrorHandling } from './errors.ts';
+import { serializeRequest } from './logging.ts';
 import { registerPasskeyRoutes } from './auth/passkey-routes.ts';
 import type { PasskeyVerifiers } from './auth/passkeys.ts';
 import { registerResetRoutes } from './auth/reset-routes.ts';
@@ -54,7 +55,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // It trusts whatever peer is directly connected, whoever that is. That is safe only because the API port is
   // not published: Caddy, on the Compose network, is the only thing that can connect.
   const trustOneHop = (_address: string, hop: number) => hop < 1;
-  const app = Fastify({ logger: production, trustProxy: production ? trustOneHop : false });
+  const app = Fastify({
+    logger: production ? { serializers: { req: serializeRequest } } : false,
+    trustProxy: production ? trustOneHop : false,
+  });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   registerErrorHandling(app);

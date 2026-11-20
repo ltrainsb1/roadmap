@@ -143,7 +143,15 @@ describe('delete', () => {
     await w.act('O', 'delete', c.top._id);
     const after = await w.stored(blocked._id);
     expect(after!.blockedBy).toEqual([keep._id]);
-    expect(after!.version).toBe(1); // the pull does not bump version
+    expect(after!.version).toBe(2); // the pull bumps version, so a form opened before the delete conflicts
+    const stale = await t.app.inject({
+      method: 'PATCH',
+      url: `/api/roadmaps/${w.roadmap._id}/projects/${blocked._id}`,
+      headers: { cookie: w.sess.O.cookie, 'x-csrf-token': w.sess.O.csrf },
+      payload: { version: 1, title: 'Renamed', blockedBy: [c.sub._id, keep._id, c.top._id] },
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ error: 'conflict' });
     expect((await w.stored(keep._id))!.blockedBy).toEqual([]);
     expect((await w.roadmapDoc())!.dependencyRevision).toBe(revision + 1);
 

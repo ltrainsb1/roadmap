@@ -7,6 +7,7 @@ import { connectDb, type Db } from '../db/client.ts';
 import { ensureIndexes } from '../db/indexes.ts';
 import { scoped } from '../db/scoped.ts';
 import { unscoped } from '../db/unscoped.ts';
+import { isDuplicateKey } from '../db/errors.ts';
 
 // This file and what it imports must not pull in @roadmap/shared: the built output runs where that
 // workspace package is TypeScript source that Node will not load from node_modules.
@@ -32,7 +33,6 @@ const inputSchema = z.object({
   name: z.string().trim().min(1).max(100),
 });
 
-const isDuplicateKey = (err: unknown) => (err as { code?: number } | null)?.code === 11000;
 
 /**
  * Creates a tenant and its first user, who has no password yet, and returns a 24 hour link that sets it.

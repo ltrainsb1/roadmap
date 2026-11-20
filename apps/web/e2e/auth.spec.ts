@@ -94,6 +94,26 @@ test('Auth: sign in with a recovery code', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
 });
 
+test('Auth: opening the app with a half-finished sign-in goes back to sign in, and finishing it works', async ({ page }) => {
+  const { email, recoveryCodes } = await createEnrolledUser(page, 'halfway');
+  await signIn(page, email);
+  await expect(page).toHaveURL(/\/login\/mfa/);
+  // The password step passed and the second step did not: the app is not open to this session.
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/login\?next=%2F$/);
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible();
+  // Without a reload in between, so the refusal the app cached must not bounce the finished sign-in.
+  await field(page, 'Email').fill(email);
+  await field(page, 'Password').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/login\/mfa/);
+  await page.getByRole('button', { name: 'Use a recovery code' }).click();
+  await field(page, 'Recovery code').fill(recoveryCodes[0]!);
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
+});
+
 test('Auth: forgot password → email link → reset → sign in', async ({ page }) => {
   const { email, secret } = await createEnrolledUser(page, 'forgot');
   await page.goto('/login');

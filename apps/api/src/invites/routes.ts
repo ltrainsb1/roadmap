@@ -23,6 +23,8 @@ import { HttpError } from '../errors.ts';
 import type { Mailer } from '../mail/mailer.ts';
 import { inviteEmail } from '../mail/templates.ts';
 import { csrfMatches } from '../policy/hook.ts';
+import { isDuplicateKey } from '../db/errors.ts';
+import { roadmapParams } from '../params.ts';
 
 export interface InviteRouteDeps {
   db: Db;
@@ -35,10 +37,8 @@ export interface InviteRouteDeps {
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60_000;
 
 const tokenParams = z.object({ token: z.string().min(1).max(200) });
-const roadmapParams = z.object({ roadmapId: z.string().min(1).max(100) });
 // Unknown, expired, revoked and used links all look the same.
 const inviteInvalid = () => new HttpError(410, 'invite_invalid');
-const isDuplicateKey = (err: unknown) => (err as { code?: number } | null)?.code === 11000;
 
 const isOpen = (i: InviteDoc, now: Date): boolean => i.acceptedAt === null && i.revokedAt === null && i.expiresAt > now;
 
@@ -74,6 +74,11 @@ export function registerInviteRoutes(app: FastifyInstance, deps: InviteRouteDeps
       const now = deps.now();
       const id = uuidv7();
       await actor.db.withTransaction(async (s) => {
+        // Two invites for one address at the same moment would each see no open link and both stay open. Every
+        // invite writes this one document, so MongoDB reports a write conflict to the second transaction; it
+        // retries and revokes the first one's link. Nothing matched: the roadmap was deleted meanwhile.
+        const { matched } = await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { membershipRevision: 1 } });
+        if (matched === 0) throw new HttpError(404, 'not_found');
         // One open link per person and roadmap: the earlier one stops working.
         const open = await s.collection('invites').find({ roadmapId, email, acceptedAt: null, revokedAt: null });
         for (const old of open) {
@@ -169,6 +174,8 @@ export function registerInviteRoutes(app: FastifyInstance, deps: InviteRouteDeps
         .findOneAndUpdate({ tokenHash, acceptedAt: null, revokedAt: null, expiresAt: { $gt: now } }, { $set: { acceptedAt: now } });
       if (!claimed) throw inviteInvalid();
 
+      // Set once the membership is stored. A failure after that must not reopen a link that has done its work.
+      let granted = false;
       try {
         const membership = (s2: ScopedDb, userId: string) =>
           s2.collection('memberships').insertOne({ _id: uuidv7(), roadmapId: claimed.roadmapId, userId, role: claimed.role, createdAt: now });
@@ -207,6 +214,7 @@ export function registerInviteRoutes(app: FastifyInstance, deps: InviteRouteDeps
             await membership(tx, userId);
             await auditAccept(tx, userId);
           });
+          granted = true;
           // After the commit, so a failed accept never leaves a session for an account that was rolled back.
           const { token, session } = await app.sessions.create(s, userId, 'pending_enroll', {
             ip: req.ip,
@@ -223,11 +231,12 @@ export function registerInviteRoutes(app: FastifyInstance, deps: InviteRouteDeps
           if (isDuplicateKey(err)) throw new HttpError(409, 'already_member');
           throw err;
         }
+        granted = true;
         await auditAccept(s, userId);
         return { roadmapId: claimed.roadmapId, next: 'done' as const };
       } catch (err) {
         // Nothing was granted, so the link stays usable.
-        await s.collection('invites').updateOne({ _id: claimed._id }, { $set: { acceptedAt: null } });
+        if (!granted) await s.collection('invites').updateOne({ _id: claimed._id }, { $set: { acceptedAt: null } });
         throw err;
       }
     },

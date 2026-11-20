@@ -1,19 +1,15 @@
 import { projectSchema, setAssigneesRequestSchema } from '@roadmap/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { z } from 'zod';
 import { createAuditLog } from '../audit/audit.ts';
 import { HttpError } from '../errors.ts';
 import { loadProject, toProjectDto } from './access.ts';
+import { projectParams } from '../params.ts';
 
 export interface AssignRouteDeps {
   now: () => Date;
 }
 
-const projectParams = z.object({
-  roadmapId: z.string().min(1).max(100),
-  projectId: z.string().min(1).max(100),
-});
 
 export function registerAssignRoutes(app: FastifyInstance, deps: AssignRouteDeps): void {
   const r = app.withTypeProvider<ZodTypeProvider>();

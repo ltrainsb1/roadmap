@@ -12,12 +12,12 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { MembershipDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
 import { canEver, type PolicyContext } from '../policy/policy.ts';
+import { roadmapParams } from '../params.ts';
 
 export interface MemberRouteDeps {
   now: () => Date;
 }
 
-const roadmapParams = z.object({ roadmapId: z.string().min(1).max(100) });
 const memberParams = roadmapParams.extend({ userId: z.string().min(1).max(100) });
 const inviteParams = roadmapParams.extend({ inviteId: z.string().min(1).max(100) });
 const noContent = { 204: z.null().describe('No content') };

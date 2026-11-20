@@ -16,14 +16,13 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { ProjectDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
 import { assignedCtx, loadProject, parentAssignedCtx, toProjectDto } from './access.ts';
+import { projectParams, roadmapParams } from '../params.ts';
 
 export interface ProjectRouteDeps {
   now: () => Date;
   maxItems: number;
 }
 
-const roadmapParams = z.object({ roadmapId: z.string().min(1).max(100) });
-const projectParams = roadmapParams.extend({ projectId: z.string().min(1).max(100) });
 
 /** Keeps the stored id of an entry the item already has, once; anything else is new and gets a fresh id. */
 function resolveIds<T extends { id?: string | undefined }>(entries: T[], stored: Array<{ id: string }>): Array<T & { id: string }> {

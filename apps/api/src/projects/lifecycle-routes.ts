@@ -6,8 +6,8 @@ import type { ScopedDb } from '../db/scoped.ts';
 import type { ProjectDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
 import { assignedCtx, loadProject } from './access.ts';
+import { projectParams } from '../params.ts';
 
-const projectParams = z.object({ roadmapId: z.string().min(1).max(100), projectId: z.string().min(1).max(100) });
 
 /** Every item in the roadmap under `item`, at any depth. */
 const descendantsOf = (s: ScopedDb, item: ProjectDoc) =>
@@ -96,7 +96,9 @@ export function registerLifecycleRoutes(app: FastifyInstance): void {
       const ids = [item._id, ...(await descendantsOf(s, item)).map((x) => x._id)];
       const projects = s.collection('projects');
       const { deleted } = await projects.deleteMany({ roadmapId, _id: { $in: ids } });
-      await projects.updateMany({ roadmapId, blockedBy: { $in: ids } }, { $pull: { blockedBy: { $in: ids } } });
+      // The version goes up with the pull: a form opened before the delete still lists the deleted item, and its
+      // next save must be a conflict the person can reload from, not a refusal about an item they never chose.
+      await projects.updateMany({ roadmapId, blockedBy: { $in: ids } }, { $pull: { blockedBy: { $in: ids } }, $inc: { version: 1 } });
       await closeRankGap(s, item);
       // Always bump dependencyRevision, not only when the pull matched: an edit that adds this item as a blocker
       // reads it before the delete commits, and the shared roadmap write is what makes that edit conflict and retry.

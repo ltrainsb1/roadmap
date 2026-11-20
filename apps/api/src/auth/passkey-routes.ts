@@ -6,7 +6,6 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
 import { scoped, type ScopedDb } from '../db/scoped.ts';
-import type { UserDoc } from '../db/types.ts';
 import { unscoped } from '../db/unscoped.ts';
 import { HttpError } from '../errors.ts';
 import { csrfMatches } from '../policy/hook.ts';
@@ -16,6 +15,8 @@ import { CHALLENGE_TTL_MS, createPasskeys, realVerifiers, type PasskeyVerifiers 
 import { setSessionCookie } from './sessions.ts';
 import { requireStepUp, stepUpCodeOf } from './step-up.ts';
 import { newToken } from './tokens.ts';
+import { isDuplicateKey } from '../db/errors.ts';
+import { loadUser } from './load-user.ts';
 
 export interface PasskeyRouteDeps {
   db: Db;
@@ -36,19 +37,12 @@ const loginBody = z.object({ response: z.looseObject({ id: z.string().min(1).max
 
 const invalidCredentials = () => new HttpError(401, 'invalid_credentials');
 const invalidPasskey = () => new HttpError(422, 'invalid_passkey');
-const isDuplicateKey = (err: unknown) => (err as { code?: number } | null)?.code === 11000;
 
 export function registerPasskeyRoutes(app: FastifyInstance, deps: PasskeyRouteDeps): void {
   const r = app.withTypeProvider<ZodTypeProvider>();
   const audit = createAuditLog();
   const lookup = unscoped(deps.db);
   const passkeys = createPasskeys(deps.config, deps.webauthn ?? realVerifiers);
-
-  const loadUser = async (db: ScopedDb, userId: string): Promise<UserDoc> => {
-    const user = await db.collection('users').findOne({ _id: userId });
-    if (!user) throw new HttpError(401, 'unauthenticated');
-    return user;
-  };
 
   const putSessionChallenge = (db: ScopedDb, sessionId: string, challenge: string) =>
     db.collection('sessions').updateOne(
@@ -208,8 +202,11 @@ export function registerPasskeyRoutes(app: FastifyInstance, deps: PasskeyRouteDe
         if (!(await assertNotLocked(actor.db, actor.userId, now))) throw invalidCredentials();
         const user = await loadUser(actor.db, actor.userId);
         const challenge = await takeSessionChallenge(actor.db, actor.sessionId);
+        // No live challenge (never asked for, expired, or replaced by a second prompt): nothing was attempted, so it
+        // is refused without counting toward the lock. A guess needs a challenge, and that path still counts.
+        if (!challenge) throw invalidCredentials();
         const passkey = user.passkeys?.find((p) => p.credentialId === response.id);
-        if (!challenge || !passkey) return fail(actor.db, user._id, req.ip);
+        if (!passkey) return fail(actor.db, user._id, req.ip);
         const counter = await passkeys.verifyAuthentication(response, challenge, passkey);
         // Failures from concurrent attempts may have locked the account while we verified.
         if (counter === null || !(await assertNotLocked(actor.db, user._id, now))) return fail(actor.db, user._id, req.ip);

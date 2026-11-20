@@ -159,6 +159,22 @@ describe('GET /api/roadmaps/:id/audit (audit.view)', () => {
     expect(future.json<Page>().items).toEqual([]);
   });
 
+  test('a date-only `to` covers that whole day, and a full instant is taken as given', async () => {
+    const w = await world();
+    await t.app.inject({
+      method: 'POST',
+      url: `/api/roadmaps/${w.roadmap._id}/invites`,
+      headers: headers(w.O.sess),
+      payload: { email: 'today@example.com', role: 'contributor' },
+    });
+    // The event's own day, so the test holds across midnight.
+    const today = (await w.audit(w.O.sess, '?action=invite.create')).json<Page>().items[0]!.timestamp.slice(0, 10);
+    const day = (await w.audit(w.O.sess, `?from=${today}&to=${today}&action=invite.create`)).json<Page>();
+    expect(day.items).toHaveLength(1);
+    const midnight = (await w.audit(w.O.sess, `?to=${today}T00:00:00Z&action=invite.create`)).json<Page>();
+    expect(midnight.items).toEqual([]);
+  });
+
   test('actors resolve in bulk: deleted users show name null, ai shows who it acted for, system has no name', async () => {
     const w = await world();
     const ghost = 'ghost-user';

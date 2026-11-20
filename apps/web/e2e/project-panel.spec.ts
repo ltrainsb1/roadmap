@@ -595,6 +595,39 @@ test('FR-1.6: an Admin assigns two members and the row lists both names', async 
   await second.context.close();
 });
 
+test("FR-1.6: ticking an assignee on a stale list shows the conflict message and never drops someone else's assignment", async ({ page, browser }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const owner = await createSignedInUser(page, 'tick');
+  const id = await createRoadmap(page, 'Tick plan');
+  const other = await inviteAndJoin(page, browser, testInfo, 'Tick plan', 'carol', 'Admin');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Shared work');
+  await page.goto(projectUrl(id, itemId));
+  const group = panelOf(page, 'Shared work').getByRole('group', { name: 'Assignees' });
+  await expect(group.getByRole('checkbox')).toHaveCount(2);
+
+  // A second session assigns Carol; this page has not refetched, so its list still shows nobody assigned.
+  const theirs = await apiAs(other.page);
+  await theirs('PUT', `/api/roadmaps/${id}/projects/${itemId}/assignees`, { userIds: [(await membersOf(call, id)).find((m) => m.name === other.name)!.userId] });
+  await expect(group.getByLabel(other.name, { exact: true })).not.toBeChecked();
+
+  await group.getByLabel(owner.name, { exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Someone else changed this at the same time. Reload and try again.');
+  // The list was refetched: Carol is still assigned, and the refused tick did not land.
+  await expect(group.getByLabel(other.name, { exact: true })).toBeChecked();
+  await expect(group.getByLabel(owner.name, { exact: true })).not.toBeChecked();
+
+  // Trying again from the fresh list keeps both.
+  await group.getByLabel(owner.name, { exact: true }).click();
+  await expect(group.getByLabel(owner.name, { exact: true })).toBeChecked();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.reload();
+  const again = panelOf(page, 'Shared work').getByRole('group', { name: 'Assignees' });
+  await expect(again.getByLabel(owner.name, { exact: true })).toBeChecked();
+  await expect(again.getByLabel(other.name, { exact: true })).toBeChecked();
+  await other.context.close();
+});
+
 test('FR-1.4: an Admin adds a tag, a link and a milestone, saves, and a reload shows them', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await createSignedInUser(page, 'lister');

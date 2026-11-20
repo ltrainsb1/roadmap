@@ -136,6 +136,9 @@ describe('shared project schemas', () => {
   test('assignee, reorder and priority label requests enforce their bounds', () => {
     expect(setAssigneesRequestSchema.safeParse({ userIds: Array.from({ length: 51 }, (_, i) => `u${i}`) }).success).toBe(false);
     expect(setAssigneesRequestSchema.safeParse({ userIds: [] }).success).toBe(true);
+    expect(setAssigneesRequestSchema.safeParse({ userIds: [], version: 3 }).success).toBe(true);
+    expect(setAssigneesRequestSchema.safeParse({ userIds: [], version: 0 }).success).toBe(false);
+    expect(setAssigneesRequestSchema.safeParse({ userIds: [], version: 1.5 }).success).toBe(false);
     expect(reorderRequestSchema.safeParse({ parentId: null, orderedIds: [] }).success).toBe(false);
     expect(reorderRequestSchema.safeParse({ parentId: null, orderedIds: ['a'] }).success).toBe(true);
     expect(priorityLabelRequestSchema.safeParse({ label: 'P5' }).success).toBe(false);

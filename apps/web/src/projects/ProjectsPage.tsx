@@ -183,7 +183,7 @@ export function ProjectsPage() {
       if (assigned) ids.push(userId);
       return ids.length === current.assigneeIds.length && ids.every((id) => current.assigneeIds.includes(id))
         ? undefined
-        : setAssignees.mutateAsync({ projectId: itemId, userIds: ids });
+        : setAssignees.mutateAsync({ projectId: itemId, body: { userIds: ids, version: current.version } });
     });
 
   const changePriorityLabel = (itemId: string, label: PriorityLabel | null) =>

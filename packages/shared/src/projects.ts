@@ -121,7 +121,11 @@ export const updateProjectRequestSchema = updateProjectBodySchema.superRefine((v
 });
 export type UpdateProjectRequest = z.infer<typeof updateProjectRequestSchema>;
 
-export const setAssigneesRequestSchema = z.object({ userIds: z.array(z.string()).max(50) });
+/** `version`, when sent, is the version the list was built from; a stale one is refused with 409 conflict. */
+export const setAssigneesRequestSchema = z.object({
+  userIds: z.array(z.string()).max(50),
+  version: z.number().int().positive().optional(),
+});
 export type SetAssigneesRequest = z.infer<typeof setAssigneesRequestSchema>;
 
 export const reorderRequestSchema = z.object({

@@ -46,8 +46,8 @@ async function world() {
       headers: { cookie: sess[who].cookie, 'x-csrf-token': sess[who].csrf },
       ...(payload ? { payload } : {}),
     });
-  const assign = (who: keyof typeof sess, projectId: string, userIds: string[], roadmapId = roadmap._id) =>
-    send(who, 'PUT', `/api/roadmaps/${roadmapId}/projects/${projectId}/assignees`, { userIds });
+  const assign = (who: keyof typeof sess, projectId: string, userIds: string[], roadmapId = roadmap._id, version?: number) =>
+    send(who, 'PUT', `/api/roadmaps/${roadmapId}/projects/${projectId}/assignees`, { userIds, ...(version !== undefined && { version }) });
   const item = (o: { parentId?: string; assigneeIds?: string[]; roadmapId?: string } = {}) =>
     t.seed.project(tenantId, o.roadmapId ?? roadmap._id, o);
   const stored = (id: string) => t.db.collection('projects').findOne({ _id: id as never });
@@ -123,6 +123,52 @@ describe('assigning members', () => {
   test('FR-1.6: an unknown item is 404', async () => {
     const w = await world();
     expect((await w.assign('A', 'no-such-item', [])).statusCode).toBe(404);
+  });
+
+  test('FR-1.6: an assign with the current version saves; a stale version is 409 conflict and changes nothing', async () => {
+    const w = await world();
+    const a = await w.item();
+    const first = await w.assign('A', a._id, [w.ids.C1], w.roadmap._id, 1);
+    expect(first.statusCode).toBe(200);
+    expect(first.json<Dto>()).toMatchObject({ assigneeIds: [w.ids.C1], version: 2 });
+
+    // Another tab still holds version 1 and ticks C2 only: that would silently drop C1.
+    const stale = await w.assign('O', a._id, [w.ids.C2], w.roadmap._id, 1);
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ error: 'conflict' });
+    expect(await w.stored(a._id)).toMatchObject({ assigneeIds: [w.ids.C1], version: 2 });
+    const events = await t.db.collection('auditEvents').find({ tenantId: w.tenantId, 'target.id': a._id, action: 'project.assign' }).toArray();
+    expect(events).toHaveLength(1);
+  });
+
+  test('FR-1.6: an assign with no version still replaces the list', async () => {
+    const w = await world();
+    const a = await w.item({ assigneeIds: [w.ids.C1] });
+    const res = await w.assign('A', a._id, [w.ids.C2]);
+    expect(res.statusCode).toBe(200);
+    expect(await w.stored(a._id)).toMatchObject({ assigneeIds: [w.ids.C2], version: 2 });
+  });
+
+  test('FR-1.6: assigning the set the item already has writes nothing, not even the roadmap revision', async () => {
+    const w = await world();
+    const a = await w.item();
+    expect((await w.assign('A', a._id, [w.ids.C1, w.ids.C2])).statusCode).toBe(200);
+    const revision = async () => (await t.db.collection('roadmaps').findOne({ _id: w.roadmap._id as never }))!.membershipRevision as unknown;
+    const before = await revision();
+    const res = await w.assign('A', a._id, [w.ids.C2, w.ids.C1], w.roadmap._id, 2);
+    expect(res.statusCode).toBe(200);
+    expect(res.json<Dto>()).toMatchObject({ version: 2 });
+    expect(await revision()).toBe(before);
+    expect(await w.stored(a._id)).toMatchObject({ version: 2 });
+  });
+
+  test('FR-1.6: an item addressed through another roadmap\'s URL is 404 and is left alone', async () => {
+    const w = await world();
+    const other = await t.seed.roadmap(w.tenantId, w.ids.A);
+    const theirs = await w.item({ roadmapId: other._id });
+    const res = await w.assign('A', theirs._id, [w.ids.C1], w.roadmap._id, 1);
+    expect(res.statusCode).toBe(404);
+    expect(await w.stored(theirs._id)).toMatchObject({ assigneeIds: [], version: 1 });
   });
 });
 

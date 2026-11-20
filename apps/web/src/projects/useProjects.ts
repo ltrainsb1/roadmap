@@ -1,4 +1,4 @@
-import type { CreateProjectRequest, PriorityLabel, Project, ProjectList, UpdateProjectRequest } from '@roadmap/shared';
+import type { CreateProjectRequest, PriorityLabel, Project, ProjectList, SetAssigneesRequest, UpdateProjectRequest } from '@roadmap/shared';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { api } from '../api/client.ts';
@@ -42,12 +42,15 @@ export function useUpdateProject(roadmapId: string) {
   });
 }
 
-/** Replaces who is assigned to an item (members only); the returned item goes in the cached list and the list is refetched. */
+/**
+ * Replaces who is assigned to an item (members only) with the `version` the list was built from, so someone assigned
+ * meanwhile is never silently dropped; the returned item goes in the cached list and the list is refetched.
+ */
 export function useSetAssignees(roadmapId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ projectId, userIds }: { projectId: string; userIds: string[] }) =>
-      api<Project>(`${base(roadmapId)}/${encodeURIComponent(projectId)}/assignees`, { method: 'PUT', body: { userIds } }),
+    mutationFn: ({ projectId, body }: { projectId: string; body: SetAssigneesRequest }) =>
+      api<Project>(`${base(roadmapId)}/${encodeURIComponent(projectId)}/assignees`, { method: 'PUT', body }),
     onSuccess: (updated) => {
       putItemInCache(queryClient, roadmapId, updated);
       return queryClient.invalidateQueries({ queryKey: PROJECTS_KEY(roadmapId) });

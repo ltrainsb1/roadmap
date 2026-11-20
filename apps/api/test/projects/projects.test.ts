@@ -167,6 +167,17 @@ describe('create rules', () => {
     expect(res.statusCode).toBe(422);
     expect(res.json()).toEqual({ error: 'too_many_items' });
   });
+
+  test('FR-1.2: a top-level create in a roadmap deleted after the access check is 404 and stores nothing', async () => {
+    const w = await world();
+    // The roadmap goes but the membership stays, as when the deletion lands between the auth hook and the transaction.
+    await t.db.collection('roadmaps').deleteOne({ _id: w.roadmap._id as never });
+    const res = await w.call('A', 'POST', { parentId: null, title: 'Orphan' });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'not_found' });
+    expect(await t.db.collection('projects').countDocuments({ roadmapId: w.roadmap._id })).toBe(0);
+    expect(await t.db.collection('auditEvents').countDocuments({ tenantId: w.tenantId, action: 'project.create' })).toBe(0);
+  });
 });
 
 describe('Tenant isolation', () => {

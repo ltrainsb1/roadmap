@@ -78,7 +78,9 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
         // A create appends to a sibling order, so it writes the same document as reorder, archive, unarchive and
         // delete. A create that races one of them (or another create) conflicts and retries, re-reading the parent
         // and the last rank: no live child under an archived parent, no orphan, no two siblings with one rank.
-        await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { orderRevision: 1 } });
+        // Nothing matched: the roadmap was deleted after the auth hook passed, so nothing may be added to it.
+        const { matched } = await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { orderRevision: 1 } });
+        if (matched === 0) throw new HttpError(404, 'not_found');
         const now = deps.now();
         const doc = await projects.insertOne({
           _id: uuidv7(),

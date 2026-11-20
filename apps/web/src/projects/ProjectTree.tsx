@@ -75,7 +75,11 @@ const sameGroupOnly: CollisionDetection = (args) => {
   return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((c) => groupOf(c) === group) });
 };
 
-/** Keyboard moves look only at rows of the group the picked-up row belongs to. */
+/**
+ * Keyboard moves look only at rows of the group the picked-up row belongs to. This relies on the shape of dnd-kit's
+ * `droppableContainers` (`get` and `getEnabled`, each entry carrying `data.current.sortable.containerId`), which is
+ * not public API: re-check it whenever @dnd-kit/core or @dnd-kit/sortable is upgraded.
+ */
 const sameGroupKeyboard: KeyboardCoordinateGetter = (event, args) => {
   const { context } = args;
   const group = groupOf(context.active);

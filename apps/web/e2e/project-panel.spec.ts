@@ -423,6 +423,8 @@ test('changing status from the row while the panel has unsaved edits keeps the e
 });
 
 test('unsaved edits are not thrown away silently: Escape, Close, Back to projects and another row ask first', async ({ page }) => {
+  // A long walk through one panel: slow, so a timeout under load names its step instead of the test's budget.
+  test.slow();
   await page.setViewportSize({ width: 1280, height: 800 });
   await createSignedInUser(page, 'guard');
   const id = await createRoadmap(page, 'Guard plan');
@@ -467,6 +469,7 @@ test('unsaved edits are not thrown away silently: Escape, Close, Back to project
 
   // Discard goes where the person was going.
   await page.getByRole('link', { name: 'Beta', exact: true }).click();
+  await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Discard', exact: true }).click();
   await expect(panelOf(page, 'Beta')).toBeVisible();
   await expect(panelOf(page, 'Beta').getByLabel('Description', { exact: true })).toHaveValue('');
@@ -474,7 +477,9 @@ test('unsaved edits are not thrown away silently: Escape, Close, Back to project
   // Discard on Escape closes the panel and returns focus to the row.
   await panelOf(page, 'Beta').getByLabel('Description', { exact: true }).fill('More');
   await page.keyboard.press('Escape');
-  await page.getByRole('dialog', { name: 'Discard your unsaved changes to Beta?' }).getByRole('button', { name: 'Discard', exact: true }).click();
+  const betaDialog = page.getByRole('dialog', { name: 'Discard your unsaved changes to Beta?' });
+  await expect(betaDialog).toBeVisible();
+  await betaDialog.getByRole('button', { name: 'Discard', exact: true }).click();
   await expect(page).toHaveURL(`/r/${id}/projects`);
   await expect(page.getByRole('link', { name: 'Beta', exact: true })).toBeFocused();
 

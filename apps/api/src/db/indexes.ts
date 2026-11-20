@@ -3,7 +3,7 @@ import type { Db, IndexDescription } from 'mongodb';
 const AUDIT_TTL_SECONDS = 2592000; // 30 days
 
 // One createIndexes call per collection: each call is one round of index-build bookkeeping on the server,
-// so a fresh database (every test file makes one) costs 9 builds rather than 19.
+// so a fresh database (every test file makes one) costs 9 builds rather than 20.
 const INDEXES: Record<string, IndexDescription[]> = {
   users: [
     // Pre-auth lookups (not tenant-first by design).

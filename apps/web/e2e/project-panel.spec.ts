@@ -706,8 +706,12 @@ test('FR-1.4: an Admin marks an item blocked by another, and the select does not
   for (const left of ['Middle item', 'Parent item', 'Child item']) expect(offered).not.toContain(left);
 
   await select.selectOption(other);
+  // Choosing is not adding: nothing is added until "Add item" is pressed.
+  await expect(panel.getByRole('button', { name: 'Remove Other item' })).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Add item', exact: true }).click();
   await expect(panel.getByRole('button', { name: 'Remove Other item' })).toBeVisible();
   await expect(select.locator('option')).toHaveCount(1);
+  await expect(select).toHaveValue('');
   await panel.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(panel.getByRole('status')).toHaveText('Saved.');
 
@@ -807,6 +811,39 @@ test('tags, links, milestones and blocked by count as unsaved edits and are aske
   await panel.getByRole('button', { name: 'Remove tag x' }).click();
   await panel.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page).toHaveURL(`/r/${id}/projects`);
+});
+
+test('FR-1.4: arrow keys on the "blocked by" select add nothing; "Add item" adds the choice and keeps focus on the select', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await createSignedInUser(page, 'arrows');
+  const id = await createRoadmap(page, 'Arrow plan');
+  const call = await apiAs(page);
+  const itemId = await seedProject(call, id, 'Target item');
+  await seedProject(call, id, 'First choice');
+  await seedProject(call, id, 'Second choice');
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Target item');
+  const select = panel.getByLabel('Add an item this is blocked by', { exact: true });
+  const add = panel.getByRole('button', { name: 'Add item', exact: true });
+
+  // With nothing chosen, the button explains instead of adding.
+  await add.click();
+  await expect(panel.getByText('Choose an item.', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+
+  await select.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(panel.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+
+  await select.selectOption({ label: 'Second choice' });
+  await expect(panel.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+  await add.click();
+  await expect(panel.getByRole('button', { name: 'Remove Second choice' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^Remove / })).toHaveCount(1);
+  await expect(panel.getByText('Choose an item.', { exact: true })).toHaveCount(0);
+  await expect(select).toHaveValue('');
+  await expect(select).toBeFocused();
 });
 
 test('the "blocked by" choices are indented by level with non-breaking spaces, which a select keeps', async ({ page }) => {

@@ -8,7 +8,8 @@ interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'id'> {
   ref?: Ref<HTMLInputElement>;
 }
 
-function ErrorIcon() {
+/** The icon before a field's error text. */
+export function ErrorIcon() {
   return (
     <svg className="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
       <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />

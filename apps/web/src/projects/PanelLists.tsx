@@ -94,6 +94,10 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
   const [milestone, setMilestone] = useState({ name: '', date: '' });
   const [milestoneError, setMilestoneError] = useState<string | undefined>();
   const blockedId = useId();
+  // The "blocked by" choice waits here until "Add item": a closed select fires change on every arrow key on some platforms.
+  const [blocker, setBlocker] = useState('');
+  const [blockerError, setBlockerError] = useState<string | undefined>();
+  const blockerSelect = useRef<HTMLSelectElement>(null);
   const root = useRef<HTMLDivElement>(null);
   // Where focus goes once the list has re-rendered, because the control that held it is gone or hidden.
   const refocus = useRef<{ list: string; index: number; fallbackId: string } | null>(null);
@@ -148,6 +152,18 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
       (i) => i.id !== item.id && !item.path.includes(i.id) && !i.path.includes(item.id) && !values.blockedBy.includes(i.id) && !wouldCycle(item.id, [i.id], byId),
     );
   }, [byId, item.id, item.path, values.blockedBy]);
+
+  const addBlocker = () => {
+    // A choice the list no longer offers (a refetch made it a cycle, say) counts as no choice.
+    if (!choices.some((c) => c.id === blocker)) return setBlockerError('Choose an item.');
+    setBlockerError(undefined);
+    setBlocker('');
+    const count = values.blockedBy.length + 1;
+    afterAdd('blocked', count, LIMITS.blockedBy, blockedId);
+    onChange({ blockedBy: [...values.blockedBy, blocker] });
+    // The select stays for the next choice, unless the list is now full and hides it.
+    if (count < LIMITS.blockedBy) blockerSelect.current?.focus();
+  };
 
   const assigned = item.assigneeIds.map((userId) => members.find((m) => m.userId === userId)?.name).filter((n): n is string => n !== undefined);
 
@@ -309,24 +325,28 @@ export function PanelLists({ idPrefix, item, byId, members, values, onChange, ed
           </ul>
         )}
         {editable && values.blockedBy.length < LIMITS.blockedBy && (
-          <SelectField
-            id={blockedId}
-            label="Add an item this is blocked by"
-            value=""
-            onChange={(e) => {
-              if (!e.target.value) return;
-              afterAdd('blocked', values.blockedBy.length + 1, LIMITS.blockedBy, blockedId);
-              onChange({ blockedBy: [...values.blockedBy, e.target.value] });
-            }}
-          >
-            <option value="">Choose an item</option>
-            {choices.map((c) => (
-              <option key={c.id} value={c.id}>
-                {'\u00a0\u00a0'.repeat(c.depth - 1)}
-                {c.title}
-              </option>
-            ))}
-          </SelectField>
+          <div className="add-entry">
+            <SelectField
+              id={blockedId}
+              ref={blockerSelect}
+              label="Add an item this is blocked by"
+              value={blocker}
+              error={blockerError}
+              onChange={(e) => {
+                setBlocker(e.target.value);
+                setBlockerError(undefined);
+              }}
+            >
+              <option value="">Choose an item</option>
+              {choices.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {'\u00a0\u00a0'.repeat(c.depth - 1)}
+                  {c.title}
+                </option>
+              ))}
+            </SelectField>
+            <Button onClick={addBlocker}>Add item</Button>
+          </div>
         )}
       </Group>
     </div>

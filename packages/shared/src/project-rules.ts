@@ -9,9 +9,13 @@ export function projectWarnings(item: Project, byId: ReadonlyMap<string, Project
   const warnings: ProjectWarning[] = [];
   const parent = item.parentId === null ? undefined : byId.get(item.parentId);
   if (parent) {
-    const startsEarly = !!item.startDate && !!parent.startDate && item.startDate < parent.startDate;
-    const endsLate = !!item.endDate && !!parent.endDate && item.endDate > parent.endDate;
-    if (startsEarly || endsLate) warnings.push({ kind: 'outside_parent', parentId: parent.id });
+    const before = (a: string | null, b: string | null) => !!a && !!b && a < b;
+    const outside =
+      before(item.startDate, parent.startDate) || // starts before the parent starts
+      before(parent.endDate, item.endDate) || // ends after the parent ends
+      before(parent.endDate, item.startDate) || // starts after the parent ends
+      before(item.endDate, parent.startDate); // ends before the parent starts
+    if (outside) warnings.push({ kind: 'outside_parent', parentId: parent.id });
   }
   if (item.startDate) {
     for (const blockerId of item.blockedBy) {

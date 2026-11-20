@@ -60,6 +60,25 @@ describe('projectWarnings', () => {
     expect(projectWarnings(child('c', parent, { startDate: '2020-01-01' }), mapOf([]))).toEqual([]);
   });
 
+  test('Review focus 4: a child with one date outside its parent gets outside_parent: a start after the parent ends, or an end before it starts', () => {
+    const parent = make('p', { startDate: '2027-02-01', endDate: '2027-02-28' });
+    const outside = [{ kind: 'outside_parent', parentId: 'p' }];
+    const warn = (over: Partial<Project>, p: Project = parent) => projectWarnings(child('c', p, over), mapOf([p]));
+    expect(warn({ startDate: '2027-03-05' })).toEqual(outside);
+    expect(warn({ endDate: '2027-01-15' })).toEqual(outside);
+    expect(warn({ startDate: '2027-02-28' })).toEqual([]);
+    expect(warn({ endDate: '2027-02-01' })).toEqual([]);
+    // Starts after the parent ends and ends after it too: still one warning.
+    expect(warn({ startDate: '2027-03-05', endDate: '2027-04-01' })).toEqual(outside);
+    // A parent with only an end, and one with only a start.
+    const endOnly = make('e', { endDate: '2027-02-28' });
+    expect(warn({ startDate: '2027-03-01' }, endOnly)).toEqual([{ kind: 'outside_parent', parentId: 'e' }]);
+    expect(warn({ startDate: '2027-02-01' }, endOnly)).toEqual([]);
+    const startOnly = make('s', { startDate: '2027-02-01' });
+    expect(warn({ endDate: '2027-01-31' }, startOnly)).toEqual([{ kind: 'outside_parent', parentId: 's' }]);
+    expect(warn({ endDate: '2027-02-01' }, startOnly)).toEqual([]);
+  });
+
   test('blocked_by_later when an item starts on or before its blocker ends', () => {
     const b1 = make('b1', { endDate: '2027-03-10' });
     const b2 = make('b2', { endDate: '2027-03-01' });

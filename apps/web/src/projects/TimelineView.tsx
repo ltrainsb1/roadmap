@@ -15,7 +15,7 @@ import { Fragment, useEffect, useRef, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Menu } from '../ui/Menu.tsx';
-import { formatDates, formatMilestone, levelName, warningText } from './names.ts';
+import { formatDates, formatMilestone, levelName, statusName, warningText } from './names.ts';
 import { actionsButtonId, Chevron, titleLinkId, WarningIcon } from './ProjectTree.tsx';
 import { StatusMenu } from './StatusMenu.tsx';
 import { TimelineAxis } from './TimelineAxis.tsx';
@@ -84,8 +84,9 @@ export function TimelineView(props: TimelineViewProps) {
     if (!el) return;
     const names = el.querySelector<HTMLElement>('.name-col')?.offsetWidth ?? 0;
     el.scrollLeft = todayX - (el.clientWidth - names) / 3;
-    // Only on first render and when asked: a zoom or filter change keeps the person's own scroll.
-  }, [scrollToTodaySignal]);
+    // On first render, when asked, and on a new zoom, where the old scroll offset means nothing. A filter change keeps
+    // the person's own scroll.
+  }, [scrollToTodaySignal, zoom]);
 
   const renderNode = ({ item, children }: TreeNode): ReactNode => {
     const hasChildren = children.length > 0;
@@ -123,6 +124,8 @@ export function TimelineView(props: TimelineViewProps) {
               {item.archived && <span className="badge">Archived</span>}
               {context && <span className="sr-only">Shown for context</span>}
               {warnings.length > 0 && <WarningIcon texts={warnings} />}
+              {/* Below 600 px the pill is hidden, and this says the status instead; from 600 px it is not shown at all. */}
+              <span className="narrow-status">{statusName(item.status)}</span>
               <StatusMenu item={item} editable={editable} onChange={(status) => void actions.changeStatus(item, status)} />
               <Menu label={`Actions for ${item.title}`} buttonId={actionsButtonId(item.id)} items={actions.menuFor(item)} />
             </div>

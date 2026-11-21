@@ -2,15 +2,27 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Menu } from './Menu.tsx';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  delete (document.documentElement as { clientWidth?: number }).clientWidth;
+});
 
-function setup() {
+/** A 375 px wide window, and a list that measures 176 by 140 px (jsdom lays nothing out). */
+function layout() {
+  Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 375 });
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(140);
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(176);
+}
+
+function setup(align?: 'start' | 'end') {
   const onOpen = vi.fn();
   const onDelete = vi.fn();
   render(
     <div data-testid="frame">
       <Menu
         label="Actions for Launch site"
+        align={align}
         items={[
           { label: 'Open', onSelect: onOpen },
           { label: 'Delete', onSelect: onDelete },
@@ -76,26 +88,49 @@ describe('Menu', () => {
     outside.remove();
   });
 
-  test('the list opens under the button, or over it when there is no room below, and stays inside the window', () => {
+  test('the list opens under the button, its right edge lined up with the button\'s', () => {
     const { button } = setup();
-    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 375 });
+    layout();
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(200, 100, 44, 44));
+    fireEvent.click(button);
+    const menu = screen.getByRole('menu');
+    expect([menu.style.top, menu.style.left]).toEqual(['148px', `${244 - 176}px`]);
+  });
+
+  test('the list opens over the button when there is no room below', () => {
+    const { button } = setup();
+    layout();
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(200, window.innerHeight - 60, 44, 44));
+    fireEvent.click(button);
+    expect(screen.getByRole('menu').style.top).toBe(`${window.innerHeight - 60 - 4 - 140}px`);
+  });
+
+  test('the list stays inside the window at either edge', () => {
+    const { button } = setup();
+    layout();
     const rect = vi.spyOn(button, 'getBoundingClientRect');
     rect.mockReturnValue(new DOMRect(10, 100, 44, 44));
     fireEvent.click(button);
-    const menu = screen.getByRole('menu');
-    // jsdom lays nothing out, so the list measures 0 by 0: its right edge lines up with the button's, kept 8 px in.
-    expect([menu.style.top, menu.style.left]).toEqual(['148px', '54px']);
-    fireEvent.keyDown(menu, { key: 'Escape' });
-
-    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(140);
-    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(176);
-    rect.mockReturnValue(new DOMRect(10, window.innerHeight - 60, 44, 44));
-    fireEvent.click(button);
-    expect(screen.getByRole('menu').style.top).toBe(`${window.innerHeight - 60 - 4 - 140}px`);
     expect(screen.getByRole('menu').style.left).toBe('8px');
-    height.mockRestore();
-    width.mockRestore();
-    delete (document.documentElement as { clientWidth?: number }).clientWidth;
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+
+    rect.mockReturnValue(new DOMRect(340, 100, 30, 44));
+    fireEvent.click(button);
+    expect(screen.getByRole('menu').style.left).toBe(`${375 - 8 - 176}px`);
+  });
+
+  test('align="start" lines the list up with the button\'s left edge, and still keeps it inside the window', () => {
+    const { button } = setup('start');
+    layout();
+    const rect = vi.spyOn(button, 'getBoundingClientRect');
+    rect.mockReturnValue(new DOMRect(40, 100, 80, 44));
+    fireEvent.click(button);
+    expect(screen.getByRole('menu').style.left).toBe('40px');
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+
+    rect.mockReturnValue(new DOMRect(300, 100, 60, 44));
+    fireEvent.click(button);
+    expect(screen.getByRole('menu').style.left).toBe(`${375 - 8 - 176}px`);
   });
 
   test('resizing the window closes the list', () => {

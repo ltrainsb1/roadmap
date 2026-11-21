@@ -38,6 +38,13 @@ async function expectFullyShown(page: Page, locator: Locator) {
   );
   expect(onTop).toBe(true);
 }
+/** Whether the today line is inside the part of the frame the name column leaves free. */
+async function todayInView(page: Page) {
+  const shown = await box(frame(page));
+  const names = await box(nameHeader(page));
+  const line = await box(row(page, 'Launch site').locator('.today-line'));
+  return line.x >= names.x + names.width && line.x + line.width <= shown.x + shown.width;
+}
 const barWidth = async (page: Page, title: string) => (await box(row(page, title).locator('.bar'))).width;
 
 /**
@@ -93,7 +100,7 @@ test('FR-1.7: each item is a row with its dates as text, and milestones are name
   await expectNoA11yViolations(page);
 });
 
-test('bars sit where the dates say', async ({ page, call, roadmap }) => {
+test('FR-1.7: bars sit where the dates say', async ({ page, call, roadmap }) => {
   await seeded(call, roadmap.id);
   await openTimeline(page, roadmap.id);
   const bar = await row(page, 'Launch site').locator('.bar').boundingBox();
@@ -106,7 +113,7 @@ test('bars sit where the dates say', async ({ page, call, roadmap }) => {
   await expect(row(page, 'Hire').locator('.bar')).toHaveCount(0);
 });
 
-test('rows collapse and expand, and the List shows the same state', async ({ page, call, roadmap }) => {
+test('FR-1.7: rows collapse and expand, and the List shows the same state', async ({ page, call, roadmap }) => {
   await seeded(call, roadmap.id);
   await openTimeline(page, roadmap.id);
   await expect(row(page, 'Design')).toBeVisible();
@@ -125,7 +132,7 @@ test('rows collapse and expand, and the List shows the same state', async ({ pag
   await expect(row(page, 'Design')).toBeVisible();
 });
 
-test('choosing a row opens the panel beside the Timeline, and saving new dates moves the bar', async ({ page, call, roadmap }) => {
+test('FR-1.7: choosing a row opens the panel beside the Timeline, and saving new dates moves the bar', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   const { hire } = await seeded(call, roadmap.id);
   await openTimeline(page, roadmap.id);
@@ -146,7 +153,7 @@ test('choosing a row opens the panel beside the Timeline, and saving new dates m
   expect((await row(page, 'Hire').locator('.bar').boundingBox())!.width).toBeCloseTo(30, 0);
 });
 
-test('the status pill and the Actions menu work on a row', async ({ page, call, roadmap }) => {
+test('FR-1.7: the status pill and the Actions menu work on a row', async ({ page, call, roadmap }) => {
   // Below 600 px the row has neither: both are in the panel and the List.
   await page.setViewportSize({ width: 1280, height: 800 });
   await seeded(call, roadmap.id);
@@ -161,7 +168,7 @@ test('the status pill and the Actions menu work on a row', async ({ page, call, 
   await expect(row(page, 'Hire')).toHaveCount(0);
 });
 
-test('Review focus 5: switching view with unsaved panel text asks first', async ({ page, call, roadmap }) => {
+test('FR-1.7: Review focus 5: switching view with unsaved panel text asks first', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   const { hire } = await seeded(call, roadmap.id);
   await page.clock.setFixedTime(NOW);
@@ -177,7 +184,7 @@ test('Review focus 5: switching view with unsaved panel text asks first', async 
   await expect(panel.getByLabel('Title', { exact: true })).toHaveValue('Hire a lead');
 });
 
-test('filters apply: a search shows the match and its greyed ancestor', async ({ page, call, roadmap }) => {
+test('FR-1.7: filters apply: a search shows the match and its greyed ancestor', async ({ page, call, roadmap }) => {
   await seeded(call, roadmap.id);
   await openTimeline(page, roadmap.id, '?q=design');
   await expect(row(page, 'Design')).toBeVisible();
@@ -186,7 +193,7 @@ test('filters apply: a search shows the match and its greyed ancestor', async ({
   await expect(row(page, 'Hire')).toHaveCount(0);
 });
 
-test('empty states', async ({ page, call, roadmap }) => {
+test('FR-1.7: empty states', async ({ page, call, roadmap }) => {
   await openTimeline(page, roadmap.id);
   await expect(page.getByText('No projects yet.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'New project' })).toHaveCount(0);
@@ -198,7 +205,7 @@ test('empty states', async ({ page, call, roadmap }) => {
   await expect(row(page, 'Hire')).toContainText('No dates');
 });
 
-test('a Contributor who is not assigned sees plain status text and no Archive or Delete', async ({ browser, call, roadmap }) => {
+test('FR-1.7: a Contributor who is not assigned sees plain status text and no Archive or Delete', async ({ browser, call, roadmap }) => {
   await seeded(call, roadmap.id);
   const guest = await joinByApi(browser, call, roadmap.id, 'contributor', 'viewer');
   const page = guest.page;
@@ -214,7 +221,7 @@ test('a Contributor who is not assigned sees plain status text and no Archive or
   await guest.context.close();
 });
 
-test('a row menu opened on the last row is fully visible and not clipped by the timeline frame', async ({ page, call, roadmap }) => {
+test('FR-1.7: a row menu opened on the last row is fully visible and not clipped by the timeline frame', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await seeded(call, roadmap.id);
   // Enough rows to run past the bottom of the window, so the last row sits at the bottom of the frame and the page.
@@ -232,7 +239,7 @@ test('a row menu opened on the last row is fully visible and not clipped by the 
   await expectFullyShown(page, page.getByRole('menuitemradio', { name: 'Cancelled', exact: true }));
 });
 
-test('a milestone sits at its date and a one-date item is an 8 px marker', async ({ page, call, roadmap }) => {
+test('FR-1.7: a milestone sits at its date and a one-date item is an 8 px marker', async ({ page, call, roadmap }) => {
   await seeded(call, roadmap.id);
   await openTimeline(page, roadmap.id);
   const bar = await box(row(page, 'Launch site').locator('.bar'));
@@ -242,7 +249,7 @@ test('a milestone sits at its date and a one-date item is an 8 px marker', async
   expect(await barWidth(page, 'Design')).toBeCloseTo(8, 0);
 });
 
-test('a search with no match shows the no-match message and Clear filters on the Timeline', async ({ page, call, roadmap }) => {
+test('FR-1.7: a search with no match shows the no-match message and Clear filters on the Timeline', async ({ page, call, roadmap }) => {
   await seeded(call, roadmap.id);
   await openTimeline(page, roadmap.id, '?q=nothing-like-this');
   await expect(page.getByText('No projects match these filters.', { exact: true })).toBeVisible();
@@ -258,6 +265,8 @@ test('FR-1.7: Zoom changes the scale and is kept in the address', async ({ page,
   await expect(zoom(page)).toHaveValue('months');
   await zoom(page).selectOption({ label: 'Weeks' });
   await expect(page).toHaveURL(`/r/${roadmap.id}/timeline?zoom=weeks`);
+  // A new scale puts today back a third of the way in.
+  await expect.poll(() => todayInView(page)).toBe(true);
   // 57 days at 24 px.
   await expect.poll(() => barWidth(page, 'Launch site')).toBeCloseTo(1368, 0);
   await zoom(page).selectOption({ label: 'Quarters' });
@@ -292,22 +301,16 @@ test('FR-1.7: the Timeline opens with today in view, and Today brings it back', 
   await seeded(call, roadmap.id);
   // At Weeks the schedule is far wider than the window.
   await openTimeline(page, roadmap.id, '?zoom=weeks');
-  const todayInView = async () => {
-    const shown = await box(frame(page));
-    const names = await box(nameHeader(page));
-    const line = await box(row(page, 'Launch site').locator('.today-line'));
-    return line.x >= names.x + names.width && line.x + line.width <= shown.x + shown.width;
-  };
-  await expect.poll(todayInView).toBe(true);
+  await expect.poll(() => todayInView(page)).toBe(true);
   await frame(page).evaluate((el) => {
     el.scrollLeft = el.scrollWidth;
   });
-  await expect.poll(todayInView).toBe(false);
+  await expect.poll(() => todayInView(page)).toBe(false);
   await page.getByRole('button', { name: 'Today', exact: true }).click();
-  await expect.poll(todayInView).toBe(true);
+  await expect.poll(() => todayInView(page)).toBe(true);
 });
 
-test('Review focus 1: items in 1900 and 2200 give a track no wider than 24,000 px', async ({ page, call, roadmap }) => {
+test('FR-1.7: Review focus 1: items in 1900 and 2200 give a track no wider than 24,000 px', async ({ page, call, roadmap }) => {
   const base = `/api/roadmaps/${roadmap.id}/projects`;
   const old = await seedProject(call, roadmap.id, 'Old');
   const far = await seedProject(call, roadmap.id, 'Far');
@@ -334,6 +337,9 @@ test('FR-1.9: at 375 px the timeline scrolls sideways inside its frame and the p
   expect((await box(nameHeader(page))).width).toBeCloseTo(140, 0);
   await expect(row(page, 'Launch site').getByRole('button', { name: 'Actions for Launch site', exact: true })).toBeHidden();
   await expect(row(page, 'Launch site').getByRole('button', { name: /^Status of Launch site/ })).toBeHidden();
+  // The status is still said, as text: no button in the row can take focus for it.
+  await expect(row(page, 'Launch site').getByRole('rowheader')).toHaveAccessibleName(/Not started/);
+  await expect(row(page, 'Launch site').getByRole('button', { name: /Status of/ })).toHaveCount(0);
 
   await frame(page).evaluate((el) => {
     el.scrollLeft = el.scrollWidth;
@@ -361,15 +367,7 @@ test('FR-1.7: the name column stays in place while the bars scroll', async ({ pa
   await expect.poll(async () => (await box(bar)).x).toBeCloseTo(before.bar - 400, 0);
   expect((await box(link)).x).toBeCloseTo(before.name, 0);
   // The bars pass under the names, not over them.
-  const name = await box(link);
-  const onTop = await link.evaluate(
-    (el, { x, y }) => {
-      const top = document.elementFromPoint(x, y);
-      return top === el || el.contains(top);
-    },
-    { x: name.x + name.width / 2, y: name.y + name.height / 2 },
-  );
-  expect(onTop).toBe(true);
+  await expectFullyShown(page, link);
 });
 
 test('FR-1.9: the Timeline passes axe at 375 px', async ({ page, call, roadmap }) => {

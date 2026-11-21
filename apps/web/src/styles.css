@@ -1001,11 +1001,27 @@ select {
     min-width: 140px;
     max-width: 140px;
   }
-  /* The status and the Actions menu are in the panel and the List. */
+  /* The status pill and the Actions menu are in the panel and the List; the status is said as text instead. */
   .timeline .name-cell .menu,
   .timeline .name-cell .pill {
     display: none;
   }
+  .timeline .name-cell .narrow-status {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+/* From 600 px the pill says the status. */
+.narrow-status {
+  display: none;
 }
 .axis {
   position: relative;

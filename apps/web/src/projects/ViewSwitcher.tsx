@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { isPlainClick } from '../ui/isPlainClick.ts';
 
 export type ProjectView = 'list' | 'timeline' | 'board';
 
@@ -31,7 +32,7 @@ export function ViewSwitcher({ roadmapId, view, search, onNavigate, views }: Vie
             aria-current={v === view ? 'page' : undefined}
             onClick={(e) => {
               // Plain clicks go through the page; a new-tab click keeps its default.
-              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              if (!isPlainClick(e)) return;
               e.preventDefault();
               onNavigate(path);
             }}

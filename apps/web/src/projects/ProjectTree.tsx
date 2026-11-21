@@ -16,6 +16,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Fragment, useCallback, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
 import { AddItemRow } from './AddItemRow.tsx';
 import { StatusMenu } from './StatusMenu.tsx';
@@ -305,7 +306,7 @@ export function ProjectTree(props: TreeProps) {
                 aria-current={item.id === selectedId ? 'true' : undefined}
                 onClick={(e) => {
                   // Plain clicks go through the page; a new-tab click keeps its default.
-                  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  if (!isPlainClick(e)) return;
                   e.preventDefault();
                   onOpen(item.id);
                 }}

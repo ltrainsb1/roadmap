@@ -12,6 +12,7 @@ export function StatusMenu({ item, editable, onChange }: { item: Project; editab
       label={`Status of ${item.title}: ${statusName(item.status)}`}
       buttonId={statusButtonId(item.id)}
       triggerClassName="pill-button"
+      align="start"
       trigger={<span className="pill">{statusName(item.status)}</span>}
       items={PROJECT_STATUSES.map((status) => ({
         label: statusName(status),

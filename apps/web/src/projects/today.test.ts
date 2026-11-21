@@ -6,4 +6,8 @@ describe('FR-1.7 today', () => {
     expect(todayIn('Pacific/Auckland', new Date('2027-03-15T12:00:00Z'))).toBe('2027-03-16');
     expect(todayIn('America/Los_Angeles', new Date('2027-03-15T05:00:00Z'))).toBe('2027-03-14');
   });
+
+  test('a zone the browser does not know falls back to UTC', () => {
+    expect(todayIn('Not/AZone', new Date('2027-03-15T12:00:00Z'))).toBe('2027-03-15');
+  });
 });

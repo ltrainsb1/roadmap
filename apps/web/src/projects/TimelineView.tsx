@@ -13,6 +13,7 @@ import {
 } from '@roadmap/shared';
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Menu } from '../ui/Menu.tsx';
 import { formatDates, formatMilestone, levelName, warningText } from './names.ts';
 import { actionsButtonId, Chevron, titleLinkId, WarningIcon } from './ProjectTree.tsx';
@@ -98,7 +99,7 @@ export function TimelineView(props: TimelineViewProps) {
                 aria-current={item.id === selectedId ? 'true' : undefined}
                 onClick={(e) => {
                   // Plain clicks go through the page; a new-tab click keeps its default.
-                  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  if (!isPlainClick(e)) return;
                   e.preventDefault();
                   actions.openItem(item.id);
                 }}

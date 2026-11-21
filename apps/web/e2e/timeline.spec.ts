@@ -182,3 +182,27 @@ test('a Contributor who is not assigned sees plain status text and no Archive or
   await expect(page.getByRole('menuitem', { name: 'Delete', exact: true })).toHaveCount(0);
   await guest.context.close();
 });
+
+test('a row menu opened on the last row is fully visible and not clipped by the timeline frame', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await seeded(call, roadmap.id);
+  // Enough rows to run past the bottom of the window, so the last row sits at the bottom of the frame and the page.
+  for (let i = 1; i <= 12; i++) await seedProject(call, roadmap.id, `Row ${i}`);
+  await openTimeline(page, roadmap.id);
+  await page.getByRole('button', { name: 'Actions for Row 12', exact: true }).click();
+  const remove = page.getByRole('menuitem', { name: 'Delete', exact: true });
+  await expect(remove).toBeVisible();
+  const box = (await remove.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  const hit = await remove.evaluate((item, { x, y }) => {
+    const top = document.elementFromPoint(x, y);
+    return top === item || item.contains(top);
+  }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  expect(hit).toBe(true);
+  // The frame did not scroll down to make room for the list, so the dates header is still in view.
+  expect(await page.locator('.timeline-frame').evaluate((el) => el.scrollTop)).toBe(0);
+});

@@ -1096,8 +1096,9 @@ select {
 .bar.status-cancelled {
   background: repeating-linear-gradient(135deg, #6b7280 0 4px, #d1d5db 4px 8px);
 }
+/* Lighter, but every status keeps 3:1 against the white row: grey 3.28, blue 4.44, red 4.69, green 3.51. */
 .timeline tr.context .bar {
-  opacity: 0.5;
+  opacity: 0.8;
 }
 .milestone {
   position: absolute;

@@ -128,13 +128,17 @@ function Column({ status, count, children }: { status: ProjectStatus; count: num
 
 type CardProps = Omit<Parameters<typeof BoardCard>[0], 'handle' | 'dragging' | 'ref'> & { movable: boolean };
 
-/** A card with its drag handle, when it may be moved. Only the handle starts a drag. */
+/**
+ * A card with its drag handle, when it may be moved. Only the handle starts a drag. The handle is left out of the tab
+ * order: the Board has no keyboard drag, and the card's status menu is the keyboard path.
+ */
 function MovableCard({ movable, ...props }: CardProps) {
   const { item } = props;
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
     id: item.id,
     data: { status: item.status },
     disabled: !movable,
+    attributes: { tabIndex: -1 },
   });
   const handle = movable ? (
     <button ref={setActivatorNodeRef} type="button" className="icon-btn drag-handle" aria-label={`Move ${item.title}`} {...attributes} {...listeners}>

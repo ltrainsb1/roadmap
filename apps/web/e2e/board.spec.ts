@@ -436,6 +436,17 @@ test('FR-1.7: screen readers are told what happened', async ({ page, call, roadm
   await expect(column(page, 'Done, 1 item')).toContainText('Hire');
 });
 
+test('FR-1.7: the drag handle is not a tab stop: Tab goes from the title to the status menu', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  // Still named for pointer and touch users.
+  await expect(handle(page, 'Hire')).toBeVisible();
+  await card(page, 'Hire').getByRole('link', { name: 'Hire', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  await expect(card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Not started', exact: true })).toBeFocused();
+});
+
 test('FR-1.7: the Board passes axe with a card picked up', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await seeded(call, roadmap.id);

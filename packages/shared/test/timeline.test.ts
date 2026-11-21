@@ -106,4 +106,33 @@ describe('timeline maths', () => {
   test('minor ticks are dropped when too narrow', () => {
     expect(timelineTicks(huge, 'weeks').minor).toEqual([]);
   });
+
+  test('month names are fixed, whatever the ICU version says', () => {
+    const range = timelineRange([make('s', { startDate: '2027-09-10', endDate: '2027-09-20' })], '2027-09-15', 'months');
+    expect(timelineTicks(range, 'months').minor.map((t) => t.label)).toEqual(['Aug', 'Sep', 'Oct']);
+    const weeks = timelineRange([make('s', { startDate: '2027-09-10', endDate: '2027-09-20' })], '2027-09-15', 'weeks');
+    expect(timelineTicks(weeks, 'weeks').major.map((t) => t.label)).toEqual(['August 2027', 'September 2027', 'October 2027']);
+  });
+
+  test('a week the range start cuts has an empty label', () => {
+    const range = timelineRange([make('w', { startDate: '2027-10-05', endDate: '2027-10-20' })], '2027-10-10', 'weeks');
+    expect(range.start).toBe('2027-09-01');
+    const { minor } = timelineTicks(range, 'weeks');
+    expect(minor[0]).toMatchObject({ date: '2027-09-01', label: '', width: 5 * 24 });
+    expect(minor[1]).toMatchObject({ date: '2027-09-06', label: '6' });
+  });
+
+  test('at weeks, months too narrow for headings give way to years', () => {
+    const { major } = timelineTicks(huge, 'weeks');
+    expect(huge.start).toBe('1899-12-01');
+    expect(major[0]!.label).toBe('1899');
+    expect(major.reduce((sum, t) => sum + t.width, 0)).toBeCloseTo(huge.width);
+  });
+
+  test('range edges at year ends and in leap years', () => {
+    const at = (startDate: string, endDate: string) => timelineRange([make('e', { startDate, endDate })], startDate, 'months');
+    expect(at('2027-01-10', '2027-01-20').start).toBe('2026-12-01');
+    expect(at('2027-12-01', '2027-12-10').end).toBe('2028-01-31');
+    expect(at('2027-12-01', '2028-01-15').end).toBe('2028-02-29');
+  });
 });

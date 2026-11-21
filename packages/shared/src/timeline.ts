@@ -110,20 +110,24 @@ const nextUnit = (day: number, unit: Unit): number => {
   return utcDay(year + 1, 0, 1);
 };
 
-const format = (day: number, options: Intl.DateTimeFormatOptions): string =>
-  new Intl.DateTimeFormat('en-GB', { ...options, timeZone: 'UTC' }).format(new Date(day * MS_PER_DAY));
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+/** Fixed names, not Intl: short month names differ between ICU versions ("Sep" or "Sept"). */
 const labelOf = (day: number, unit: Unit): string => {
   if (unit === 'week') return String(new Date(day * MS_PER_DAY).getUTCDate());
-  if (unit === 'month') return format(day, { month: 'short' });
+  if (unit === 'month') return MONTHS[ymd(day).month]!.slice(0, 3);
   if (unit === 'quarter') return `Q${Math.floor(ymd(day).month / 3) + 1}`;
-  return format(day, { year: 'numeric' });
+  return String(ymd(day).year);
 };
 
 const majorLabel = (day: number, unit: Unit): string =>
-  unit === 'month' ? format(day, { month: 'long', year: 'numeric' }) : labelOf(day, unit);
+  unit === 'month' ? `${MONTHS[ymd(day).month]!} ${ymd(day).year}` : labelOf(day, unit);
 
-function ticksOf(range: TimelineRange, unit: Unit, label: (day: number, unit: Unit) => string): TimelineTick[] {
+/** A week the range start cuts has no label: its Monday is in the previous month, under the wrong heading. */
+const minorLabel = (day: number, unit: Unit, rangeStart: number): string =>
+  unit === 'week' && day < rangeStart ? '' : labelOf(day, unit);
+
+function ticksOf(range: TimelineRange, unit: Unit, label: (day: number, unit: Unit, rangeStart: number) => string): TimelineTick[] {
   const rangeStart = dayNumber(range.start);
   const rangeEnd = dayNumber(range.end);
   const ticks: TimelineTick[] = [];
@@ -134,7 +138,7 @@ function ticksOf(range: TimelineRange, unit: Unit, label: (day: number, unit: Un
       date: dateOf(from),
       left: (from - rangeStart) * range.dayWidth,
       width: (to - from + 1) * range.dayWidth,
-      label: label(period, unit),
+      label: label(period, unit, rangeStart),
     });
   }
   return ticks;
@@ -147,13 +151,17 @@ const UNITS: Record<TimelineZoom, { major: Unit; minor: Unit }> = {
 };
 
 const MIN_TICK_WIDTH = 24;
+const MIN_MONTH_HEADING_WIDTH = 48;
 
 /** Upper and lower header rows. `minor` is empty when its ticks would average under 24 px wide. */
 export function timelineTicks(range: TimelineRange, zoom: TimelineZoom): { major: TimelineTick[]; minor: TimelineTick[] } {
   const units = UNITS[zoom];
-  const minor = ticksOf(range, units.minor, labelOf);
+  const minor = ticksOf(range, units.minor, minorLabel);
+  let major = ticksOf(range, units.major, majorLabel);
+  // Too many months to read as headings: show the years instead.
+  if (zoom === 'weeks' && range.width / major.length < MIN_MONTH_HEADING_WIDTH) major = ticksOf(range, 'year', majorLabel);
   return {
-    major: ticksOf(range, units.major, majorLabel),
+    major,
     minor: range.width / minor.length < MIN_TICK_WIDTH ? [] : minor,
   };
 }

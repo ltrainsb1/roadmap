@@ -25,7 +25,6 @@ test('FR-1.4: an Admin opens an item, changes title, description, status and dat
   await expect(panel.getByRole('heading', { name: 'Launch site', level: 2 })).toBeFocused();
 
   await panel.getByLabel('Title', { exact: true }).fill('Launch the new site');
-  await page.goto(`/r/${id}/projects`);
   await panel.getByLabel('Description', { exact: true }).fill('Move every page to the new design.');
   await panel.getByLabel('Status', { exact: true }).selectOption({ label: 'In progress' });
   await panel.getByLabel('Start date', { exact: true }).fill('2027-03-03');
@@ -314,7 +313,7 @@ test('saving an item that another session deleted explains it and shows the miss
   await other.context.close();
 });
 
-test('saving after being unassigned explains it', async ({ page, browser, call, roadmap }) => {
+test('saving after being unassigned explains it', async ({ browser, call, roadmap }) => {
   const id = roadmap.id;
   const guest = await joinByApi(browser, call, id, 'contributor', 'dropped');
   const itemId = await seedProject(call, id, 'Was mine');
@@ -327,7 +326,6 @@ test('saving after being unassigned explains it', async ({ page, browser, call, 
   const panel = panelOf(p, 'Was mine');
   await panel.getByLabel('Description', { exact: true }).fill('My unsaved notes');
 
-  await page.goto(`/r/${id}/projects`);
   // An Admin unassigns them; their page has not refetched.
   await call('PUT', `/api/roadmaps/${id}/projects/${itemId}/assignees`, { userIds: [] });
   await panel.getByRole('button', { name: 'Save', exact: true }).click();

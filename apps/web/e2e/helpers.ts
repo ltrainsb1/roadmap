@@ -177,15 +177,6 @@ export async function signInWithRecoveryCode(page: Page, email: string, code: st
   await expect(page).toHaveURL('/');
 }
 
-/** An owner with an authenticator app, signed in on `page` and looking at the roadmap list. */
-export async function createSignedInUser(page: Page, label: string): Promise<TestUser> {
-  const user = await createEnrolledUser(page, label);
-  await signInWithTotp(page, user.email, user.secret);
-  await expect(page).toHaveURL('/');
-  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
-  return user;
-}
-
 /** Creates a roadmap from the picker; returns its id once the page has moved into it. */
 export async function createRoadmap(page: Page, name: string): Promise<string> {
   await page.goto('/');

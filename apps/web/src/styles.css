@@ -1215,10 +1215,15 @@ select {
 }
 /* The title has the card's width to itself, so a narrow column does not squeeze it between the controls. */
 .card-title {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
   margin: 4px 0;
 }
 .card-title .item-title {
   display: block;
+  flex: 1;
+  min-width: 0;
   /* Breaks between words where it can, and inside a word only when the word is wider than the card. */
   overflow-wrap: break-word;
 }

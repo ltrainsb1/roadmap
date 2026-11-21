@@ -110,6 +110,19 @@ test('FR-1.7: a card shows assignees, dates and the priority label', async ({ pa
   await expect(card(page, 'Hire')).not.toContainText('In ');
 });
 
+test('FR-1.7: a card that starts before its blocker ends shows the warning icon', async ({ page, call, roadmap }) => {
+  const blocker = await seedProject(call, roadmap.id, 'Foundations');
+  const item = await seedProject(call, roadmap.id, 'Walls');
+  const base = `/api/roadmaps/${roadmap.id}/projects`;
+  await call('PATCH', `${base}/${blocker}`, { version: 1, startDate: '2027-01-01', endDate: '2027-06-01' });
+  await call('PATCH', `${base}/${item}`, { version: 1, startDate: '2027-05-01', endDate: '2027-07-01', blockedBy: [blocker] });
+  await openBoard(page, roadmap.id);
+  const warning = card(page, 'Walls').getByRole('img', { name: 'Has warnings' });
+  await expect(warning).toBeVisible();
+  await expect(card(page, 'Walls').locator('.warning')).toHaveAttribute('title', 'Starts before Foundations ends.');
+  await expect(card(page, 'Foundations').getByRole('img', { name: 'Has warnings' })).toHaveCount(0);
+});
+
 test("FR-1.7: Level shows another level, names each card's parent, and is kept in the address", async ({ page, call, roadmap }) => {
   await seeded(call, roadmap.id);
   await openBoard(page, roadmap.id);

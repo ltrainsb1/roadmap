@@ -1,7 +1,7 @@
 import type { Project, ProjectStatus } from '@roadmap/shared';
 import type { ReactNode, Ref } from 'react';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
-import { actionsButtonId, TitleLink } from './itemParts.tsx';
+import { actionsButtonId, TitleLink, WarningIcon } from './itemParts.tsx';
 import { formatDates, levelName } from './names.ts';
 import { StatusMenu } from './StatusMenu.tsx';
 
@@ -10,6 +10,8 @@ interface BoardCardProps {
   /** The title of the item this one belongs to; undefined on the Projects level. */
   parentTitle: string | undefined;
   assigneeNames: string[];
+  /** The item's date warnings in words; the icon is shown when there are any. */
+  warnings: string[];
   /** Whether the person may change this item's status here. */
   editable: boolean;
   selected: boolean;
@@ -29,12 +31,13 @@ interface BoardCardProps {
  * One item on the Board: its title on a line of its own, then its parent, assignees, dates and badges, then a row with
  * the drag handle, the status and the Actions menu.
  */
-export function BoardCard({ item, parentTitle, assigneeNames, editable, selected, href, onOpen, onChangeStatus, menu, handle, dragging = false, ref }: BoardCardProps) {
+export function BoardCard({ item, parentTitle, assigneeNames, warnings, editable, selected, href, onOpen, onChangeStatus, menu, handle, dragging = false, ref }: BoardCardProps) {
   return (
     <li ref={ref} className={`card${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}`}>
       <p className="card-title">
         <span className="sr-only">{levelName(item.depth)}: </span>
         <TitleLink item={item} href={href} selected={selected} onOpen={onOpen} />
+        {warnings.length > 0 && <WarningIcon texts={warnings} />}
       </p>
       {parentTitle !== undefined && <p className="card-parent">In {parentTitle}</p>}
       <p className="card-meta">

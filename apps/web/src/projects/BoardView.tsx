@@ -1,4 +1,4 @@
-import { can, filterProjects, PROJECT_STATUSES, treeOrder, type Project, type ProjectFilters, type ProjectStatus, type Role } from '@roadmap/shared';
+import { can, filterProjects, PROJECT_STATUSES, projectWarnings, treeOrder, type Project, type ProjectFilters, type ProjectStatus, type Role } from '@roadmap/shared';
 import {
   DndContext,
   DragOverlay,
@@ -18,7 +18,7 @@ import { Button } from '../ui/Button.tsx';
 import { BoardCard } from './BoardCard.tsx';
 import { hasNarrowing, type ViewOptions } from './filters.ts';
 import { dragHandleIcon, titleLinkId } from './itemParts.tsx';
-import { itemCount, levelPlural, statusName } from './names.ts';
+import { itemCount, levelPlural, statusName, warningText } from './names.ts';
 import { statusButtonId } from './StatusMenu.tsx';
 import type { ItemActions } from './useItemActions.tsx';
 import { isAssigned } from './useProjects.ts';
@@ -256,6 +256,7 @@ export function BoardView({ role, myId, items, filters, level, byId, memberNames
                         item={{ ...item, status }}
                         parentTitle={item.parentId === null ? undefined : byId.get(item.parentId)?.title}
                         assigneeNames={item.assigneeIds.map((id) => memberNames.get(id)).filter((n): n is string => n !== undefined)}
+                        warnings={projectWarnings(item, byId).map((w) => warningText(w, byId))}
                         editable={editable}
                         movable={editable}
                         selected={item.id === selectedId}

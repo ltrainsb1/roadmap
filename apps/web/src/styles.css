@@ -1198,12 +1198,27 @@ select {
   border-color: var(--primary);
   box-shadow: inset 0 0 0 1px var(--primary);
 }
-.card-head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.card.dragging {
+  /* Where the card was picked up from; its text keeps full contrast. */
+  background: var(--surface);
+  border-style: dashed;
+  border-color: var(--primary);
 }
-.card-head .item-title {
+.board-column.over {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+/* The copy of a card that follows the pointer while it is dragged. */
+.drag-overlay {
+  cursor: grabbing;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+}
+/* The title has the card's width to itself, so a narrow column does not squeeze it between the controls. */
+.card-title {
+  margin: 4px 0;
+}
+.card-title .item-title {
+  display: block;
   /* Breaks between words where it can, and inside a word only when the word is wider than the card. */
   overflow-wrap: break-word;
 }
@@ -1218,9 +1233,38 @@ select {
   flex-wrap: wrap;
   gap: 0 12px;
 }
-.card-foot {
+.card-badges {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 4px 8px;
+  margin: 0 0 4px;
+}
+/* The handle, the status and the Actions menu share one row under the title. In a card too narrow for the three
+   (a column of 150 to 230 px, from 900 px wide or beside the panel), the status goes on a line of its own below the
+   handle and the Actions menu. */
+.card {
+  container-type: inline-size;
+}
+.card-foot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'handle status actions';
+  align-items: center;
+  gap: 0 4px;
+}
+.card-foot > .drag-handle {
+  grid-area: handle;
+}
+.card-status {
+  grid-area: status;
+}
+.card-actions {
+  grid-area: actions;
+}
+@container (max-width: 200px) {
+  .card-foot {
+    grid-template-areas:
+      'handle . actions'
+      'status status status';
+  }
 }

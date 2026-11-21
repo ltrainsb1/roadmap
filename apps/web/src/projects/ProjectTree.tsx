@@ -97,7 +97,7 @@ const sameGroupKeyboard: KeyboardCoordinateGetter = (event, args) => {
   });
 };
 
-const dragHandleIcon = (
+export const dragHandleIcon = (
   <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
     <circle cx="5.5" cy="4" r="1.25" fill="currentColor" />
     <circle cx="10.5" cy="4" r="1.25" fill="currentColor" />

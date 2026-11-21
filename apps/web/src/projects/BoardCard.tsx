@@ -1,5 +1,5 @@
 import type { Project, ProjectStatus } from '@roadmap/shared';
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { Link } from 'react-router-dom';
 import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
@@ -22,14 +22,19 @@ interface BoardCardProps {
   menu: MenuItem[];
   /** The drag handle, or null when the card can't be dragged. */
   handle: ReactNode;
+  /** Whether the card is the one being dragged: its copy follows the pointer and this one stays, outlined. */
+  dragging?: boolean;
+  ref?: Ref<HTMLLIElement>;
 }
 
-/** One item on the Board: its title, parent, assignees, dates, label and status, and its Actions menu. */
-export function BoardCard({ item, parentTitle, assigneeNames, editable, selected, href, onOpen, onChangeStatus, menu, handle }: BoardCardProps) {
+/**
+ * One item on the Board: its title on a line of its own, then its parent, assignees, dates and badges, then a row with
+ * the drag handle, the status and the Actions menu.
+ */
+export function BoardCard({ item, parentTitle, assigneeNames, editable, selected, href, onOpen, onChangeStatus, menu, handle, dragging = false, ref }: BoardCardProps) {
   return (
-    <li className={`card${selected ? ' selected' : ''}`}>
-      <div className="card-head">
-        {handle}
+    <li ref={ref} className={`card${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}`}>
+      <p className="card-title">
         <span className="sr-only">{levelName(item.depth)}: </span>
         <Link
           id={titleLinkId(item.id)}
@@ -45,17 +50,26 @@ export function BoardCard({ item, parentTitle, assigneeNames, editable, selected
         >
           {item.title}
         </Link>
-        <Menu label={`Actions for ${item.title}`} buttonId={actionsButtonId(item.id)} items={menu} />
-      </div>
+      </p>
       {parentTitle !== undefined && <p className="card-parent">In {parentTitle}</p>}
       <p className="card-meta">
         <span>{assigneeNames.length > 0 ? assigneeNames.join(', ') : 'Unassigned'}</span>
         <span>{formatDates(item.startDate, item.endDate)}</span>
       </p>
+      {(item.priorityLabel || item.archived) && (
+        <p className="card-badges">
+          {item.priorityLabel && <span className="badge">{item.priorityLabel}</span>}
+          {item.archived && <span className="badge">Archived</span>}
+        </p>
+      )}
       <div className="card-foot">
-        <StatusMenu item={item} editable={editable} onChange={onChangeStatus} />
-        {item.priorityLabel && <span className="badge">{item.priorityLabel}</span>}
-        {item.archived && <span className="badge">Archived</span>}
+        {handle}
+        <span className="card-status">
+          <StatusMenu item={item} editable={editable} onChange={onChangeStatus} />
+        </span>
+        <span className="card-actions">
+          <Menu label={`Actions for ${item.title}`} buttonId={actionsButtonId(item.id)} items={menu} />
+        </span>
       </div>
     </li>
   );

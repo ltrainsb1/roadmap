@@ -41,6 +41,15 @@ export function filtersFromSearch(params: URLSearchParams): ProjectFilters {
 /** The assignee value that stands for the signed-in person. */
 export const ME = 'me';
 
+/**
+ * The filters as they apply to whoever reads the page: "Assigned to me" becomes their id, whoever wrote the address.
+ * It stays "me", which matches nobody, while the person is not known yet.
+ */
+export const filtersForReader = (f: ProjectFilters, myId: string | undefined): ProjectFilters => ({
+  ...f,
+  assigneeIds: f.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id)),
+});
+
 /** The query string for `f`; empty when nothing is set. Multi-value fields repeat their key. */
 export function filtersToSearch(f: ProjectFilters): URLSearchParams {
   const params = new URLSearchParams();
@@ -93,8 +102,6 @@ const NONE: ReadonlySet<string> = new Set();
 /** The items the list shows, and those shown only for context, for these filters. */
 export function viewOf(items: readonly Project[], filters: ProjectFilters, myId: string | undefined) {
   if (!hasNarrowing(filters) && !filters.showArchived) return { items: items.filter((i) => !i.archived), context: NONE };
-  // "Assigned to me" is the reader, whoever wrote the address.
-  const mine = filters.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id));
-  const { matches, context } = filterProjects(items, { ...filters, assigneeIds: mine });
+  const { matches, context } = filterProjects(items, filtersForReader(filters, myId));
   return { items: items.filter((i) => matches.has(i.id) || context.has(i.id)), context };
 }

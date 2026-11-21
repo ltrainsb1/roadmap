@@ -12,7 +12,7 @@ import { Field } from '../ui/Field.tsx';
 import { SelectField } from '../ui/SelectField.tsx';
 import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
 import { BoardView } from './BoardView.tsx';
-import { filtersFromSearch, hasNarrowing, ME, searchFor, viewOf, viewOptionsFromSearch, type ViewOptions } from './filters.ts';
+import { filtersForReader, filtersFromSearch, hasNarrowing, searchFor, viewOf, viewOptionsFromSearch, type ViewOptions } from './filters.ts';
 import { levelPlural } from './names.ts';
 import {
   actionsButtonId,
@@ -76,10 +76,7 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
   const setZoom = (zoom: TimelineZoom) => setParams(searchFor(filters, { ...options, zoom }), { replace: true });
   const setLevel = (level: ViewOptions['level']) => setParams(searchFor(filters, { ...options, level }), { replace: true });
   // The Board filters the whole roadmap itself, so "Assigned to me" must already name the reader.
-  const boardFilters = useMemo(
-    () => ({ ...filters, assigneeIds: filters.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id)) }),
-    [filters, myId],
-  );
+  const boardFilters = useMemo(() => filtersForReader(filters, myId), [filters, myId]);
   // Counts presses of "Today"; the Timeline scrolls to today each time it changes.
   const [todaySignal, setTodaySignal] = useState(0);
   const closeFilters = () => {
@@ -282,6 +279,7 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
                 roadmapId={roadmapId}
                 search={search}
                 actions={actions}
+                onClearFilters={clearFiltersFromNoMatch}
               />
             )}
             {view === 'list' && (shown.length > 0 || adding !== null) && (

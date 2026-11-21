@@ -16,6 +16,38 @@ const box = async (locator: Locator) => {
   expect(b).not.toBeNull();
   return b!;
 };
+const handle = (page: Page, title: string) => page.getByRole('button', { name: `Move ${title}`, exact: true });
+const centre = (b: { x: number; y: number; width: number; height: number }) => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
+const READ_ONLY = 'Only people assigned to this item, Owners and Admins can change it.';
+const CONFLICT = 'Someone else changed this at the same time. Reload and try again.';
+
+/** Presses the mouse on `title`'s handle and moves it a little, which picks the card up. */
+async function pickUp(page: Page, title: string) {
+  const from = centre(await box(handle(page, title)));
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 10, from.y + 10, { steps: 3 });
+  await expect(page.getByText(`Picked up ${title}.`, { exact: true })).toBeAttached();
+}
+
+/** Moves the picked-up card to the middle of `target` in steps, as a hand would, and lets go. */
+async function dropOn(page: Page, target: Locator) {
+  const to = centre(await box(target));
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+  await page.mouse.up();
+}
+
+/** Drags `title`'s card by its handle with the mouse onto `target`. */
+async function drag(page: Page, title: string, target: Locator) {
+  await pickUp(page, title);
+  await dropOn(page, target);
+}
+
+/** The id of a member, by email. */
+async function memberId(call: ApiCall, roadmapId: string, email: string) {
+  const { members } = await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${roadmapId}/members`);
+  return members.find((m) => m.email === email)!.userId;
+}
 
 /**
  * "Launch site" (in progress, assigned to the owner, 3 Mar to 28 Apr 2027, P1) holding "Design" (done) and "Build"
@@ -217,4 +249,238 @@ test('FR-1.9: the Board passes axe at 375 px', async ({ page, call, roadmap }) =
   await openBoard(page, roadmap.id);
   await expect(card(page, 'Hire')).toBeVisible();
   await expectNoA11yViolations(page);
+});
+
+test('FR-1.7: dragging a card to another column changes its status, and it is still there after a reload', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  await drag(page, 'Hire', column(page, 'Done, 0 items'));
+  await expect(column(page, 'Done, 1 item')).toContainText('Hire');
+  await expect(column(page, 'Not started, 0 items')).toContainText('No items');
+  await expect(card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Done', exact: true })).toBeVisible();
+  await expect(card(page, 'Hire')).not.toHaveClass(/dragging/);
+  await page.reload();
+  await expect(column(page, 'Done, 1 item')).toContainText('Hire');
+});
+
+test('FR-1.7: dropping a card on its own column or outside the board changes nothing', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  let saves = 0;
+  page.on('request', (r) => {
+    if (r.method() === 'PATCH' && /\/api\/roadmaps\/[^/]+\/projects\/[^/]+$/.test(new URL(r.url()).pathname)) saves += 1;
+  });
+
+  await drag(page, 'Hire', column(page, 'Not started, 1 item'));
+  await expect(page.getByText('Move cancelled.', { exact: true })).toBeAttached();
+  await expect(column(page, 'Not started, 1 item')).toContainText('Hire');
+
+  await pickUp(page, 'Hire');
+  await expect(page.getByText('Move cancelled.', { exact: true })).toHaveCount(0);
+  await dropOn(page, page.getByRole('heading', { name: 'Projects', level: 1 }));
+  await expect(page.getByText('Move cancelled.', { exact: true })).toBeAttached();
+  await expect(column(page, 'Not started, 1 item')).toContainText('Hire');
+  await expect(card(page, 'Hire')).not.toHaveClass(/dragging/);
+
+  // A save would have gone out as the card was dropped.
+  expect(saves).toBe(0);
+  await page.reload();
+  await expect(column(page, 'Not started, 1 item')).toContainText('Hire');
+  // The status menu's save is counted, so the count above is not zero for want of seeing requests.
+  await card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Not started', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'Blocked', exact: true }).click();
+  await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
+  expect(saves).toBe(1);
+});
+
+test('FR-1.7: Review focus 3: a move that conflicts puts the card back and says why', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { base, hire } = await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  await expect(card(page, 'Hire')).toBeVisible();
+  // Someone else blocks it; this page still has the old copy.
+  await call('PATCH', `${base}/${hire}`, { version: 1, status: 'blocked' });
+  await drag(page, 'Hire', column(page, 'Done, 0 items'));
+  await expect(page.getByRole('alert')).toHaveText(CONFLICT);
+  await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
+  await expect(column(page, 'Done, 0 items')).toContainText('No items');
+  await expect(card(page, 'Hire')).not.toHaveClass(/dragging/);
+});
+
+test('FR-1.7: Review focus 4: a Contributor whose assignment was just removed gets the read-only message and the card goes back', async ({ browser, call, roadmap }) => {
+  const { base, hire } = await seeded(call, roadmap.id);
+  const guest = await joinByApi(browser, call, roadmap.id, 'contributor', 'mover');
+  await call('PUT', `${base}/${hire}/assignees`, { userIds: [await memberId(call, roadmap.id, guest.user.email)] });
+  const page = guest.page;
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openBoard(page, roadmap.id);
+  await expect(handle(page, 'Hire')).toBeVisible();
+
+  // The owner unassigns them; their page has not refetched.
+  await call('PUT', `${base}/${hire}/assignees`, { userIds: [] });
+  await drag(page, 'Hire', column(page, 'Done, 0 items'));
+  await expect(page.getByRole('alert')).toHaveText(READ_ONLY);
+  await expect(column(page, 'Not started, 1 item')).toContainText('Hire');
+  await expect(column(page, 'Done, 0 items')).toContainText('No items');
+  await expect(card(page, 'Hire')).not.toHaveClass(/dragging/);
+  // The refetched list says they may no longer move it.
+  await expect(handle(page, 'Hire')).toHaveCount(0);
+  await guest.context.close();
+});
+
+test("FR-1.7: Review focus 5: moving the card of the open item updates the panel's Status, and Save then works", async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { hire } = await seeded(call, roadmap.id);
+  await page.goto(`/r/${roadmap.id}/board/${hire}`);
+  const panel = panelOf(page, 'Hire');
+  await panel.getByLabel('Title', { exact: true }).fill('Hire two people');
+
+  await drag(page, 'Hire', column(page, 'In progress, 1 item'));
+  await expect(column(page, 'In progress, 2 items')).toContainText('Hire');
+  await expect(panel.getByLabel('Status', { exact: true })).toHaveValue('in_progress');
+  await expect(panel.getByLabel('Status', { exact: true }).locator('option:checked')).toHaveText('In progress');
+  await expect(panel.getByLabel('Title', { exact: true })).toHaveValue('Hire two people');
+
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panelOf(page, 'Hire two people').getByRole('status')).toHaveText('Saved.');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.reload();
+  await expect(column(page, 'In progress, 2 items')).toContainText('Hire two people');
+});
+
+test('FR-1.7: cards that may not be moved have no handle', async ({ page, browser, call, roadmap }) => {
+  const { base, hire } = await seeded(call, roadmap.id);
+  await call('POST', `${base}/${hire}/archive`);
+  await openBoard(page, roadmap.id, '?archived=1');
+  await expect(card(page, 'Hire').getByText('Archived', { exact: true })).toBeVisible();
+  await expect(handle(page, 'Hire')).toHaveCount(0);
+  await expect(handle(page, 'Launch site')).toBeVisible();
+
+  // A Contributor assigned to nothing may move nothing.
+  const guest = await joinByApi(browser, call, roadmap.id, 'contributor', 'onlooker');
+  await openBoard(guest.page, roadmap.id);
+  await expect(card(guest.page, 'Launch site')).toBeVisible();
+  await expect(guest.page.getByRole('button', { name: /^Move / })).toHaveCount(0);
+  await guest.context.close();
+});
+
+test('FR-1.9: a card can be moved by touch at 375 px', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  const from = centre(await box(handle(page, 'Hire')));
+  const next = await box(column(page, 'In progress, 1 item'));
+  const frame = await box(board(page));
+  // A point in the part of the next column that shows at the board's edge, short of the tenth of the board's width
+  // at its edge where holding a card scrolls the board.
+  const to = { x: next.x + 8, y: from.y };
+  expect(to.x).toBeLessThan(frame.x + frame.width * 0.9);
+
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', points: { x: number; y: number }[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map((p) => ({ x: p.x, y: p.y, id: 1 })) });
+  // A long press picks the card up; dnd-kit says so once it has.
+  await touch('touchStart', [from]);
+  await expect(page.getByText('Picked up Hire.', { exact: true })).toBeAttached();
+  for (let i = 1; i <= 10; i += 1) {
+    await touch('touchMove', [{ x: from.x + ((to.x - from.x) * i) / 10, y: from.y }]);
+  }
+  await expect(page.getByText('Hire is over In progress.', { exact: true })).toBeAttached();
+  await touch('touchEnd', []);
+  await expect(page.getByText('Moved Hire to In progress.', { exact: true })).toBeAttached();
+  await expect(column(page, 'In progress, 2 items')).toContainText('Hire');
+  await expect(column(page, 'Not started, 0 items')).toContainText('No items');
+  const { items } = await call<{ items: { title: string; status: string }[] }>('GET', `/api/roadmaps/${roadmap.id}/projects`);
+  expect(items.find((i) => i.title === 'Hire')?.status).toBe('in_progress');
+});
+
+test('FR-1.7: screen readers are told what happened', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  await expect(handle(page, 'Hire')).toHaveAccessibleDescription('Drag this card to another column, or use its status menu.');
+  await pickUp(page, 'Hire');
+  const done = centre(await box(column(page, 'Done, 0 items')));
+  await page.mouse.move(done.x, done.y, { steps: 12 });
+  await expect(page.getByText('Hire is over Done.', { exact: true })).toBeAttached();
+  await page.mouse.up();
+  await expect(page.getByText('Moved Hire to Done.', { exact: true })).toBeAttached();
+  await expect(column(page, 'Done, 1 item')).toContainText('Hire');
+});
+
+test('FR-1.7: the Board passes axe with a card picked up', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  await pickUp(page, 'Hire');
+  const done = centre(await box(column(page, 'Done, 0 items')));
+  await page.mouse.move(done.x, done.y, { steps: 12 });
+  await expect(page.getByText('Hire is over Done.', { exact: true })).toBeAttached();
+  await expectNoA11yViolations(page);
+  await page.mouse.up();
+  await expect(column(page, 'Done, 1 item')).toContainText('Hire');
+});
+
+test('FR-1.7: filters that match nothing at this level show the no-match message on the Board', async ({ page, call, roadmap }) => {
+  // Only "Design", a sub-project, is done.
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id, '?status=done');
+  await expect(page.getByText('No projects match these filters.', { exact: true })).toBeVisible();
+  await expect(board(page)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await expect(page).toHaveURL(`/r/${roadmap.id}/board`);
+  await expect(card(page, 'Hire')).toBeVisible();
+  await expect(card(page, 'Launch site')).toBeVisible();
+  await expect(page.getByText('No projects match these filters.', { exact: true })).toHaveCount(0);
+});
+
+test("FR-1.7: beside the open panel at 1280 px a card's title has the card's width to itself", async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { hire } = await seeded(call, roadmap.id);
+  await page.goto(`/r/${roadmap.id}/board/${hire}`);
+  await expect(panelOf(page, 'Hire')).toBeVisible();
+  const title = await box(card(page, 'Launch site').getByRole('link', { name: 'Launch site', exact: true }));
+  expect(title.width).toBeGreaterThanOrEqual(100);
+  // The handle, the status menu and the Actions menu share a row below the title.
+  const below = await box(handle(page, 'Launch site'));
+  expect(below.y).toBeGreaterThanOrEqual(title.y + title.height);
+  const actionsBox = await box(page.getByRole('button', { name: 'Actions for Launch site', exact: true }));
+  expect(Math.abs(actionsBox.y - below.y)).toBeLessThan(8);
+});
+
+test('FR-1.8: "Assigned to me" on the Board shows only my cards', async ({ page, call, roadmap }) => {
+  // Only "Launch site" is assigned to the owner.
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id, '?assignee=me');
+  await expect(card(page, 'Launch site')).toBeVisible();
+  await expect.poll(() => titlesIn(board(page))).toEqual(['Launch site']);
+});
+
+test("FR-1.7: cards under different parents follow the List's order", async ({ page, call, roadmap }) => {
+  const first = await seedProject(call, roadmap.id, 'First');
+  const second = await seedProject(call, roadmap.id, 'Second');
+  // Made in the other order: the second project's children first.
+  await seedProject(call, roadmap.id, 'Second A', second);
+  await seedProject(call, roadmap.id, 'Second B', second);
+  await seedProject(call, roadmap.id, 'First A', first);
+  await openBoard(page, roadmap.id, '?level=2');
+  await expect.poll(() => titlesIn(column(page, 'Not started, 3 items'))).toEqual(['First A', 'Second A', 'Second B']);
+});
+
+test('FR-1.7: the level is kept when a filter changes and when a card is opened and closed', async ({ page, call, roadmap }) => {
+  const { design } = await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id, '?level=2');
+  await page.getByLabel('Search projects', { exact: true }).fill('Des');
+  await expect(page).toHaveURL(`/r/${roadmap.id}/board?q=Des&level=2`);
+  await expect(level(page)).toHaveValue('2');
+  await expect.poll(() => titlesIn(board(page))).toEqual(['Design']);
+
+  await card(page, 'Design').getByRole('link', { name: 'Design', exact: true }).click();
+  await expect(page).toHaveURL(`/r/${roadmap.id}/board/${design}?q=Des&level=2`);
+  await panelOf(page, 'Design').getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page).toHaveURL(`/r/${roadmap.id}/board?q=Des&level=2`);
+  await expect(level(page)).toHaveValue('2');
+  await expect.poll(() => titlesIn(board(page))).toEqual(['Design']);
 });

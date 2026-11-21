@@ -11,7 +11,9 @@ import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
 import { SelectField } from '../ui/SelectField.tsx';
 import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
-import { filtersFromSearch, hasNarrowing, searchFor, viewOf, viewOptionsFromSearch } from './filters.ts';
+import { BoardView } from './BoardView.tsx';
+import { filtersFromSearch, hasNarrowing, ME, searchFor, viewOf, viewOptionsFromSearch, type ViewOptions } from './filters.ts';
+import { levelPlural } from './names.ts';
 import {
   actionsButtonId,
   NEW_PROJECT_BUTTON_ID,
@@ -34,6 +36,7 @@ import { viewPath, ViewSwitcher, type ProjectView } from './ViewSwitcher.tsx';
 const FILTERS_BUTTON_ID = 'filters-button';
 const SEARCH_ID = 'project-search';
 const ZOOM_NAMES: Record<TimelineZoom, string> = { weeks: 'Weeks', months: 'Months', quarters: 'Quarters' };
+const LEVELS: readonly ViewOptions['level'][] = [1, 2, 3, 4];
 
 /** The items of one roadmap in one view, with the search, filters, view switcher and the item panel. */
 export function ProjectsPage({ view }: { view: ProjectView }) {
@@ -71,6 +74,12 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
   const setFilters = (next: typeof filters) => setParams(searchFor(next, options), { replace: true });
   const clearFilters = () => setParams(searchFor(NO_FILTERS, options), { replace: true });
   const setZoom = (zoom: TimelineZoom) => setParams(searchFor(filters, { ...options, zoom }), { replace: true });
+  const setLevel = (level: ViewOptions['level']) => setParams(searchFor(filters, { ...options, level }), { replace: true });
+  // The Board filters the whole roadmap itself, so "Assigned to me" must already name the reader.
+  const boardFilters = useMemo(
+    () => ({ ...filters, assigneeIds: filters.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id)) }),
+    [filters, myId],
+  );
   // Counts presses of "Today"; the Timeline scrolls to today each time it changes.
   const [todaySignal, setTodaySignal] = useState(0);
   const closeFilters = () => {
@@ -180,7 +189,7 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
                 roadmapId={roadmapId}
                 view={view}
                 search={search}
-                views={['list', 'timeline']}
+                views={['list', 'timeline', 'board']}
                 onNavigate={(path) => actions.unlessDirty(() => void navigate(path))}
               />
               {view === 'timeline' && (
@@ -196,6 +205,22 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
                   </div>
                   <Button onClick={() => setTodaySignal((n) => n + 1)}>Today</Button>
                 </>
+              )}
+              {view === 'board' && (
+                <div className="toolbar-level">
+                  <SelectField
+                    id="board-level"
+                    label="Level"
+                    value={options.level}
+                    onChange={(e) => setLevel(Number(e.target.value) as ViewOptions['level'])}
+                  >
+                    {LEVELS.map((l) => (
+                      <option key={l} value={l}>
+                        {levelPlural(l)}
+                      </option>
+                    ))}
+                  </SelectField>
+                </div>
               )}
             </div>
             <FiltersPanel
@@ -243,6 +268,21 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
                   scrollToTodaySignal={todaySignal}
                 />
               </>
+            )}
+            {view === 'board' && shown.length > 0 && (
+              <BoardView
+                role={role}
+                myId={myId}
+                items={projects.items}
+                filters={boardFilters}
+                level={options.level}
+                byId={projects.byId}
+                memberNames={memberNames}
+                selectedId={selected?.id}
+                roadmapId={roadmapId}
+                search={search}
+                actions={actions}
+              />
             )}
             {view === 'list' && (shown.length > 0 || adding !== null) && (
               <ProjectTree

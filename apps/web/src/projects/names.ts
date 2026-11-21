@@ -15,6 +15,14 @@ const LEVEL_NAMES = ['Project', 'Sub-project', 'Task', 'Sub-task'] as const;
 /** The name of a level: 1 is a Project, 4 a Sub-task. */
 export const levelName = (depth: number): string => LEVEL_NAMES[depth - 1] ?? 'Item';
 
+const LEVEL_PLURALS = ['Projects', 'Sub-projects', 'Tasks', 'Sub-tasks'] as const;
+
+/** The name of a level in the plural, as the Board's "Level" control offers it: 1 is Projects, 4 Sub-tasks. */
+export const levelPlural = (depth: number): string => LEVEL_PLURALS[depth - 1] ?? 'Items';
+
+/** How many cards a column holds: "1 item", "3 items". */
+export const itemCount = (n: number): string => `${n} ${n === 1 ? 'item' : 'items'}`;
+
 /** The menu item that adds an item under one at `depth`; null at the deepest level. */
 export const addChildLabel = (depth: number): string | null => {
   const child = LEVEL_NAMES[depth];

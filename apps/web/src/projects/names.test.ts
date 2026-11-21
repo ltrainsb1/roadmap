@@ -1,6 +1,6 @@
 import type { Project } from '@roadmap/shared';
 import { describe, expect, test } from 'vitest';
-import { addChildLabel, formatDates, formatMilestone, levelName, statusName, warningText } from './names.ts';
+import { addChildLabel, formatDates, formatMilestone, itemCount, levelName, levelPlural, statusName, warningText } from './names.ts';
 
 describe('FR-1.7 project names', () => {
   test.each([
@@ -68,5 +68,22 @@ describe('FR-1.7 warning sentences', () => {
 describe('FR-1.7 milestone phrases', () => {
   test('a milestone reads with its name and date', () => {
     expect(formatMilestone({ name: 'Beta', date: '2027-03-03' })).toBe('Milestone: Beta, 3 Mar 2027');
+  });
+});
+
+describe('FR-1.7 Board names', () => {
+  test.each([
+    [1, 'Projects'],
+    [2, 'Sub-projects'],
+    [3, 'Tasks'],
+    [4, 'Sub-tasks'],
+  ] as const)('level %i in the plural is %s', (depth, name) => {
+    expect(levelPlural(depth)).toBe(name);
+  });
+
+  test('a card count', () => {
+    expect(itemCount(0)).toBe('0 items');
+    expect(itemCount(1)).toBe('1 item');
+    expect(itemCount(3)).toBe('3 items');
   });
 });

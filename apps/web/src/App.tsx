@@ -76,6 +76,7 @@ export function App() {
             <Route index element={<RoadmapIndex />} />
             <Route path="projects/:projectId?" element={<ProjectsRoute view="list" />} />
             <Route path="timeline/:projectId?" element={<ProjectsRoute view="timeline" />} />
+            <Route path="board/:projectId?" element={<ProjectsRoute view="board" />} />
             <Route path="members" element={<MembersPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>

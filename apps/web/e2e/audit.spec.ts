@@ -1,22 +1,12 @@
-import { expect, test } from '@playwright/test';
-import {
-  createRoadmap,
-  createSignedInUser,
-  expectNoA11yViolations,
-  field,
-  inviteAndJoin,
-  sendInvite,
-  uniqueEmail,
-  useCspGuard,
-} from './helpers.ts';
+import { expectNoA11yViolations, field, sendInvite, uniqueEmail, useCspGuard } from './helpers.ts';
+import { expect, joinByApi, test } from './fixtures.ts';
 
 useCspGuard();
 
-test('Admin sees invite and role change events in the audit log and can filter by action', async ({ page, browser }, testInfo) => {
-  await createSignedInUser(page, 'chair');
-  const id = await createRoadmap(page, 'Ledger plan');
-  const admin = await inviteAndJoin(page, browser, testInfo, 'Ledger plan', 'steward', 'Admin');
-  const member = await inviteAndJoin(page, browser, testInfo, 'Ledger plan', 'clerk', 'Contributor');
+test('Admin sees invite and role change events in the audit log and can filter by action', async ({ browser, call, owner, roadmap }) => {
+  const id = roadmap.id;
+  const admin = await joinByApi(browser, call, id, 'admin', 'steward');
+  const member = await joinByApi(browser, call, id, 'contributor', 'clerk');
 
   const a = admin.page;
   await a.goto(`/r/${id}/members`);
@@ -31,7 +21,7 @@ test('Admin sees invite and role change events in the audit log and can filter b
   const log = a.getByRole('list', { name: 'Events' });
   await expect(log.getByRole('listitem').filter({ hasText: "steward user changed clerk user's role from Contributor to Admin." })).toHaveCount(1);
   await expect(log.getByRole('listitem').filter({ hasText: `steward user invited ${invitee} as Contributor.` })).toHaveCount(1);
-  await expect(log.getByRole('listitem').filter({ hasText: 'chair user created the roadmap "Ledger plan".' })).toHaveCount(1);
+  await expect(log.getByRole('listitem').filter({ hasText: `${owner.name} created the roadmap "${roadmap.name}".` })).toHaveCount(1);
   await expect(log.locator('time').first()).toHaveAttribute('datetime', /^\d{4}-\d{2}-\d{2}T/);
   await expectNoA11yViolations(a);
 
@@ -51,11 +41,9 @@ test('Admin sees invite and role change events in the audit log and can filter b
   await member.context.close();
 });
 
-test('Audit log pages with Load more', async ({ page }) => {
-  await createSignedInUser(page, 'pager');
-  const id = await createRoadmap(page, 'Long plan');
-  await sendInvite(page, uniqueEmail('one'), 'Contributor');
-  await sendInvite(page, uniqueEmail('two'), 'Contributor');
+test('Audit log pages with Load more', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
+  for (const label of ['one', 'two']) await call('POST', `/api/roadmaps/${id}/invites`, { email: uniqueEmail(label), role: 'contributor' });
 
   // Ask the real API for two events at a time so a short log still has a second page.
   await page.route('**/api/roadmaps/*/audit*', (route) => {

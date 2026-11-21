@@ -1,16 +1,11 @@
-import { expect, test } from '@playwright/test';
-import {
-  createRoadmap,
-  createSignedInUser,
-  expectNoA11yViolations,
-  field,
-  useCspGuard,
-} from './helpers.ts';
+import { createRoadmap, expectNoA11yViolations, field, useCspGuard } from './helpers.ts';
+import { expect, test } from './fixtures.ts';
 
 useCspGuard();
 
-test('FR-1.1: user creates two roadmaps and switches between them from the picker', async ({ page }) => {
-  await createSignedInUser(page, 'picker');
+test('FR-1.1: user creates two roadmaps and switches between them from the picker', async ({ page, owner }) => {
+  void owner;
+  await page.goto('/');
   await expect(page.getByText("You don't have a roadmap yet.")).toBeVisible();
 
   const alphaId = await createRoadmap(page, 'Alpha plan');
@@ -38,10 +33,9 @@ test('FR-1.1: user creates two roadmaps and switches between them from the picke
   await expect(page.getByRole('alert')).toHaveText("This roadmap doesn't exist, or you don't have access to it.");
 });
 
-test('Signed-in screens pass axe at 375px and 1280px, with no horizontal scroll on mobile', async ({ page }, testInfo) => {
+test('Signed-in screens pass axe at 375px and 1280px, with no horizontal scroll on mobile', async ({ page, roadmap }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile';
-  await createSignedInUser(page, 'axe');
-  const id = await createRoadmap(page, 'Axe plan');
+  const id = roadmap.id;
 
   const screens: [string, string][] = [
     ['/', 'Roadmaps'],

@@ -1,23 +1,19 @@
-import { expect, test } from '@playwright/test';
 import {
   addVirtualAuthenticator,
-  createEnrolledUser,
   expectNoA11yViolations,
   field,
   signIn,
   signInWithRecoveryCode,
-  signInWithTotp,
   totpFor,
   useCspGuard,
   watchCsp,
 } from './helpers.ts';
+import { expect, test } from './fixtures.ts';
 
 useCspGuard();
 
-test('Sign out of all sessions logs out a second browser context', async ({ page, browser }, testInfo) => {
-  const user = await createEnrolledUser(page, 'everywhere');
-  await signInWithTotp(page, user.email, user.secret);
-  await expect(page).toHaveURL('/');
+test('Sign out of all sessions logs out a second browser context', async ({ page, browser, owner: user }, testInfo) => {
+  await page.goto('/');
 
   // A second browser signs in with a recovery code (the authenticator step is used up).
   const use = testInfo.project.use;
@@ -56,18 +52,17 @@ test('Sign out of all sessions logs out a second browser context', async ({ page
   await other.close();
 });
 
-test('Sign out in the header shows the sign-in screen', async ({ page }) => {
-  const user = await createEnrolledUser(page, 'leaver');
-  await signInWithTotp(page, user.email, user.secret);
+test('Sign out in the header shows the sign-in screen', async ({ page, owner }) => {
+  void owner;
+  await page.goto('/');
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible();
   await page.goto('/');
   await expect(page).toHaveURL(/\/login/);
 });
 
-test('Security: new recovery codes need the authenticator code, show once, and replace the old ones (R18)', async ({ page }) => {
-  const user = await createEnrolledUser(page, 'codes');
-  await signInWithRecoveryCode(page, user.email, user.recoveryCodes[0]!);
+test('Security: new recovery codes need the authenticator code, show once, and replace the old ones (R18)', async ({ page, owner: user }) => {
+  await page.goto('/');
   await page.getByRole('link', { name: 'Security' }).click();
   await expect(page.getByText('Your old codes stop working.')).toBeVisible();
 
@@ -106,11 +101,10 @@ test('Security: new recovery codes need the authenticator code, show once, and r
   await expect(page).toHaveURL('/');
 });
 
-test('Security: adding a passkey asks for a code first, and a recovery code works (R18)', async ({ page, browserName }) => {
+test('Security: adding a passkey asks for a code first, and a recovery code works (R18)', async ({ page, browserName, owner: user }) => {
   test.skip(browserName !== 'chromium');
   await addVirtualAuthenticator(page);
-  const user = await createEnrolledUser(page, 'keys');
-  await signInWithTotp(page, user.email, user.secret);
+  await page.goto('/');
   await page.getByRole('link', { name: 'Security' }).click();
   await expect(page.getByText('You have no passkeys yet.')).toBeVisible();
 

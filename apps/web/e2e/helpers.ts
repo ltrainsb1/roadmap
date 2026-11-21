@@ -244,21 +244,6 @@ export async function joinViaInvite(browser: Browser, info: TestInfo, invitePath
   return { email, name, secret, recoveryCodes, context, page };
 }
 
-/** Invites `email` from the owner's Members screen and has them join in a new context. */
-export async function inviteAndJoin(
-  owner: Page,
-  browser: Browser,
-  info: TestInfo,
-  roadmapName: string,
-  label: string,
-  role: 'Admin' | 'Contributor',
-): Promise<Joined> {
-  const email = uniqueEmail(label);
-  await sendInvite(owner, email, role);
-  const path = await inviteLinkFor(email, roadmapName);
-  return joinViaInvite(browser, info, path, `${label} user`, email);
-}
-
 /** The row of the project list for the item titled `title`. */
 export const projectRow = (page: Page, title: string) =>
   page.getByRole('row').filter({ has: page.getByRole('link', { name: title, exact: true }) });

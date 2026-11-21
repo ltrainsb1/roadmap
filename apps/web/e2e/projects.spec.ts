@@ -1,22 +1,10 @@
-import { expect, test } from '@playwright/test';
-import {
-  addChild,
-  addProject,
-  apiAs,
-  createRoadmap,
-  createSignedInUser,
-  expectNoA11yViolations,
-  inviteAndJoin,
-  openProject,
-  projectRow,
-  seedProject,
-  useCspGuard,
-} from './helpers.ts';
+import { addChild, addProject, createRoadmap, expectNoA11yViolations, openProject, projectRow, seedProject, useCspGuard } from './helpers.ts';
+import { expect, joinByApi, test } from './fixtures.ts';
 
 useCspGuard();
 
-test('FR-1.7: a new roadmap opens on Projects and shows the empty message for an Owner', async ({ page, browser }, testInfo) => {
-  await createSignedInUser(page, 'empty');
+test('FR-1.7: a new roadmap opens on Projects and shows the empty message for an Owner', async ({ page, browser, call }) => {
+  // The roadmap is made from the picker: that is what this test is about.
   const id = await createRoadmap(page, 'Fresh plan');
   await expect(page).toHaveURL(`/r/${id}/projects`);
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
@@ -29,16 +17,15 @@ test('FR-1.7: a new roadmap opens on Projects and shows the empty message for an
   await page.goto(`/r/${id}`);
   await expect(page).toHaveURL(`/r/${id}/projects`);
 
-  const guest = await inviteAndJoin(page, browser, testInfo, 'Fresh plan', 'reader', 'Contributor');
+  const guest = await joinByApi(browser, call, id, 'contributor', 'reader');
   await guest.page.goto(`/r/${id}/projects`);
   await expect(guest.page.getByText('No projects yet. An Admin adds the first one.', { exact: true })).toBeVisible();
   await expect(guest.page.getByRole('button', { name: 'New project' })).toHaveCount(0);
   await guest.context.close();
 });
 
-test('FR-1.2: an Owner adds a project, a sub-project, a task and a sub-task in place, and a Sub-task\'s menu has no add item', async ({ page }) => {
-  await createSignedInUser(page, 'builder');
-  await createRoadmap(page, 'Build plan');
+test('FR-1.2: an Owner adds a project, a sub-project, a task and a sub-task in place, and a Sub-task\'s menu has no add item', async ({ page, roadmap }) => {
+  await page.goto(`/r/${roadmap.id}/projects`);
 
   await addProject(page, 'Alpha');
   await addChild(page, 'Alpha', 'Beta');
@@ -105,9 +92,8 @@ test('FR-1.2: an Owner adds a project, a sub-project, a task and a sub-task in p
   await expect(page.getByRole('region', { name: 'Gamma' })).toBeVisible();
 });
 
-test('the add row stays open for another entry at the same level, and shows the server\'s answer when it refuses', async ({ page }) => {
-  await createSignedInUser(page, 'repeat');
-  await createRoadmap(page, 'Repeat plan');
+test('the add row stays open for another entry at the same level, and shows the server\'s answer when it refuses', async ({ page, roadmap }) => {
+  await page.goto(`/r/${roadmap.id}/projects`);
   await page.getByRole('button', { name: 'New project' }).click();
   const input = page.getByRole('textbox', { name: 'Title of the new project' });
   await input.fill('One');
@@ -132,9 +118,8 @@ test('the add row stays open for another entry at the same level, and shows the 
   await expect(input).toBeFocused();
 });
 
-test('the tree collapses and expands, and stays collapsed after a reload', async ({ page }) => {
-  await createSignedInUser(page, 'folder');
-  await createRoadmap(page, 'Fold plan');
+test('the tree collapses and expands, and stays collapsed after a reload', async ({ page, roadmap }) => {
+  await page.goto(`/r/${roadmap.id}/projects`);
   await addProject(page, 'Alpha');
   await addChild(page, 'Alpha', 'Beta');
   await addChild(page, 'Beta', 'Gamma');
@@ -160,11 +145,9 @@ test('the tree collapses and expands, and stays collapsed after a reload', async
   await expect(page.getByRole('button', { name: 'Collapse Alpha' })).toBeVisible();
 });
 
-test('collapsed state and an open add row do not carry over when the roadmap is switched from the picker', async ({ page }) => {
-  await createSignedInUser(page, 'switcher');
-  const a = await createRoadmap(page, 'First list');
-  const b = await createRoadmap(page, 'Second list');
-  const call = await apiAs(page);
+test('collapsed state and an open add row do not carry over when the roadmap is switched from the picker', async ({ page, call, roadmap }) => {
+  const a = roadmap.id;
+  const b = (await call<{ id: string }>('POST', '/api/roadmaps', { name: 'Second list' })).id;
   for (const [id, parent, child] of [[a, 'Alpha', 'Beta'], [b, 'Gamma', 'Delta']] as const) {
     await seedProject(call, id, child, await seedProject(call, id, parent));
   }
@@ -187,15 +170,14 @@ test('collapsed state and an open add row do not carry over when the roadmap is 
   await expect(projectRow(page, 'Delta')).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: /^Title of the new / })).toHaveCount(0);
 
-  await page.getByLabel('Roadmap', { exact: true }).selectOption({ label: 'First list' });
+  await page.getByLabel('Roadmap', { exact: true }).selectOption({ label: roadmap.name });
   await expect(page).toHaveURL(`/r/${a}/projects`);
   await expect(page.getByRole('button', { name: 'Expand Alpha' })).toBeVisible();
   await expect(projectRow(page, 'Beta')).toHaveCount(0);
 });
 
-test('an empty title shows "Enter a title." and Escape cancels the row', async ({ page }) => {
-  await createSignedInUser(page, 'blank');
-  await createRoadmap(page, 'Blank plan');
+test('an empty title shows "Enter a title." and Escape cancels the row', async ({ page, roadmap }) => {
+  await page.goto(`/r/${roadmap.id}/projects`);
   const open = page.getByRole('button', { name: 'New project' });
   await open.click();
   const input = page.getByRole('textbox', { name: 'Title of the new project' });
@@ -214,11 +196,9 @@ test('an empty title shows "Enter a title." and Escape cancels the row', async (
   await expect(page.getByText('No projects yet.', { exact: true })).toBeVisible();
 });
 
-test('rows show status, assignee names, dates and position', async ({ page }) => {
+test('rows show status, assignee names, dates and position', async ({ page, call, owner: user, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  const user = await createSignedInUser(page, 'seeder');
-  const id = await createRoadmap(page, 'Seed plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const first = await seedProject(call, id, 'Launch site');
   const second = await seedProject(call, id, 'Hire writers');
   const third = await seedProject(call, id, 'Plan party');
@@ -227,7 +207,7 @@ test('rows show status, assignee names, dates and position', async ({ page }) =>
   await call('PUT', `/api/roadmaps/${id}/projects/${first}/assignees`, { userIds: [me.userId] });
   await call('PUT', `/api/roadmaps/${id}/projects/${second}/priority-label`, { label: 'P1' });
   await call('PATCH', `/api/roadmaps/${id}/projects/${third}`, { version: 1, startDate: '2026-12-01', endDate: '2027-01-15' });
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
 
   await expect(page.getByRole('columnheader')).toHaveText(['Name', 'Status', 'Assignees', 'Dates', 'Priority', 'Actions']);
 
@@ -247,29 +227,25 @@ test('rows show status, assignee names, dates and position', async ({ page }) =>
   await expect(projectRow(page, 'Plan party').getByRole('cell', { name: '3', exact: true })).toBeVisible();
 });
 
-test('a warning icon marks an item whose dates fall outside its parent', async ({ page }) => {
-  await createSignedInUser(page, 'warner');
-  const id = await createRoadmap(page, 'Warn plan');
-  const call = await apiAs(page);
+test('a warning icon marks an item whose dates fall outside its parent', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
   const parent = await seedProject(call, id, 'Season');
   const child = await seedProject(call, id, 'Opening night', parent);
   await call('PATCH', `/api/roadmaps/${id}/projects/${parent}`, { version: 1, startDate: '2027-03-01', endDate: '2027-03-31' });
   await call('PATCH', `/api/roadmaps/${id}/projects/${child}`, { version: 1, startDate: '2027-04-02', endDate: '2027-04-03' });
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
   await expect(projectRow(page, 'Opening night').getByRole('img', { name: 'Has warnings' })).toBeVisible();
   await expect(projectRow(page, 'Season').getByRole('img', { name: 'Has warnings' })).toHaveCount(0);
 });
 
-test('FR-1.9: at 375 px the table shows Name and Status only, four levels of indentation fit, and the page does not scroll sideways', async ({ page }) => {
+test('FR-1.9: at 375 px the table shows Name and Status only, four levels of indentation fit, and the page does not scroll sideways', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 375, height: 667 });
-  await createSignedInUser(page, 'phone');
-  const id = await createRoadmap(page, 'Phone plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const a = await seedProject(call, id, 'Alpha programme');
   const b = await seedProject(call, id, 'Beta stream', a);
   const c = await seedProject(call, id, 'Gamma task', b);
   await seedProject(call, id, 'Delta sub-task', c);
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
 
   await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
@@ -298,16 +274,14 @@ test('FR-1.9: at 375 px the table shows Name and Status only, four levels of ind
   await expect(page.getByRole('textbox', { name: /Title of the new/ })).toHaveCount(0);
 });
 
-test('a Contributor sees the add item only on items they are assigned to or that sit under one', async ({ page, browser }, testInfo) => {
-  await createSignedInUser(page, 'lead');
-  const id = await createRoadmap(page, 'Scope plan');
-  const guest = await inviteAndJoin(page, browser, testInfo, 'Scope plan', 'helper', 'Contributor');
-  const call = await apiAs(page);
+test('a Contributor sees the add item only on items they are assigned to or that sit under one', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const guest = await joinByApi(browser, call, id, 'contributor', 'helper');
   const mine = await seedProject(call, id, 'Mine');
   await seedProject(call, id, 'Under mine', mine);
   const theirs = await seedProject(call, id, 'Theirs');
   await seedProject(call, id, 'Under theirs', theirs);
-  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.email)!;
+  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.user.email)!;
   await call('PUT', `/api/roadmaps/${id}/projects/${mine}/assignees`, { userIds: [helper.userId] });
 
   const p = guest.page;
@@ -328,12 +302,11 @@ test('a Contributor sees the add item only on items they are assigned to or that
   await guest.context.close();
 });
 
-test('Projects screens pass axe, with rows and with the add row open', async ({ page }) => {
-  await createSignedInUser(page, 'checker');
-  const id = await createRoadmap(page, 'Axe projects');
+test('Projects screens pass axe, with rows and with the add row open', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
+  await page.goto(`/r/${id}/projects`);
   await addProject(page, 'Alpha');
   await addChild(page, 'Alpha', 'Beta');
-  const call = await apiAs(page);
   const alpha = (await call<{ items: { id: string; title: string }[] }>('GET', `/api/roadmaps/${id}/projects`)).items.find((i) => i.title === 'Alpha')!;
   await call('PATCH', `/api/roadmaps/${id}/projects/${alpha.id}`, { version: 1, startDate: '2027-03-01', endDate: '2027-03-31' });
   await page.reload();
@@ -352,12 +325,10 @@ test('Projects screens pass axe, with rows and with the add row open', async ({ 
   await expectNoA11yViolations(page);
 });
 
-test('a failed background refresh keeps the rows and an open add row with its text, and "Try again" brings the list back', async ({ page }) => {
-  await createSignedInUser(page, 'flaky');
-  const id = await createRoadmap(page, 'Flaky plan');
-  const call = await apiAs(page);
+test('a failed background refresh keeps the rows and an open add row with its text, and "Try again" brings the list back', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
   await seedProject(call, id, 'Alpha');
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
   await expect(projectRow(page, 'Alpha')).toBeVisible();
 
   await page.getByRole('button', { name: 'New project' }).click();
@@ -381,13 +352,11 @@ test('a failed background refresh keeps the rows and an open add row with its te
   await expect(input).toHaveValue('Half typed');
 });
 
-test('an item added under a parent that was collapsed while the add row was open shows up, with its parent open', async ({ page }) => {
-  await createSignedInUser(page, 'folder2');
-  const id = await createRoadmap(page, 'Fold again');
-  const call = await apiAs(page);
+test('an item added under a parent that was collapsed while the add row was open shows up, with its parent open', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
   const alpha = await seedProject(call, id, 'Alpha');
   await seedProject(call, id, 'Beta', alpha);
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
 
   await page.getByRole('button', { name: 'Actions for Alpha' }).click();
   // The menu names its button; it points at it instead of repeating the label.

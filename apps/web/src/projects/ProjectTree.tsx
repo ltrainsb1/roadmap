@@ -1,4 +1,4 @@
-import { buildTree, can, PROJECT_STATUSES, projectWarnings, type Project, type ProjectStatus, type Role, type TreeNode } from '@roadmap/shared';
+import { buildTree, can, projectWarnings, type Project, type ProjectStatus, type Role, type TreeNode } from '@roadmap/shared';
 import {
   closestCenter,
   DndContext,
@@ -18,8 +18,9 @@ import { Fragment, useCallback, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
 import { AddItemRow } from './AddItemRow.tsx';
+import { StatusMenu } from './StatusMenu.tsx';
 import { isAssigned } from './useProjects.ts';
-import { addChildLabel, formatDates, levelName, statusName, warningText } from './names.ts';
+import { addChildLabel, formatDates, levelName, warningText } from './names.ts';
 
 /** Where the add row is open: under `parentId`, or at the top level when null. */
 export interface AddTarget {
@@ -28,7 +29,6 @@ export interface AddTarget {
 
 export const NEW_PROJECT_BUTTON_ID = 'new-project-button';
 export const actionsButtonId = (itemId: string) => `actions-${itemId}`;
-export const statusButtonId = (itemId: string) => `status-${itemId}`;
 export const titleLinkId = (itemId: string) => `title-${itemId}`;
 
 const collapsedKey = (roadmapId: string) => `roadmap:${roadmapId}:collapsed`;
@@ -182,7 +182,7 @@ interface TreeProps {
   onAdd: (parentId: string | null, title: string) => Promise<unknown>;
   onCancelAdd: () => void;
   /** Saves a new status for the item; the page shows any error. */
-  onChangeStatus: (item: Project, status: ProjectStatus) => void;
+  onChangeStatus: (item: Project, status: ProjectStatus) => unknown;
   /** Opens an item's panel; the page may ask about unsaved edits first. */
   onOpen: (itemId: string) => void;
   /**
@@ -318,21 +318,11 @@ export function ProjectTree(props: TreeProps) {
             </div>
           </th>
           <td className="status-cell">
-            {!item.archived && can({ role, action: 'project.edit', ctx: { isAssigned: isAssigned(item, myId, byId) } }) ? (
-              <Menu
-                label={`Status of ${item.title}: ${statusName(item.status)}`}
-                buttonId={statusButtonId(item.id)}
-                triggerClassName="pill-button"
-                trigger={<span className="pill">{statusName(item.status)}</span>}
-                items={PROJECT_STATUSES.map((status) => ({
-                  label: statusName(status),
-                  checked: status === item.status,
-                  onSelect: () => onChangeStatus(item, status),
-                }))}
-              />
-            ) : (
-              <span className="pill">{statusName(item.status)}</span>
-            )}
+            <StatusMenu
+              item={item}
+              editable={!item.archived && can({ role, action: 'project.edit', ctx: { isAssigned: isAssigned(item, myId, byId) } })}
+              onChange={(status) => onChangeStatus(item, status)}
+            />
           </td>
           <td className="wide-cell">{names.length > 0 ? names.join(', ') : 'Unassigned'}</td>
           <td className="wide-cell">{formatDates(item.startDate, item.endDate)}</td>

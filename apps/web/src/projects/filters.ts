@@ -4,6 +4,8 @@ import {
   PRIORITY_LABELS,
   PROJECT_STATUSES,
   type PriorityLabel,
+  filterProjects,
+  type Project,
   type ProjectFilters,
   type ProjectStatus,
 } from '@roadmap/shared';
@@ -53,3 +55,14 @@ export function filtersToSearch(f: ProjectFilters): URLSearchParams {
 
 /** Whether a search or a field filter narrows the list. "Show archived" widens it, so it does not count. */
 export const hasNarrowing = (f: ProjectFilters): boolean => f.text.trim() !== '' || activeFilterCount(f) > 0;
+
+const NONE: ReadonlySet<string> = new Set();
+
+/** The items the list shows, and those shown only for context, for these filters. */
+export function viewOf(items: readonly Project[], filters: ProjectFilters, myId: string | undefined) {
+  if (!hasNarrowing(filters) && !filters.showArchived) return { items: items.filter((i) => !i.archived), context: NONE };
+  // "Assigned to me" is the reader, whoever wrote the address.
+  const mine = filters.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id));
+  const { matches, context } = filterProjects(items, { ...filters, assigneeIds: mine });
+  return { items: items.filter((i) => matches.has(i.id) || context.has(i.id)), context };
+}

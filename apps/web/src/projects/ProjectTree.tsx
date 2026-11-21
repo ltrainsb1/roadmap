@@ -15,13 +15,12 @@ import {
 } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Fragment, useCallback, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
 import { AddItemRow } from './AddItemRow.tsx';
+import { actionsButtonId, dragHandleIcon, NameCell } from './itemParts.tsx';
 import { StatusMenu } from './StatusMenu.tsx';
 import { isAssigned } from './useProjects.ts';
-import { addChildLabel, formatDates, levelName, warningText } from './names.ts';
+import { addChildLabel, formatDates, warningText } from './names.ts';
 
 /** Where the add row is open: under `parentId`, or at the top level when null. */
 export interface AddTarget {
@@ -29,8 +28,6 @@ export interface AddTarget {
 }
 
 export const NEW_PROJECT_BUTTON_ID = 'new-project-button';
-export const actionsButtonId = (itemId: string) => `actions-${itemId}`;
-export const titleLinkId = (itemId: string) => `title-${itemId}`;
 
 const collapsedKey = (roadmapId: string) => `roadmap:${roadmapId}:collapsed`;
 
@@ -97,17 +94,6 @@ const sameGroupKeyboard: KeyboardCoordinateGetter = (event, args) => {
   });
 };
 
-export const dragHandleIcon = (
-  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
-    <circle cx="5.5" cy="4" r="1.25" fill="currentColor" />
-    <circle cx="10.5" cy="4" r="1.25" fill="currentColor" />
-    <circle cx="5.5" cy="8" r="1.25" fill="currentColor" />
-    <circle cx="10.5" cy="8" r="1.25" fill="currentColor" />
-    <circle cx="5.5" cy="12" r="1.25" fill="currentColor" />
-    <circle cx="10.5" cy="12" r="1.25" fill="currentColor" />
-  </svg>
-);
-
 interface SortableRowProps {
   id: string;
   title: string;
@@ -135,25 +121,6 @@ function SortableRow({ id, title, className, draggable, children }: SortableRowP
     >
       {children(handle)}
     </tr>
-  );
-}
-
-export function WarningIcon({ texts }: { texts: string[] }) {
-  return (
-    <span className="warning" title={texts.join(' ')}>
-      <svg viewBox="0 0 16 16" width="18" height="18" role="img" aria-label="Has warnings">
-        <path d="M8 1.5 15 14H1z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-        <path d="M8 6.5v3.5M8 11.5v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
-    </span>
-  );
-}
-
-export function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" className={open ? 'chevron open' : 'chevron'}>
-      <path d="m6 3.5 4.5 4.5L6 12.5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }
 
@@ -292,32 +259,18 @@ export function ProjectTree(props: TreeProps) {
         >
           {(handle) => (
             <>
-          <th scope="row" className="name-cell">
-            <div className="name">
-              {hasChildren && !expandAll ? (
-                <button type="button" className="icon-btn" aria-label={`${open ? 'Collapse' : 'Expand'} ${item.title}`} onClick={() => onToggle(item.id)}>
-                  <Chevron open={open} />
-                </button>
-              ) : (
-                <span className="chevron-space" aria-hidden="true" />
-              )}
-              <span className="sr-only">{levelName(item.depth)}: </span>
-              <Link id={titleLinkId(item.id)} to={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}${search}`} className="item-title"
-                aria-current={item.id === selectedId ? 'true' : undefined}
-                onClick={(e) => {
-                  // Plain clicks go through the page; a new-tab click keeps its default.
-                  if (!isPlainClick(e)) return;
-                  e.preventDefault();
-                  onOpen(item.id);
-                }}
-              >
-                {item.title}
-              </Link>
-              {item.archived && <span className="badge">Archived</span>}
-              {context && <span className="sr-only">Shown for context</span>}
-              {warnings.length > 0 && <WarningIcon texts={warnings} />}
-            </div>
-          </th>
+          <NameCell
+            item={item}
+            hasChildren={hasChildren}
+            expandAll={expandAll}
+            open={open}
+            onToggle={() => onToggle(item.id)}
+            href={`/r/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}${search}`}
+            selected={item.id === selectedId}
+            onOpen={() => onOpen(item.id)}
+            context={context}
+            warnings={warnings}
+          />
           <td className="status-cell">
             <StatusMenu
               item={item}

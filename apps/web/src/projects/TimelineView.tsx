@@ -12,11 +12,9 @@ import {
   type TreeNode,
 } from '@roadmap/shared';
 import { Fragment, useEffect, useRef, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Menu } from '../ui/Menu.tsx';
-import { formatDates, formatMilestone, levelName, statusName, warningText } from './names.ts';
-import { actionsButtonId, Chevron, titleLinkId, WarningIcon } from './ProjectTree.tsx';
+import { actionsButtonId, NameCell } from './itemParts.tsx';
+import { formatDates, formatMilestone, statusName, warningText } from './names.ts';
 import { StatusMenu } from './StatusMenu.tsx';
 import { TimelineAxis } from './TimelineAxis.tsx';
 import type { ItemActions } from './useItemActions.tsx';
@@ -97,39 +95,23 @@ export function TimelineView(props: TimelineViewProps) {
     return (
       <Fragment key={item.id}>
         <tr className={`depth-${item.depth}${item.id === selectedId ? ' selected' : ''}${context ? ' context' : ''}`}>
-          <th scope="row" className="name-cell">
-            <div className="name">
-              {hasChildren && !expandAll ? (
-                <button type="button" className="icon-btn" aria-label={`${open ? 'Collapse' : 'Expand'} ${item.title}`} onClick={() => onToggle(item.id)}>
-                  <Chevron open={open} />
-                </button>
-              ) : (
-                <span className="chevron-space" aria-hidden="true" />
-              )}
-              <span className="sr-only">{levelName(item.depth)}: </span>
-              <Link
-                id={titleLinkId(item.id)}
-                to={`${base}/${encodeURIComponent(item.id)}${search}`}
-                className="item-title"
-                aria-current={item.id === selectedId ? 'true' : undefined}
-                onClick={(e) => {
-                  // Plain clicks go through the page; a new-tab click keeps its default.
-                  if (!isPlainClick(e)) return;
-                  e.preventDefault();
-                  actions.openItem(item.id);
-                }}
-              >
-                {item.title}
-              </Link>
-              {item.archived && <span className="badge">Archived</span>}
-              {context && <span className="sr-only">Shown for context</span>}
-              {warnings.length > 0 && <WarningIcon texts={warnings} />}
-              {/* Below 600 px the pill is hidden, and this says the status instead; from 600 px it is not shown at all. */}
-              <span className="narrow-status">{statusName(item.status)}</span>
-              <StatusMenu item={item} editable={editable} onChange={(status) => void actions.changeStatus(item, status)} />
-              <Menu label={`Actions for ${item.title}`} buttonId={actionsButtonId(item.id)} items={actions.menuFor(item)} />
-            </div>
-          </th>
+          <NameCell
+            item={item}
+            hasChildren={hasChildren}
+            expandAll={expandAll}
+            open={open}
+            onToggle={() => onToggle(item.id)}
+            href={`${base}/${encodeURIComponent(item.id)}${search}`}
+            selected={item.id === selectedId}
+            onOpen={() => actions.openItem(item.id)}
+            context={context}
+            warnings={warnings}
+          >
+            {/* Below 600 px the pill is hidden, and this says the status instead; from 600 px it is not shown at all. */}
+            <span className="narrow-status">{statusName(item.status)}</span>
+            <StatusMenu item={item} editable={editable} onChange={(status) => void actions.changeStatus(item, status)} />
+            <Menu label={`Actions for ${item.title}`} buttonId={actionsButtonId(item.id)} items={actions.menuFor(item)} />
+          </NameCell>
           <td className="track-cell">
             <Track item={item} range={range} today={today} />
           </td>

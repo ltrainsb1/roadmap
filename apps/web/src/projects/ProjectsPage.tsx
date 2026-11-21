@@ -14,8 +14,8 @@ import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
 import { BoardView } from './BoardView.tsx';
 import { filtersForReader, filtersFromSearch, hasNarrowing, searchFor, viewOf, viewOptionsFromSearch, type ViewOptions } from './filters.ts';
 import { levelPlural } from './names.ts';
+import { actionsButtonId } from './itemParts.tsx';
 import {
-  actionsButtonId,
   NEW_PROJECT_BUTTON_ID,
   ProjectTree,
   useCollapsed,

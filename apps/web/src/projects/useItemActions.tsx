@@ -7,7 +7,7 @@ import type { useMembers } from '../members/useMembers.ts';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import type { MenuItem } from '../ui/Menu.tsx';
 import type { OwnChange } from './ProjectPanel.tsx';
-import { titleLinkId } from './ProjectTree.tsx';
+import { titleLinkId } from './itemParts.tsx';
 import {
   isAssigned,
   PROJECTS_KEY,

@@ -1,10 +1,8 @@
 import type { Project, ProjectStatus } from '@roadmap/shared';
 import type { ReactNode, Ref } from 'react';
-import { Link } from 'react-router-dom';
-import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
+import { actionsButtonId, TitleLink } from './itemParts.tsx';
 import { formatDates, levelName } from './names.ts';
-import { actionsButtonId, titleLinkId } from './ProjectTree.tsx';
 import { StatusMenu } from './StatusMenu.tsx';
 
 interface BoardCardProps {
@@ -36,20 +34,7 @@ export function BoardCard({ item, parentTitle, assigneeNames, editable, selected
     <li ref={ref} className={`card${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}`}>
       <p className="card-title">
         <span className="sr-only">{levelName(item.depth)}: </span>
-        <Link
-          id={titleLinkId(item.id)}
-          to={href}
-          className="item-title"
-          aria-current={selected ? 'true' : undefined}
-          onClick={(e) => {
-            // Plain clicks go through the page; a new-tab click keeps its default.
-            if (!isPlainClick(e)) return;
-            e.preventDefault();
-            onOpen();
-          }}
-        >
-          {item.title}
-        </Link>
+        <TitleLink item={item} href={href} selected={selected} onOpen={onOpen} />
       </p>
       {parentTitle !== undefined && <p className="card-parent">In {parentTitle}</p>}
       <p className="card-meta">

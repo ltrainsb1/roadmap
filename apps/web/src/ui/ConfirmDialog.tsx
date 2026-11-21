@@ -47,7 +47,17 @@ export function ConfirmDialog({
   }, [open]);
 
   return (
-    <dialog ref={ref} className="dialog" aria-labelledby={titleId} onClose={onClose}>
+    <dialog
+      ref={ref}
+      className="dialog"
+      aria-labelledby={titleId}
+      // The browser sends "close" a moment after the dialog closes. By then it may have been opened again, as when
+      // Escape in a form asks about unsaved edits just after an earlier question was answered; that late event is
+      // about the earlier closing and must not close the new question.
+      onClose={() => {
+        if (!ref.current?.open) onClose();
+      }}
+    >
       {open && (
         <form
           onSubmit={(e) => {

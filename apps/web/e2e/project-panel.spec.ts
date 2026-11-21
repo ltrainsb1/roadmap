@@ -445,8 +445,8 @@ test('unsaved edits are not thrown away silently: Escape, Close, Back to project
   const description = panel.getByLabel('Description', { exact: true });
   const dialog = page.getByRole('dialog', { name: 'Discard your unsaved changes to Alpha?' });
 
-  // A clean form closes at once.
-  await panel.focus();
+  // A clean form closes at once. Escape is heard inside the panel, where opening it puts focus.
+  await expect(panel.getByRole('heading', { name: 'Alpha', level: 2 })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(`/r/${id}/projects`);
   await expect(dialog).toHaveCount(0);

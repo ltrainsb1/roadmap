@@ -156,6 +156,23 @@ test('FR-1.7: the status menu on a card moves it to that column', async ({ page,
   await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
   await expect(column(page, 'Not started, 0 items')).toContainText('No items');
   await expect(card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Blocked', exact: true })).toBeVisible();
+  // The card was rebuilt in its new column; focus is on its status menu again, not lost to the page.
+  await expect(card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Blocked', exact: true })).toBeFocused();
+});
+
+test('FR-1.7: a refused move from the status menu puts the card back with focus still on its status menu', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { base, hire } = await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  await expect(card(page, 'Hire')).toBeVisible();
+  // Someone else blocks it; this page still has the old copy.
+  await call('PATCH', `${base}/${hire}`, { version: 1, status: 'blocked' });
+  await card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Not started', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'Done', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText(CONFLICT);
+  await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
+  await expect(column(page, 'Done, 0 items')).toContainText('No items');
+  await expect(card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Blocked', exact: true })).toBeFocused();
 });
 
 test('FR-1.7: choosing a card opens the panel, and the Actions menu archives and deletes', async ({ page, call, roadmap }) => {

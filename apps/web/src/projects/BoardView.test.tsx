@@ -75,6 +75,19 @@ describe('useBoardMoves', () => {
     expect(result.current.statusOf(hire)).toBe('not_started');
   });
 
+  test('FR-1.7: beforeChange is told before the card moves and again before it goes back, and not for a no-op move', async () => {
+    const { changeStatus, settle } = pendingSave();
+    const seen: string[] = [];
+    const { result } = renderHook(() => useBoardMoves({ changeStatus }, (item) => seen.push(result.current.statusOf(item))));
+    act(() => result.current.move(hire, 'not_started'));
+    expect(seen).toEqual([]);
+    act(() => result.current.move(hire, 'done'));
+    // Told while the card still shows its old status.
+    expect(seen).toEqual(['not_started']);
+    await settled(() => settle(false));
+    expect(seen).toEqual(['not_started', 'done']);
+  });
+
   test('FR-1.7: a second move before the first is saved wins, and the first settling does not undo it', async () => {
     const saves: ((saved: boolean) => void)[] = [];
     const changeStatus = vi.fn(() => new Promise<boolean>((resolve) => saves.push(resolve)));

@@ -13,12 +13,13 @@ import {
   type DragEndEvent,
   type UniqueIdentifier,
 } from '@dnd-kit/core';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/Button.tsx';
 import { BoardCard } from './BoardCard.tsx';
 import { hasNarrowing, type ViewOptions } from './filters.ts';
-import { dragHandleIcon } from './itemParts.tsx';
+import { dragHandleIcon, titleLinkId } from './itemParts.tsx';
 import { itemCount, levelPlural, statusName } from './names.ts';
+import { statusButtonId } from './StatusMenu.tsx';
 import type { ItemActions } from './useItemActions.tsx';
 import { isAssigned } from './useProjects.ts';
 import { viewPath } from './ViewSwitcher.tsx';
@@ -53,28 +54,38 @@ const isStatus = (id: UniqueIdentifier | undefined): id is ProjectStatus => (PRO
 /**
  * Moves cards between columns. A moved card shows in its new column at once, while its save runs, and follows its
  * item again once the save settles: by then the item has the saved status, or, when the save was refused, the
- * refetched one.
+ * refetched one. `beforeChange` is told just before the card is shown in its new column and again just before it
+ * follows its item, which puts it back when the save was refused.
  */
-export function useBoardMoves(actions: Pick<ItemActions, 'changeStatus'>): {
+export function useBoardMoves(
+  actions: Pick<ItemActions, 'changeStatus'>,
+  beforeChange: (item: Project) => void = () => undefined,
+): {
   statusOf(item: Project): ProjectStatus;
   move(item: Project, status: ProjectStatus): void;
 } {
-  // The status each card is shown with while its move is being saved, and which move that was, so an earlier move
-  // settling does not undo a later one.
-  const [pending, setPending] = useState<ReadonlyMap<string, { status: ProjectStatus; n: number }>>(new Map());
+  // The status each card is shown with while its move is being saved.
+  const [pending, setPending] = useState<ReadonlyMap<string, ProjectStatus>>(new Map());
   const moves = useRef(0);
-  const statusOf = (item: Project) => pending.get(item.id)?.status ?? item.status;
+  // The latest move of each card, so an earlier move settling does not undo a later one.
+  const latest = useRef(new Map<string, number>());
+  const statusOf = (item: Project) => pending.get(item.id) ?? item.status;
   const move = (item: Project, status: ProjectStatus) => {
     if (status === statusOf(item)) return;
     const n = (moves.current += 1);
-    setPending((p) => new Map(p).set(item.id, { status, n }));
-    const settle = () =>
+    latest.current.set(item.id, n);
+    beforeChange(item);
+    setPending((p) => new Map(p).set(item.id, status));
+    const settle = () => {
+      if (latest.current.get(item.id) !== n) return;
+      latest.current.delete(item.id);
+      beforeChange(item);
       setPending((p) => {
-        if (p.get(item.id)?.n !== n) return p;
         const next = new Map(p);
         next.delete(item.id);
         return next;
       });
+    };
     void actions.changeStatus(item, status).then(settle, settle);
   };
   return { statusOf, move };
@@ -135,7 +146,24 @@ function MovableCard({ movable, ...props }: CardProps) {
 
 /** The items at one level as cards, in one column per status, each column in the List's order. */
 export function BoardView({ role, myId, items, filters, level, byId, memberNames, selectedId, roadmapId, search, actions, onClearFilters }: BoardViewProps) {
-  const moves = useBoardMoves(actions);
+  // A card that changes column is a new element there, so focus inside it would fall to the page. The card that held
+  // focus when it moved (the status menu hands focus back to its button before the move; a drag by the mouse leaves it
+  // on the handle) gets it back on its status menu, or on its title once it may no longer be changed, after it renders.
+  // Only when focus was in fact lost: a card that stayed in its column keeps focus wherever it is.
+  const refocus = useRef<string | null>(null);
+  const keepFocus = (item: Project) => {
+    const card = document.getElementById(titleLinkId(item.id))?.closest('.card');
+    if (card?.contains(document.activeElement)) refocus.current = item.id;
+  };
+  useEffect(() => {
+    const id = refocus.current;
+    if (id === null) return;
+    refocus.current = null;
+    const target = document.getElementById(statusButtonId(id)) ?? document.getElementById(titleLinkId(id));
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (target && lost) target.focus();
+  });
+  const moves = useBoardMoves(actions, keepFocus);
   // The card being dragged, for the copy of it that follows the pointer.
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const sensors = useSensors(

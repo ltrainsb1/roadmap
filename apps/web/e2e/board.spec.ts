@@ -269,6 +269,33 @@ test('FR-1.9: at 375 px the columns scroll sideways inside the board and the pag
   await expect(card(page, 'Hire').locator('.pill')).toBeVisible();
 });
 
+test('FR-1.7: a card menu opens right by its button and inside the window', async ({ page, call, roadmap }) => {
+  await seeded(call, roadmap.id);
+  await openBoard(page, roadmap.id);
+  const viewport = page.viewportSize()!;
+  for (const name of ['Actions for Hire', 'Status of Hire: Not started']) {
+    const button = card(page, 'Hire').getByRole('button', { name, exact: true });
+    await button.click();
+    const menu = page.getByRole('menu', { name, exact: true });
+    await expect(menu).toBeVisible();
+    const b = await box(button);
+    const m = await box(menu);
+    // 4 px under the button, or 4 px over it.
+    const under = Math.abs(m.y - (b.y + b.height + 4)) < 1;
+    const over = Math.abs(m.y + m.height - (b.y - 4)) < 1;
+    expect(under || over).toBe(true);
+    // Overlapping the button's column, and wholly inside the window.
+    expect(m.x).toBeLessThan(b.x + b.width);
+    expect(m.x + m.width).toBeGreaterThan(b.x);
+    expect(m.x).toBeGreaterThanOrEqual(0);
+    expect(m.y).toBeGreaterThanOrEqual(0);
+    expect(m.x + m.width).toBeLessThanOrEqual(viewport.width);
+    expect(m.y + m.height).toBeLessThanOrEqual(viewport.height);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+  }
+});
+
 test('FR-1.7: the Board passes axe at 1280 px', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await seeded(call, roadmap.id);

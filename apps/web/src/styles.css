@@ -607,6 +607,8 @@ select {
   display: flex;
   flex-direction: column;
   min-width: 11rem;
+  /* Menu caps the height at the room beside the button; a longer list scrolls inside itself. */
+  overflow-y: auto;
   padding: 4px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -615,6 +617,7 @@ select {
 }
 .menu-item {
   display: flex;
+  flex: none;
   align-items: center;
   min-height: var(--control-height);
   padding: 8px 12px;

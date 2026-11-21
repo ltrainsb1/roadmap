@@ -133,6 +133,35 @@ describe('Menu', () => {
     expect(screen.getByRole('menu').style.left).toBe(`${375 - 8 - 176}px`);
   });
 
+  test('the list is no taller than the room on the side it opens, and scrolling inside it leaves it open', () => {
+    const { button } = setup();
+    layout();
+    const rect = vi.spyOn(button, 'getBoundingClientRect');
+    // Under a button near the top: the room from under the button to 8 px above the window's bottom edge.
+    rect.mockReturnValue(new DOMRect(200, 100, 44, 44));
+    fireEvent.click(button);
+    const menu = screen.getByRole('menu');
+    expect(menu.style.maxHeight).toBe(`${window.innerHeight - 144 - 4 - 8}px`);
+    fireEvent.scroll(menu);
+    expect(screen.getByRole('menu')).toBeTruthy();
+    fireEvent.keyDown(menu, { key: 'Escape' });
+
+    // Over a button near the bottom: the room from 8 px under the window's top edge to over the button.
+    rect.mockReturnValue(new DOMRect(200, window.innerHeight - 60, 44, 44));
+    fireEvent.click(button);
+    expect(screen.getByRole('menu').style.maxHeight).toBe(`${window.innerHeight - 60 - 4 - 8}px`);
+  });
+
+  test('a list taller than the room above fills it, starting 8 px under the window\'s top edge', () => {
+    const { button } = setup();
+    layout();
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(2000);
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(200, window.innerHeight - 60, 44, 44));
+    fireEvent.click(button);
+    const menu = screen.getByRole('menu');
+    expect([menu.style.top, menu.style.maxHeight]).toEqual(['8px', `${window.innerHeight - 60 - 4 - 8}px`]);
+  });
+
   test('resizing the window closes the list', () => {
     const { button } = setup();
     fireEvent.click(button);

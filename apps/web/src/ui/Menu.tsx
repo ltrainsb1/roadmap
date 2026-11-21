@@ -29,16 +29,19 @@ const EDGE = 8;
 
 /**
  * Where the list goes, in window coordinates: under the button, or over it when there is more room above than below
- * and not enough below, and always inside the window from side to side.
+ * and not enough below, and always inside the window from side to side. It is no taller than the room on that side,
+ * and scrolls inside itself when it holds more.
  */
 function placeList(button: DOMRect, width: number, height: number, align: 'start' | 'end') {
   const windowWidth = document.documentElement.clientWidth;
-  const below = window.innerHeight - button.bottom - GAP;
-  const above = button.top - GAP;
-  const top = below >= height || below >= above ? button.bottom + GAP : Math.max(EDGE, button.top - GAP - height);
+  const below = window.innerHeight - button.bottom - GAP - EDGE;
+  const above = button.top - GAP - EDGE;
+  const down = below >= height || below >= above;
+  const maxHeight = Math.max(0, down ? below : above);
+  const top = down ? button.bottom + GAP : button.top - GAP - Math.min(height, maxHeight);
   const preferred = align === 'start' ? button.left : button.right - width;
   const left = Math.max(EDGE, Math.min(preferred, windowWidth - EDGE - width));
-  return { top, left };
+  return { top, left, maxHeight };
 }
 
 /**
@@ -51,7 +54,7 @@ function placeList(button: DOMRect, width: number, height: number, align: 'start
  */
 export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon-btn', align = 'end' }: MenuProps) {
   const [open, setOpen] = useState(false);
-  const [place, setPlace] = useState({ top: 0, left: 0 });
+  const [place, setPlace] = useState<{ top: number; left: number; maxHeight?: number }>({ top: 0, left: 0 });
   // Where the button was when the list was placed.
   const placedAt = useRef<DOMRect | null>(null);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -67,7 +70,11 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
   useLayoutEffect(() => {
     if (!open || !button.current || !list.current) return;
     placedAt.current = button.current.getBoundingClientRect();
-    setPlace(placeList(placedAt.current, list.current.offsetWidth, list.current.offsetHeight, align));
+    // The list's full height, even when a height cap from its last opening still holds it in: its scrolled content,
+    // plus its borders.
+    const el = list.current;
+    const height = el.scrollHeight + el.offsetHeight - el.clientHeight;
+    setPlace(placeList(placedAt.current, el.offsetWidth, height, align));
   }, [open, align]);
 
   useEffect(() => {
@@ -164,7 +171,7 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
           role="menu"
           aria-labelledby={triggerId}
           className="menu-list"
-          style={{ position: 'fixed', top: place.top, left: place.left }}
+          style={{ position: 'fixed', top: place.top, left: place.left, maxHeight: place.maxHeight }}
           onKeyDown={onListKeyDown}
         >
           {items.map((item) => (

@@ -212,7 +212,10 @@ test('FR-1.7: a Contributor who is not assigned sees plain status text and no Ar
   // Below 600 px the row has neither the status nor the Actions menu.
   await page.setViewportSize({ width: 1280, height: 800 });
   await openTimeline(page, roadmap.id);
-  await expect(row(page, 'Hire')).toContainText('Not started');
+  // The visible read-only pill, not the status text kept for screen readers below 600 px.
+  const pill = row(page, 'Hire').locator('.pill');
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveText('Not started');
   await expect(row(page, 'Hire').getByRole('button', { name: /^Status of Hire/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Actions for Hire', exact: true }).click();
   await expect(page.getByRole('menuitem', { name: 'Open', exact: true })).toBeVisible();

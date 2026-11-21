@@ -162,6 +162,22 @@ describe('Menu', () => {
     expect([menu.style.top, menu.style.maxHeight]).toEqual(['8px', `${window.innerHeight - 60 - 4 - 8}px`]);
   });
 
+  test('arrowing to an entry outside a capped list scrolls the list to show it', () => {
+    const { button } = setup();
+    fireEvent.click(button);
+    const menu = screen.getByRole('menu');
+    const second = screen.getByRole('menuitem', { name: 'Delete' });
+    // Two 44 px entries in a list with room for one.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(44);
+    vi.spyOn(menu, 'clientHeight', 'get').mockReturnValue(44);
+    vi.spyOn(second, 'offsetTop', 'get').mockReturnValue(44);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(second);
+    expect(menu.scrollTop).toBe(44);
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(menu.scrollTop).toBe(0);
+  });
+
   test('resizing the window closes the list', () => {
     const { button } = setup();
     fireEvent.click(button);

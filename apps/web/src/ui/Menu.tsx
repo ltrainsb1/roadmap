@@ -66,6 +66,17 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
 
   const entries = () => Array.from(list.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? []);
 
+  // Focus without letting the browser scroll the page (that would close the list), then scroll only the list, which
+  // has a height cap, far enough to show the entry.
+  const focusEntry = (entry: HTMLElement | undefined) => {
+    const el = list.current;
+    if (!entry || !el) return;
+    entry.focus({ preventScroll: true });
+    const bottom = entry.offsetTop + entry.offsetHeight;
+    if (entry.offsetTop < el.scrollTop) el.scrollTop = entry.offsetTop;
+    else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
+  };
+
   // Measured before the browser paints, so the list never shows in the wrong place.
   useLayoutEffect(() => {
     if (!open || !button.current || !list.current) return;
@@ -78,7 +89,7 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
   }, [open, align]);
 
   useEffect(() => {
-    if (open) (list.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? entries()[0])?.focus({ preventScroll: true });
+    if (open) focusEntry(list.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? entries()[0]);
   }, [open]);
 
   // A scroll anywhere (captured, since scroll events don't bubble) or a resize leaves the list away from its button.
@@ -124,7 +135,7 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
     const at = all.indexOf(document.activeElement as HTMLElement);
     const move = (index: number) => {
       e.preventDefault();
-      all[(index + all.length) % all.length]?.focus({ preventScroll: true });
+      focusEntry(all[(index + all.length) % all.length]);
     };
     if (e.key === 'ArrowDown') move(at + 1);
     else if (e.key === 'ArrowUp') move(at - 1);

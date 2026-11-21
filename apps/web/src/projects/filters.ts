@@ -8,6 +8,8 @@ import {
   type Project,
   type ProjectFilters,
   type ProjectStatus,
+  TIMELINE_ZOOMS,
+  type TimelineZoom,
 } from '@roadmap/shared';
 
 const isStatus = (value: string): value is ProjectStatus => (PROJECT_STATUSES as readonly string[]).includes(value);
@@ -50,6 +52,36 @@ export function filtersToSearch(f: ProjectFilters): URLSearchParams {
   if (f.from !== null) params.set('from', f.from);
   if (f.to !== null) params.set('to', f.to);
   if (f.showArchived) params.set('archived', '1');
+  return params;
+}
+
+/** The view settings kept in the address beside the filters: the Timeline's zoom and the Board's level. */
+export interface ViewOptions {
+  zoom: TimelineZoom;
+  level: 1 | 2 | 3 | 4;
+}
+
+const DEFAULT_OPTIONS: ViewOptions = { zoom: 'months', level: 1 };
+const LEVELS = ['1', '2', '3', '4'] as const;
+
+const isZoom = (value: string | null): value is TimelineZoom => value !== null && (TIMELINE_ZOOMS as readonly string[]).includes(value);
+const isLevel = (value: string | null): value is (typeof LEVELS)[number] => value !== null && (LEVELS as readonly string[]).includes(value);
+
+/** The zoom and level an address stands for; a missing or unknown value is the default. */
+export function viewOptionsFromSearch(params: URLSearchParams): ViewOptions {
+  const zoom = params.get('zoom');
+  const level = params.get('level');
+  return {
+    zoom: isZoom(zoom) ? zoom : DEFAULT_OPTIONS.zoom,
+    level: isLevel(level) ? (Number(level) as ViewOptions['level']) : DEFAULT_OPTIONS.level,
+  };
+}
+
+/** The query string for the filters and view settings. Zoom and level are written only when not the default. */
+export function searchFor(f: ProjectFilters, options: ViewOptions): URLSearchParams {
+  const params = filtersToSearch(f);
+  if (options.zoom !== DEFAULT_OPTIONS.zoom) params.set('zoom', options.zoom);
+  if (options.level !== DEFAULT_OPTIONS.level) params.set('level', String(options.level));
   return params;
 }
 

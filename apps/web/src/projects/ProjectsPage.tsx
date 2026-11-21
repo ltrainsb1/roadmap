@@ -1,7 +1,7 @@
-import { activeFilterCount, can, type ProjectList } from '@roadmap/shared';
+import { activeFilterCount, can, NO_FILTERS, type ProjectList } from '@roadmap/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { messageFor } from '../api/errors.ts';
 import { useMe } from '../auth/useMe.ts';
 import { useMembers } from '../members/useMembers.ts';
@@ -10,7 +10,7 @@ import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
 import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
-import { filtersFromSearch, filtersToSearch, hasNarrowing, viewOf } from './filters.ts';
+import { filtersFromSearch, hasNarrowing, searchFor, viewOf, viewOptionsFromSearch } from './filters.ts';
 import {
   actionsButtonId,
   NEW_PROJECT_BUTTON_ID,
@@ -25,12 +25,16 @@ import {
   useCreateProject,
   useProjects,
 } from './useProjects.ts';
+import { TimelineView } from './TimelineView.tsx';
+import { todayIn } from './today.ts';
 import { useItemActions } from './useItemActions.tsx';
+import { viewPath, ViewSwitcher, type ProjectView } from './ViewSwitcher.tsx';
 
 const FILTERS_BUTTON_ID = 'filters-button';
 const SEARCH_ID = 'project-search';
 
-export function ProjectsPage() {
+/** The items of one roadmap in one view, with the search, filters, view switcher and the item panel. */
+export function ProjectsPage({ view }: { view: ProjectView }) {
   const { roadmapId, role } = useRoadmap();
   const { projectId } = useParams();
   const me = useMe();
@@ -43,23 +47,27 @@ export function ProjectsPage() {
   const [params, setParams] = useSearchParams();
   const myId = me.data?.user.id;
   const filters = useMemo(() => filtersFromSearch(params), [params]);
-  const search = params.toString() === '' ? '' : `?${params.toString()}`;
+  const options = useMemo(() => viewOptionsFromSearch(params), [params]);
+  // Every query string is built from the filters and the view settings, so changing one keeps the others.
+  const query = searchFor(filters, options).toString();
+  const search = query === '' ? '' : `?${query}`;
+  const navigate = useNavigate();
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const listPath = `/r/${encodeURIComponent(roadmapId)}/projects`;
-  // Where closing the panel goes back to: the list as it was filtered.
-  const listUrl = `${listPath}${search}`;
+  const basePath = viewPath(roadmapId, view);
+  // Where closing the panel goes back to: the view as it was filtered.
+  const viewUrl = `${basePath}${search}`;
   const hasPanel = projectId !== undefined;
-  const actions = useItemActions({ roadmapId, role, myId, basePath: listPath, search, projectId, projects, members });
+  const actions = useItemActions({ roadmapId, role, myId, basePath, search, projectId, projects, members });
   const { actionError, notice, setNotice } = actions;
 
   const [adding, setAdding] = useState<AddTarget | null>(null);
   const narrowing = hasNarrowing(filters);
   const filtered = narrowing || filters.showArchived;
-  const view = useMemo(() => viewOf(projects.items, filters, myId), [filters, projects.items, myId]);
-  const shown = view.items;
+  const visible = useMemo(() => viewOf(projects.items, filters, myId), [filters, projects.items, myId]);
+  const shown = visible.items;
   const tagsInUse = useMemo(() => [...new Set(projects.items.filter((i) => !i.archived).flatMap((i) => i.tags))].sort(), [projects.items]);
-  const setFilters = (next: typeof filters) => setParams(filtersToSearch(next), { replace: true });
-  const clearFilters = () => setParams(new URLSearchParams(), { replace: true });
+  const setFilters = (next: typeof filters) => setParams(searchFor(next, options), { replace: true });
+  const clearFilters = () => setParams(searchFor(NO_FILTERS, options), { replace: true });
   const closeFilters = () => {
     setFiltersOpen(false);
     document.getElementById(FILTERS_BUTTON_ID)?.focus();
@@ -102,6 +110,8 @@ export function ProjectsPage() {
   };
 
   const canAddTop = can({ role, action: 'project.create', ctx: { isAssigned: false } });
+  // Adding happens on the List only, where the new item's place in the order can be seen.
+  const showNewProject = canAddTop && view === 'list';
   // The list shows whenever its data is there: a failed refresh must not unmount the rows, an open add row or focus.
   // The members only name the assignees, so a slow or failed members list leaves the names out and nothing more.
   // It waits for the signed-in person too, so "Assigned to me" in the address always has someone to mean.
@@ -114,6 +124,7 @@ export function ProjectsPage() {
   const reorderable = !filtered;
   const canReorderRole = can({ role, action: 'project.setPriority' });
   const refreshFailed = hasList && projects.isRefetchError;
+  const hasDates = shown.some((i) => i.startDate !== null || i.endDate !== null || i.milestones.length > 0);
 
   return (
     <>
@@ -121,7 +132,7 @@ export function ProjectsPage() {
         <h1 ref={actions.headingRef} tabIndex={-1}>
           Projects
         </h1>
-        {canAddTop && (
+        {showNewProject && (
           <Button id={NEW_PROJECT_BUTTON_ID} variant={panelEditable ? 'secondary' : 'primary'} onClick={() => startAdd(null)}>
             New project
           </Button>
@@ -160,6 +171,13 @@ export function ProjectsPage() {
               >
                 {activeCount > 0 ? `Filters (${activeCount})` : 'Filters'}
               </Button>
+              <ViewSwitcher
+                roadmapId={roadmapId}
+                view={view}
+                search={search}
+                views={['list', 'timeline']}
+                onNavigate={(path) => actions.unlessDirty(() => void navigate(path))}
+              />
             </div>
             <FiltersPanel
               open={filtersOpen}
@@ -172,8 +190,8 @@ export function ProjectsPage() {
               membersLoaded={members.data !== undefined}
               myId={myId ?? ''}
             />
-            {!reorderable && canReorderRole && shown.length > 0 && <p className="reorder-note">Clear filters to reorder.</p>}
-            {shown.length === 0 && adding === null && (
+            {view === 'list' && !reorderable && canReorderRole && shown.length > 0 && <p className="reorder-note">Clear filters to reorder.</p>}
+            {shown.length === 0 && (adding === null || view !== 'list') && (
               <>
                 <p>
                   {filtered && projects.items.length > 0
@@ -185,13 +203,34 @@ export function ProjectsPage() {
                 {filtered && projects.items.length > 0 && <Button onClick={clearFiltersFromNoMatch}>Clear filters</Button>}
               </>
             )}
-            {(shown.length > 0 || adding !== null) && (
+            {view === 'timeline' && shown.length > 0 && (
+              <>
+                {!hasDates && <p>No items have dates yet. Open an item to add its dates.</p>}
+                <TimelineView
+                  roadmapId={roadmapId}
+                  role={role}
+                  myId={myId}
+                  items={shown}
+                  contextIds={visible.context}
+                  expandAll={narrowing}
+                  byId={projects.byId}
+                  today={todayIn(me.data?.user.timezone ?? 'UTC')}
+                  zoom={options.zoom}
+                  selectedId={selected?.id}
+                  collapsed={collapsed}
+                  onToggle={toggle}
+                  search={search}
+                  actions={actions}
+                />
+              </>
+            )}
+            {view === 'list' && (shown.length > 0 || adding !== null) && (
               <ProjectTree
                 roadmapId={roadmapId}
                 role={role}
                 myId={myId}
                 items={shown}
-                contextIds={view.context}
+                contextIds={visible.context}
                 expandAll={narrowing}
                 reorderable={reorderable}
                 search={search}
@@ -221,7 +260,7 @@ export function ProjectsPage() {
               myId={me.data?.user.id}
               item={selected}
               byId={projects.byId}
-              listPath={listUrl}
+              listPath={viewUrl}
               onClose={actions.closePanel}
               onReload={actions.reloadItem}
               members={members.data?.members ?? []}
@@ -234,7 +273,7 @@ export function ProjectsPage() {
           {hasPanel && !selected && (
             <section className="project-panel" aria-label="Details">
               <Alert>This item no longer exists, or you don't have access to it.</Alert>
-              <Link to={listUrl} className="text-link">
+              <Link to={viewUrl} className="text-link">
                 Back to projects
               </Link>
             </section>

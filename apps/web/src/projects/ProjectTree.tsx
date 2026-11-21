@@ -137,7 +137,7 @@ function SortableRow({ id, title, className, draggable, children }: SortableRowP
   );
 }
 
-function WarningIcon({ texts }: { texts: string[] }) {
+export function WarningIcon({ texts }: { texts: string[] }) {
   return (
     <span className="warning" title={texts.join(' ')}>
       <svg viewBox="0 0 16 16" width="18" height="18" role="img" aria-label="Has warnings">
@@ -148,7 +148,7 @@ function WarningIcon({ texts }: { texts: string[] }) {
   );
 }
 
-function Chevron({ open }: { open: boolean }) {
+export function Chevron({ open }: { open: boolean }) {
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" className={open ? 'chevron open' : 'chevron'}>
       <path d="m6 3.5 4.5 4.5L6 12.5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />

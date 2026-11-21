@@ -923,3 +923,172 @@ select {
   font-weight: normal;
   font-style: italic;
 }
+
+.view-switcher {
+  display: inline-flex;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.view-switcher a {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(var(--control-height) - 2px);
+  padding: 0 14px;
+  color: var(--text);
+  text-decoration: none;
+}
+.view-switcher a + a {
+  border-inline-start: 1px solid var(--border);
+}
+.view-switcher a[aria-current='page'] {
+  font-weight: 600;
+  background: var(--surface);
+  box-shadow: inset 0 -3px 0 var(--primary);
+}
+
+/* The schedule scrolls sideways inside its own frame; the page itself never does. */
+.timeline-frame {
+  max-width: 100%;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+.timeline {
+  border-collapse: collapse;
+}
+.timeline th,
+.timeline td {
+  padding: 4px 12px 4px 0;
+  text-align: left;
+  font-weight: normal;
+  vertical-align: middle;
+  border-bottom: 1px solid #d5d9e0;
+  overflow-wrap: anywhere;
+}
+.timeline thead th {
+  font-weight: 600;
+  vertical-align: bottom;
+}
+.timeline .name-col,
+.timeline .name-cell {
+  width: 320px;
+  min-width: 320px;
+  max-width: 320px;
+  background: var(--bg);
+}
+.timeline tr.selected .name-cell {
+  background: var(--surface);
+}
+.timeline .schedule-col,
+.timeline .track-cell {
+  position: relative;
+  padding: 0;
+  border-inline-start: 1px solid #d5d9e0;
+}
+.axis {
+  position: relative;
+  height: 66px;
+  font-weight: normal;
+}
+.axis-major,
+.axis-minor {
+  position: relative;
+  height: 22px;
+}
+.tick {
+  position: absolute;
+  top: 0;
+  height: 22px;
+  padding-inline-start: 4px;
+  overflow: hidden;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  border-inline-start: 1px solid #d5d9e0;
+}
+.axis-major .tick {
+  font-weight: 600;
+}
+.today-label {
+  position: absolute;
+  bottom: 0;
+  height: 22px;
+  padding-inline-start: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--danger);
+  white-space: nowrap;
+  border-inline-start: 2px solid var(--danger);
+}
+.track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+}
+.bar {
+  position: absolute;
+  top: 50%;
+  height: 20px;
+  margin-top: -10px;
+  border-radius: 4px;
+}
+.bar.kind-start,
+.bar.kind-end {
+  border-radius: 2px;
+}
+.bar.status-not_started {
+  background: #6b7280;
+}
+.bar.status-in_progress {
+  background: var(--primary);
+}
+.bar.status-blocked {
+  background: var(--danger);
+}
+.bar.status-done {
+  background: #15803d;
+}
+.bar.status-cancelled {
+  background: repeating-linear-gradient(135deg, #6b7280 0 4px, #d1d5db 4px 8px);
+}
+.timeline tr.context .bar {
+  opacity: 0.5;
+}
+.milestone {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  margin-inline-start: -6px;
+  background: var(--text);
+  border: 2px solid var(--bg);
+  transform: rotate(45deg);
+}
+.today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 2px;
+  background: var(--danger);
+  pointer-events: none;
+}
+.no-dates {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  font-size: 0.875rem;
+  color: var(--muted);
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+.timeline tr.context th,
+.timeline tr.context .item-title {
+  color: var(--muted);
+}
+.timeline tr.context .item-title {
+  font-weight: normal;
+  font-style: italic;
+}

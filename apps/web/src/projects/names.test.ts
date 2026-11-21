@@ -1,6 +1,6 @@
 import type { Project } from '@roadmap/shared';
 import { describe, expect, test } from 'vitest';
-import { addChildLabel, formatDates, levelName, statusName, warningText } from './names.ts';
+import { addChildLabel, formatDates, formatMilestone, levelName, statusName, warningText } from './names.ts';
 
 describe('FR-1.7 project names', () => {
   test.each([
@@ -62,5 +62,11 @@ describe('FR-1.7 warning sentences', () => {
   test('an item that is gone from the list still gets a sentence', () => {
     expect(warningText({ kind: 'outside_parent', parentId: 'x' }, byId)).toBe("Dates fall outside the parent's dates.");
     expect(warningText({ kind: 'blocked_by_later', blockerId: 'x' }, byId)).toBe('Starts before a blocker ends.');
+  });
+});
+
+describe('FR-1.7 milestone phrases', () => {
+  test('a milestone reads with its name and date', () => {
+    expect(formatMilestone({ name: 'Beta', date: '2027-03-03' })).toBe('Milestone: Beta, 3 Mar 2027');
   });
 });

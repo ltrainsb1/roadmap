@@ -31,6 +31,9 @@ const parse = (date: string): Date => new Date(`${date}T00:00:00Z`);
 /** One calendar date (`YYYY-MM-DD`) as "3 Mar 2027". */
 export const formatDay = (date: string): string => WITH_YEAR.format(parse(date));
 
+/** A milestone as "Milestone: Beta, 3 Mar 2027". */
+export const formatMilestone = (m: { name: string; date: string }): string => `Milestone: ${m.name}, ${formatDay(m.date)}`;
+
 /** Start and end dates (`YYYY-MM-DD` or null) as one phrase: "3 Mar to 28 Apr 2027", "From 3 Mar 2027", "Until 28 Apr 2027", "No dates". */
 export function formatDates(start: string | null, end: string | null): string {
   if (start && end) {

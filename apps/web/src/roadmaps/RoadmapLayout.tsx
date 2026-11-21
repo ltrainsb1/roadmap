@@ -52,9 +52,11 @@ export function RoadmapLayout() {
 
   const base = `/r/${encodeURIComponent(roadmapId)}`;
   // Switching keeps the tab: the same section of the other roadmap.
-  // A project's panel belongs to its own roadmap, so switching lands on the list.
+  // The List, Timeline and Board are all the Projects tab. Switching keeps the view, but an item's panel belongs to
+  // its own roadmap, so the item is dropped.
   const rawSection = location.pathname.slice(base.length) || '/projects';
-  const section = rawSection.startsWith('/projects') ? '/projects' : rawSection;
+  const view = /^\/(projects|timeline|board)(?=\/|$)/.exec(rawSection)?.[0];
+  const section = view ?? rawSection;
   const picker = (
     <div className="roadmap-picker">
       <label htmlFor="roadmap-picker">Roadmap</label>
@@ -79,7 +81,9 @@ export function RoadmapLayout() {
   return (
     <Layout width="wide" signedIn headerExtra={picker}>
       <nav aria-label="Roadmap sections" className="tabs">
-        <NavLink to={`${base}/projects`}>Projects</NavLink>
+        <Link to={`${base}/projects`} aria-current={view ? 'page' : undefined}>
+          Projects
+        </Link>
         <NavLink to={`${base}/members`}>Members</NavLink>
         {can({ role: current.role, action: 'audit.view' }) && <NavLink to={`${base}/audit`}>Audit log</NavLink>}
       </nav>

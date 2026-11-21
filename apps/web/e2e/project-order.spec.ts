@@ -111,6 +111,33 @@ test('FR-1.3: an Admin drags a row with the mouse', async ({ page, call, roadmap
   await expect.poll(() => titles(page)).toEqual(['Two', 'Three', 'One']);
 });
 
+test('FR-1.3: an Admin reorders a row by touch at 375 px, with a long press', async ({ page, call, roadmap }) => {
+  await threeProjects(page, call, roadmap.id);
+  await page.setViewportSize({ width: 375, height: 667 });
+  const handle = page.getByRole('button', { name: 'Reorder One' });
+  await expect(handle).toBeVisible();
+  const h = (await handle.boundingBox())!;
+  const target = (await projectRow(page, 'Three').boundingBox())!;
+  const from = { x: h.x + h.width / 2, y: h.y + h.height / 2 };
+  const to = { x: from.x, y: target.y + target.height / 2 + 10 };
+
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', points: { x: number; y: number }[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map((p) => ({ x: p.x, y: p.y, id: 1 })) });
+  // A long press picks the row up; dnd-kit says so once it has.
+  await touch('touchStart', [from]);
+  await expect(page.getByText('Picked up One.', { exact: true })).toBeAttached();
+  for (let i = 1; i <= 10; i += 1) {
+    await touch('touchMove', [{ x: from.x, y: from.y + ((to.y - from.y) * i) / 10 }]);
+  }
+  await expect(page.getByText('Moved One to position 3 of 3.', { exact: true })).toBeAttached();
+  await touch('touchEnd', []);
+  await expect(page.getByText('Dropped One at position 3 of 3.', { exact: true })).toBeAttached();
+  await expect.poll(() => titles(page)).toEqual(['Two', 'Three', 'One']);
+  await page.reload();
+  await expect.poll(() => titles(page)).toEqual(['Two', 'Three', 'One']);
+});
+
 test('Review focus 5: when a sibling was added in another session, the reorder shows "The list changed while you were reordering. Try again." and the list refreshes', async ({ page, call, roadmap }) => {
   await threeProjects(page, call, roadmap.id);
   await seedProject(call, roadmap.id, 'Four');

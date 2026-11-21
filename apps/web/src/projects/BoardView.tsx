@@ -2,7 +2,6 @@ import { can, filterProjects, PROJECT_STATUSES, projectWarnings, treeOrder, type
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   pointerWithin,
   TouchSensor,
   useDraggable,
@@ -16,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/Button.tsx';
 import { BoardCard } from './BoardCard.tsx';
+import { MouseAndPenSensor } from './dragSensors.ts';
 import { hasNarrowing, type ViewOptions } from './filters.ts';
 import { dragHandleIcon, titleLinkId } from './itemParts.tsx';
 import { itemCount, levelPlural, statusName, warningText } from './names.ts';
@@ -23,18 +23,6 @@ import { statusButtonId } from './StatusMenu.tsx';
 import type { ItemActions } from './useItemActions.tsx';
 import { isAssigned } from './useProjects.ts';
 import { viewPath } from './ViewSwitcher.tsx';
-
-/**
- * dnd-kit's pointer sensor, for a mouse or a pen only. A finger is left to the TouchSensor, so a touch drag starts
- * with its long press; otherwise this sensor would take the touch's pointer events first and start after 5 px.
- */
-class MouseAndPenSensor extends PointerSensor {
-  static override activators = PointerSensor.activators.map((activator) => ({
-    ...activator,
-    handler: (...args: Parameters<typeof activator.handler>) =>
-      args[0].nativeEvent.pointerType !== 'touch' && activator.handler(...args),
-  }));
-}
 
 /**
  * Holding a card near the board's left or right edge scrolls the board sideways. Only the board scrolls this way, not

@@ -3,7 +3,6 @@ import {
   closestCenter,
   DndContext,
   KeyboardSensor,
-  PointerSensor,
   TouchSensor,
   useSensor,
   useSensors,
@@ -17,6 +16,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { Fragment, useCallback, useRef, useState, type ReactNode } from 'react';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
 import { AddItemRow } from './AddItemRow.tsx';
+import { MouseAndPenSensor } from './dragSensors.ts';
 import { actionsButtonId, dragHandleIcon, NameCell } from './itemParts.tsx';
 import { StatusMenu } from './StatusMenu.tsx';
 import { isAssigned } from './useProjects.ts';
@@ -171,7 +171,7 @@ export function ProjectTree(props: TreeProps) {
   // The row being dragged shows without its children, so it moves as one line.
   const [dragging, setDragging] = useState<string | null>(null);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(MouseAndPenSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sameGroupKeyboard }),
   );

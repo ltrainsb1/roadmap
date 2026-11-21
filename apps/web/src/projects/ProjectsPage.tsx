@@ -1,4 +1,4 @@
-import { activeFilterCount, can, NO_FILTERS, type ProjectList } from '@roadmap/shared';
+import { activeFilterCount, can, NO_FILTERS, TIMELINE_ZOOMS, type ProjectList, type TimelineZoom } from '@roadmap/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -9,6 +9,7 @@ import { useRoadmap } from '../roadmaps/RoadmapLayout.tsx';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
+import { SelectField } from '../ui/SelectField.tsx';
 import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
 import { filtersFromSearch, hasNarrowing, searchFor, viewOf, viewOptionsFromSearch } from './filters.ts';
 import {
@@ -32,6 +33,7 @@ import { viewPath, ViewSwitcher, type ProjectView } from './ViewSwitcher.tsx';
 
 const FILTERS_BUTTON_ID = 'filters-button';
 const SEARCH_ID = 'project-search';
+const ZOOM_NAMES: Record<TimelineZoom, string> = { weeks: 'Weeks', months: 'Months', quarters: 'Quarters' };
 
 /** The items of one roadmap in one view, with the search, filters, view switcher and the item panel. */
 export function ProjectsPage({ view }: { view: ProjectView }) {
@@ -68,6 +70,9 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
   const tagsInUse = useMemo(() => [...new Set(projects.items.filter((i) => !i.archived).flatMap((i) => i.tags))].sort(), [projects.items]);
   const setFilters = (next: typeof filters) => setParams(searchFor(next, options), { replace: true });
   const clearFilters = () => setParams(searchFor(NO_FILTERS, options), { replace: true });
+  const setZoom = (zoom: TimelineZoom) => setParams(searchFor(filters, { ...options, zoom }), { replace: true });
+  // Counts presses of "Today"; the Timeline scrolls to today each time it changes.
+  const [todaySignal, setTodaySignal] = useState(0);
   const closeFilters = () => {
     setFiltersOpen(false);
     document.getElementById(FILTERS_BUTTON_ID)?.focus();
@@ -178,6 +183,20 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
                 views={['list', 'timeline']}
                 onNavigate={(path) => actions.unlessDirty(() => void navigate(path))}
               />
+              {view === 'timeline' && (
+                <>
+                  <div className="toolbar-zoom">
+                    <SelectField id="timeline-zoom" label="Zoom" value={options.zoom} onChange={(e) => setZoom(e.target.value as TimelineZoom)}>
+                      {TIMELINE_ZOOMS.map((z) => (
+                        <option key={z} value={z}>
+                          {ZOOM_NAMES[z]}
+                        </option>
+                      ))}
+                    </SelectField>
+                  </div>
+                  <Button onClick={() => setTodaySignal((n) => n + 1)}>Today</Button>
+                </>
+              )}
             </div>
             <FiltersPanel
               open={filtersOpen}
@@ -221,6 +240,7 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
                   onToggle={toggle}
                   search={search}
                   actions={actions}
+                  scrollToTodaySignal={todaySignal}
                 />
               </>
             )}

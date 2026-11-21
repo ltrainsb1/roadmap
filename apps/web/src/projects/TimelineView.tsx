@@ -11,7 +11,7 @@ import {
   type TimelineZoom,
   type TreeNode,
 } from '@roadmap/shared';
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Menu } from '../ui/Menu.tsx';
@@ -44,6 +44,8 @@ interface TimelineViewProps {
   /** The query string to keep when opening an item, with its leading "?" or empty. */
   search: string;
   actions: ItemActions;
+  /** Each change scrolls the schedule so today is a third of the way in; it also happens once on first render. */
+  scrollToTodaySignal: number;
 }
 
 /** One item's schedule: its bar, its dates and milestones in words, and the today line. */
@@ -69,9 +71,21 @@ function Track({ item, range, today }: { item: Project; range: TimelineRange; to
  * right. View only: dates are edited in the panel.
  */
 export function TimelineView(props: TimelineViewProps) {
-  const { roadmapId, role, myId, items, contextIds, expandAll, byId, today, zoom, selectedId, collapsed, onToggle, search, actions } = props;
+  const { roadmapId, role, myId, items, contextIds, expandAll, byId, today, zoom, selectedId, collapsed, onToggle, search, actions, scrollToTodaySignal } =
+    props;
   const range = timelineRange(items, today, zoom);
   const base = viewPath(roadmapId, 'timeline');
+  const frame = useRef<HTMLDivElement>(null);
+  const todayX = xOf(today, range);
+
+  // Today goes a third of the way across the part of the frame the name column leaves free.
+  useEffect(() => {
+    const el = frame.current;
+    if (!el) return;
+    const names = el.querySelector<HTMLElement>('.name-col')?.offsetWidth ?? 0;
+    el.scrollLeft = todayX - (el.clientWidth - names) / 3;
+    // Only on first render and when asked: a zoom or filter change keeps the person's own scroll.
+  }, [scrollToTodaySignal]);
 
   const renderNode = ({ item, children }: TreeNode): ReactNode => {
     const hasChildren = children.length > 0;
@@ -123,7 +137,8 @@ export function TimelineView(props: TimelineViewProps) {
   };
 
   return (
-    <div className="timeline-frame">
+    // One scroll container for the header and every row, so they move together; the name column is sticky inside it.
+    <div ref={frame} className="timeline-frame" role="region" aria-label="Schedule, scrolls sideways" tabIndex={0}>
       <table className="timeline" aria-label="Timeline">
         <TimelineAxis range={range} zoom={zoom} today={today} />
         <tbody>{buildTree(items).map(renderNode)}</tbody>

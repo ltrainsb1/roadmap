@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expectNoA11yViolations, seedProject, useCspGuard } from './helpers.ts';
 import { expect, joinByApi, test, type ApiCall } from './fixtures.ts';
 
@@ -12,6 +12,33 @@ const row = (page: Page, title: string) =>
   timeline(page).getByRole('row').filter({ has: page.getByRole('link', { name: title, exact: true }) });
 const views = (page: Page) => page.getByRole('navigation', { name: 'View', exact: true });
 const panelOf = (page: Page, title: string) => page.getByRole('region', { name: title, exact: true });
+const frame = (page: Page) => page.getByRole('region', { name: 'Schedule, scrolls sideways', exact: true });
+const zoom = (page: Page) => page.getByLabel('Zoom', { exact: true });
+const nameHeader = (page: Page) => timeline(page).getByRole('columnheader', { name: 'Name', exact: true });
+const box = async (locator: Locator) => {
+  const b = await locator.boundingBox();
+  expect(b).not.toBeNull();
+  return b!;
+};
+/** The element lies inside the window and nothing covers its centre. */
+async function expectFullyShown(page: Page, locator: Locator) {
+  await expect(locator).toBeVisible();
+  const item = await box(locator);
+  const viewport = page.viewportSize()!;
+  expect(item.x).toBeGreaterThanOrEqual(0);
+  expect(item.y).toBeGreaterThanOrEqual(0);
+  expect(item.x + item.width).toBeLessThanOrEqual(viewport.width);
+  expect(item.y + item.height).toBeLessThanOrEqual(viewport.height);
+  const onTop = await locator.evaluate(
+    (el, { x, y }) => {
+      const top = document.elementFromPoint(x, y);
+      return top === el || el.contains(top);
+    },
+    { x: item.x + item.width / 2, y: item.y + item.height / 2 },
+  );
+  expect(onTop).toBe(true);
+}
+const barWidth = async (page: Page, title: string) => (await box(row(page, title).locator('.bar'))).width;
 
 /**
  * "Launch site" (3 Mar to 28 Apr 2027, milestone "Beta" on 1 Apr 2027) with child "Design" (start 10 Mar 2027
@@ -120,6 +147,8 @@ test('choosing a row opens the panel beside the Timeline, and saving new dates m
 });
 
 test('the status pill and the Actions menu work on a row', async ({ page, call, roadmap }) => {
+  // Below 600 px the row has neither: both are in the panel and the List.
+  await page.setViewportSize({ width: 1280, height: 800 });
   await seeded(call, roadmap.id);
   await openTimeline(page, roadmap.id);
   await row(page, 'Hire').getByRole('button', { name: 'Status of Hire: Not started', exact: true }).click();
@@ -173,6 +202,8 @@ test('a Contributor who is not assigned sees plain status text and no Archive or
   await seeded(call, roadmap.id);
   const guest = await joinByApi(browser, call, roadmap.id, 'contributor', 'viewer');
   const page = guest.page;
+  // Below 600 px the row has neither the status nor the Actions menu.
+  await page.setViewportSize({ width: 1280, height: 800 });
   await openTimeline(page, roadmap.id);
   await expect(row(page, 'Hire')).toContainText('Not started');
   await expect(row(page, 'Hire').getByRole('button', { name: /^Status of Hire/ })).toHaveCount(0);
@@ -191,18 +222,160 @@ test('a row menu opened on the last row is fully visible and not clipped by the 
   await openTimeline(page, roadmap.id);
   await page.getByRole('button', { name: 'Actions for Row 12', exact: true }).click();
   const remove = page.getByRole('menuitem', { name: 'Delete', exact: true });
-  await expect(remove).toBeVisible();
-  const box = (await remove.boundingBox())!;
-  const viewport = page.viewportSize()!;
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.y).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
-  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
-  const hit = await remove.evaluate((item, { x, y }) => {
-    const top = document.elementFromPoint(x, y);
-    return top === item || item.contains(top);
-  }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
-  expect(hit).toBe(true);
+  await expectFullyShown(page, remove);
   // The frame did not scroll down to make room for the list, so the dates header is still in view.
-  expect(await page.locator('.timeline-frame').evaluate((el) => el.scrollTop)).toBe(0);
+  expect(await frame(page).evaluate((el) => el.scrollTop)).toBe(0);
+  await page.keyboard.press('Escape');
+
+  // A menu on the first row runs down over the name cells of the rows below, and stays on top of them.
+  await page.getByRole('button', { name: /^Status of Launch site/ }).click();
+  await expectFullyShown(page, page.getByRole('menuitemradio', { name: 'Cancelled', exact: true }));
+});
+
+test('a milestone sits at its date and a one-date item is an 8 px marker', async ({ page, call, roadmap }) => {
+  await seeded(call, roadmap.id);
+  await openTimeline(page, roadmap.id);
+  const bar = await box(row(page, 'Launch site').locator('.bar'));
+  const beta = await box(row(page, 'Launch site').locator('.milestone'));
+  // The diamond is centred on the start of 1 Apr: 29 days after 3 Mar at 6 px.
+  expect(beta.x + beta.width / 2 - bar.x).toBeCloseTo(174, 0);
+  expect(await barWidth(page, 'Design')).toBeCloseTo(8, 0);
+});
+
+test('a search with no match shows the no-match message and Clear filters on the Timeline', async ({ page, call, roadmap }) => {
+  await seeded(call, roadmap.id);
+  await openTimeline(page, roadmap.id, '?q=nothing-like-this');
+  await expect(page.getByText('No projects match these filters.', { exact: true })).toBeVisible();
+  await expect(timeline(page)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await expect(row(page, 'Launch site')).toBeVisible();
+  await expect(row(page, 'Hire')).toBeVisible();
+});
+
+test('FR-1.7: Zoom changes the scale and is kept in the address', async ({ page, call, roadmap }) => {
+  await seeded(call, roadmap.id);
+  await openTimeline(page, roadmap.id);
+  await expect(zoom(page)).toHaveValue('months');
+  await zoom(page).selectOption({ label: 'Weeks' });
+  await expect(page).toHaveURL(`/r/${roadmap.id}/timeline?zoom=weeks`);
+  // 57 days at 24 px.
+  await expect.poll(() => barWidth(page, 'Launch site')).toBeCloseTo(1368, 0);
+  await zoom(page).selectOption({ label: 'Quarters' });
+  await expect(page).toHaveURL(`/r/${roadmap.id}/timeline?zoom=quarters`);
+  await expect.poll(() => barWidth(page, 'Launch site')).toBeCloseTo(114, 0);
+  await page.reload();
+  await expect(zoom(page)).toHaveValue('quarters');
+  await expect(zoom(page).locator('option:checked')).toHaveText('Quarters');
+});
+
+test('FR-1.7: changing a filter keeps the zoom', async ({ page, call, roadmap }) => {
+  await seeded(call, roadmap.id);
+  await openTimeline(page, roadmap.id, '?zoom=weeks');
+  await page.getByRole('searchbox', { name: 'Search projects' }).fill('la');
+  await expect(page).toHaveURL(`/r/${roadmap.id}/timeline?q=la&zoom=weeks`);
+  await expect(zoom(page)).toHaveValue('weeks');
+});
+
+test('FR-1.7: the header shows the dates for the zoom', async ({ page, call, roadmap }) => {
+  await seeded(call, roadmap.id);
+  await openTimeline(page, roadmap.id);
+  const header = timeline(page).locator('thead');
+  await expect(header).toContainText('2027');
+  await expect(header).toContainText('Mar');
+  await zoom(page).selectOption({ label: 'Weeks' });
+  await expect(header).toContainText('March 2027');
+  await zoom(page).selectOption({ label: 'Quarters' });
+  await expect(header).toContainText('Q1');
+});
+
+test('FR-1.7: the Timeline opens with today in view, and Today brings it back', async ({ page, call, roadmap }) => {
+  await seeded(call, roadmap.id);
+  // At Weeks the schedule is far wider than the window.
+  await openTimeline(page, roadmap.id, '?zoom=weeks');
+  const todayInView = async () => {
+    const shown = await box(frame(page));
+    const names = await box(nameHeader(page));
+    const line = await box(row(page, 'Launch site').locator('.today-line'));
+    return line.x >= names.x + names.width && line.x + line.width <= shown.x + shown.width;
+  };
+  await expect.poll(todayInView).toBe(true);
+  await frame(page).evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+  });
+  await expect.poll(todayInView).toBe(false);
+  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await expect.poll(todayInView).toBe(true);
+});
+
+test('Review focus 1: items in 1900 and 2200 give a track no wider than 24,000 px', async ({ page, call, roadmap }) => {
+  const base = `/api/roadmaps/${roadmap.id}/projects`;
+  const old = await seedProject(call, roadmap.id, 'Old');
+  const far = await seedProject(call, roadmap.id, 'Far');
+  await call('PATCH', `${base}/${old}`, { version: 1, startDate: '1900-01-01', endDate: '1900-01-02' });
+  await call('PATCH', `${base}/${far}`, { version: 1, startDate: '2200-12-30', endDate: '2200-12-31' });
+  await openTimeline(page, roadmap.id);
+  await expect(row(page, 'Far')).toContainText('30 Dec to 31 Dec 2200');
+  const scrollWidth = await frame(page).evaluate((el) => el.scrollWidth);
+  const names = await box(nameHeader(page));
+  expect(scrollWidth).toBeLessThanOrEqual(24_000 + Math.ceil(names.width));
+  expect(await barWidth(page, 'Old')).toBeGreaterThanOrEqual(8);
+  expect(await barWidth(page, 'Far')).toBeGreaterThanOrEqual(8);
+});
+
+test('FR-1.9: at 375 px the timeline scrolls sideways inside its frame and the page does not', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await seeded(call, roadmap.id);
+  await openTimeline(page, roadmap.id);
+  await expect(row(page, 'Launch site')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  const sizes = await frame(page).evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+  expect(sizes.scrollWidth).toBeGreaterThan(sizes.clientWidth);
+  // The name column is narrow, and the status and Actions menu are left to the panel and the List.
+  expect((await box(nameHeader(page))).width).toBeCloseTo(140, 0);
+  await expect(row(page, 'Launch site').getByRole('button', { name: 'Actions for Launch site', exact: true })).toBeHidden();
+  await expect(row(page, 'Launch site').getByRole('button', { name: /^Status of Launch site/ })).toBeHidden();
+
+  await frame(page).evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+  });
+  await expect.poll(() => frame(page).evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+  const link = timeline(page).getByRole('link', { name: 'Launch site', exact: true });
+  await expect(link).toBeInViewport();
+  expect((await box(link)).x).toBeGreaterThanOrEqual((await box(frame(page))).x);
+});
+
+test('FR-1.7: the name column stays in place while the bars scroll', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await seeded(call, roadmap.id);
+  await openTimeline(page, roadmap.id, '?zoom=weeks');
+  const link = timeline(page).getByRole('link', { name: 'Launch site', exact: true });
+  const bar = row(page, 'Launch site').locator('.bar');
+  await frame(page).evaluate((el) => {
+    el.scrollLeft = 0;
+  });
+  await expect.poll(() => frame(page).evaluate((el) => el.scrollLeft)).toBe(0);
+  const before = { name: (await box(link)).x, bar: (await box(bar)).x };
+  await frame(page).evaluate((el) => {
+    el.scrollLeft = 400;
+  });
+  await expect.poll(async () => (await box(bar)).x).toBeCloseTo(before.bar - 400, 0);
+  expect((await box(link)).x).toBeCloseTo(before.name, 0);
+  // The bars pass under the names, not over them.
+  const name = await box(link);
+  const onTop = await link.evaluate(
+    (el, { x, y }) => {
+      const top = document.elementFromPoint(x, y);
+      return top === el || el.contains(top);
+    },
+    { x: name.x + name.width / 2, y: name.y + name.height / 2 },
+  );
+  expect(onTop).toBe(true);
+});
+
+test('FR-1.9: the Timeline passes axe at 375 px', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await seeded(call, roadmap.id);
+  await openTimeline(page, roadmap.id);
+  await expect(row(page, 'Launch site')).toBeVisible();
+  await expectNoA11yViolations(page);
 });

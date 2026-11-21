@@ -30,17 +30,21 @@ async function pickUp(page: Page, title: string) {
   await expect(page.getByText(`Picked up ${title}.`, { exact: true })).toBeAttached();
 }
 
-/** Moves the picked-up card to the middle of `target` in steps, as a hand would, and lets go. */
-async function dropOn(page: Page, target: Locator) {
+/** Moves the picked-up card to the middle of `target` in steps, as a hand would, without letting go. */
+async function moveOver(page: Page, target: Locator) {
   const to = centre(await box(target));
   await page.mouse.move(to.x, to.y, { steps: 12 });
-  await page.mouse.up();
 }
 
-/** Drags `title`'s card by its handle with the mouse onto `target`. */
-async function drag(page: Page, title: string, target: Locator) {
+/**
+ * Drags `title`'s card by its handle with the mouse onto the column `target`, whose status is `status`, and lets go
+ * once dnd-kit has said the card is over it.
+ */
+async function drag(page: Page, title: string, target: Locator, status: string) {
   await pickUp(page, title);
-  await dropOn(page, target);
+  await moveOver(page, target);
+  await expect(page.getByText(`${title} is over ${status}.`, { exact: true })).toBeAttached();
+  await page.mouse.up();
 }
 
 /** The id of a member, by email. */
@@ -255,7 +259,7 @@ test('FR-1.7: dragging a card to another column changes its status, and it is st
   await page.setViewportSize({ width: 1280, height: 800 });
   await seeded(call, roadmap.id);
   await openBoard(page, roadmap.id);
-  await drag(page, 'Hire', column(page, 'Done, 0 items'));
+  await drag(page, 'Hire', column(page, 'Done, 0 items'), 'Done');
   await expect(column(page, 'Done, 1 item')).toContainText('Hire');
   await expect(column(page, 'Not started, 0 items')).toContainText('No items');
   await expect(card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Done', exact: true })).toBeVisible();
@@ -273,13 +277,19 @@ test('FR-1.7: dropping a card on its own column or outside the board changes not
     if (r.method() === 'PATCH' && /\/api\/roadmaps\/[^/]+\/projects\/[^/]+$/.test(new URL(r.url()).pathname)) saves += 1;
   });
 
-  await drag(page, 'Hire', column(page, 'Not started, 1 item'));
+  // Over its own column nothing is said, so the column's outline shows the card is over it.
+  await pickUp(page, 'Hire');
+  await moveOver(page, column(page, 'Not started, 1 item'));
+  await expect(column(page, 'Not started, 1 item')).toHaveClass(/\bover\b/);
+  await page.mouse.up();
   await expect(page.getByText('Move cancelled.', { exact: true })).toBeAttached();
   await expect(column(page, 'Not started, 1 item')).toContainText('Hire');
 
   await pickUp(page, 'Hire');
   await expect(page.getByText('Move cancelled.', { exact: true })).toHaveCount(0);
-  await dropOn(page, page.getByRole('heading', { name: 'Projects', level: 1 }));
+  await moveOver(page, page.getByRole('heading', { name: 'Projects', level: 1 }));
+  await expect(board(page).locator('.board-column.over')).toHaveCount(0);
+  await page.mouse.up();
   await expect(page.getByText('Move cancelled.', { exact: true })).toBeAttached();
   await expect(column(page, 'Not started, 1 item')).toContainText('Hire');
   await expect(card(page, 'Hire')).not.toHaveClass(/dragging/);
@@ -292,7 +302,7 @@ test('FR-1.7: dropping a card on its own column or outside the board changes not
   await card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Not started', exact: true }).click();
   await page.getByRole('menuitemradio', { name: 'Blocked', exact: true }).click();
   await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
-  expect(saves).toBe(1);
+  await expect.poll(() => saves).toBe(1);
 });
 
 test('FR-1.7: Review focus 3: a move that conflicts puts the card back and says why', async ({ page, call, roadmap }) => {
@@ -302,7 +312,7 @@ test('FR-1.7: Review focus 3: a move that conflicts puts the card back and says 
   await expect(card(page, 'Hire')).toBeVisible();
   // Someone else blocks it; this page still has the old copy.
   await call('PATCH', `${base}/${hire}`, { version: 1, status: 'blocked' });
-  await drag(page, 'Hire', column(page, 'Done, 0 items'));
+  await drag(page, 'Hire', column(page, 'Done, 0 items'), 'Done');
   await expect(page.getByRole('alert')).toHaveText(CONFLICT);
   await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
   await expect(column(page, 'Done, 0 items')).toContainText('No items');
@@ -320,7 +330,7 @@ test('FR-1.7: Review focus 4: a Contributor whose assignment was just removed ge
 
   // The owner unassigns them; their page has not refetched.
   await call('PUT', `${base}/${hire}/assignees`, { userIds: [] });
-  await drag(page, 'Hire', column(page, 'Done, 0 items'));
+  await drag(page, 'Hire', column(page, 'Done, 0 items'), 'Done');
   await expect(page.getByRole('alert')).toHaveText(READ_ONLY);
   await expect(column(page, 'Not started, 1 item')).toContainText('Hire');
   await expect(column(page, 'Done, 0 items')).toContainText('No items');
@@ -337,7 +347,7 @@ test("FR-1.7: Review focus 5: moving the card of the open item updates the panel
   const panel = panelOf(page, 'Hire');
   await panel.getByLabel('Title', { exact: true }).fill('Hire two people');
 
-  await drag(page, 'Hire', column(page, 'In progress, 1 item'));
+  await drag(page, 'Hire', column(page, 'In progress, 1 item'), 'In progress');
   await expect(column(page, 'In progress, 2 items')).toContainText('Hire');
   await expect(panel.getByLabel('Status', { exact: true })).toHaveValue('in_progress');
   await expect(panel.getByLabel('Status', { exact: true }).locator('option:checked')).toHaveText('In progress');
@@ -402,8 +412,7 @@ test('FR-1.7: screen readers are told what happened', async ({ page, call, roadm
   await openBoard(page, roadmap.id);
   await expect(handle(page, 'Hire')).toHaveAccessibleDescription('Drag this card to another column, or use its status menu.');
   await pickUp(page, 'Hire');
-  const done = centre(await box(column(page, 'Done, 0 items')));
-  await page.mouse.move(done.x, done.y, { steps: 12 });
+  await moveOver(page, column(page, 'Done, 0 items'));
   await expect(page.getByText('Hire is over Done.', { exact: true })).toBeAttached();
   await page.mouse.up();
   await expect(page.getByText('Moved Hire to Done.', { exact: true })).toBeAttached();
@@ -415,8 +424,7 @@ test('FR-1.7: the Board passes axe with a card picked up', async ({ page, call, 
   await seeded(call, roadmap.id);
   await openBoard(page, roadmap.id);
   await pickUp(page, 'Hire');
-  const done = centre(await box(column(page, 'Done, 0 items')));
-  await page.mouse.move(done.x, done.y, { steps: 12 });
+  await moveOver(page, column(page, 'Done, 0 items'));
   await expect(page.getByText('Hire is over Done.', { exact: true })).toBeAttached();
   await expectNoA11yViolations(page);
   await page.mouse.up();
@@ -483,4 +491,45 @@ test('FR-1.7: the level is kept when a filter changes and when a card is opened 
   await expect(page).toHaveURL(`/r/${roadmap.id}/board?q=Des&level=2`);
   await expect(level(page)).toHaveValue('2');
   await expect.poll(() => titlesIn(board(page))).toEqual(['Design']);
+});
+
+test('FR-1.7: a card moved twice in quick succession ends in the second column with no error', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { hire } = await seeded(call, roadmap.id);
+  // The first save reaches the server, but its answer is held until the second move has been made.
+  let arrived!: () => void;
+  const firstArrived = new Promise<void>((resolve) => (arrived = resolve));
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let patches = 0;
+  await page.route(`**/api/roadmaps/${roadmap.id}/projects/${hire}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback();
+    patches += 1;
+    if (patches > 1) return route.fallback();
+    const response = await route.fetch();
+    arrived();
+    await released;
+    await route.fulfill({ response });
+  });
+  await openBoard(page, roadmap.id);
+
+  await drag(page, 'Hire', column(page, 'Done, 0 items'), 'Done');
+  await firstArrived;
+  await expect(column(page, 'Done, 1 item')).toContainText('Hire');
+  await drag(page, 'Hire', column(page, 'Blocked, 0 items'), 'Blocked');
+  await expect(page.getByText('Moved Hire to Blocked.', { exact: true })).toBeAttached();
+  await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
+  // The second save waits for the first, so only the first has gone out.
+  expect(patches).toBe(1);
+
+  release();
+  await expect.poll(() => patches).toBe(2);
+  await expect(card(page, 'Hire').getByRole('button', { name: 'Status of Hire: Blocked', exact: true })).toBeVisible();
+  await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
+  await expect(column(page, 'Done, 0 items')).toContainText('No items');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.unroute(`**/api/roadmaps/${roadmap.id}/projects/${hire}`);
+  await page.reload();
+  await expect(column(page, 'Blocked, 1 item')).toContainText('Hire');
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

@@ -35,6 +35,19 @@ class MouseAndPenSensor extends PointerSensor {
   }));
 }
 
+/**
+ * Holding a card near the board's left or right edge scrolls the board sideways. Only the board scrolls this way, not
+ * the page: a card is dropped anywhere over a column and the columns are as tall as the board, which never scrolls
+ * up or down itself, so there is nothing to reach by scrolling vertically. (dnd-kit 6 has no switch for one axis;
+ * `canScroll` picks the elements.) The edge zone is a tenth of the board's width, not the default fifth: at 375 px
+ * the next column shows only about 50 px at the edge, and the default zone covered all of it, scrolling the board
+ * past that column before the card could be dropped there.
+ */
+const AUTO_SCROLL = {
+  threshold: { x: 0.1, y: 0.2 },
+  canScroll: (element: Element) => element.classList.contains('board'),
+};
+
 const isStatus = (id: UniqueIdentifier | undefined): id is ProjectStatus => (PROJECT_STATUSES as readonly unknown[]).includes(id);
 
 /**
@@ -183,10 +196,7 @@ export function BoardView({ role, myId, items, filters, level, byId, memberNames
     <DndContext
       sensors={sensors}
       collisionDetection={pointerWithin}
-      // A card is dropped anywhere over a column, so only sideways scrolling helps, and its edge zone is kept narrow:
-      // at 375 px the next column shows only about 50 px at the board's edge, and the default zone would cover all of
-      // it and scroll the board past that column before the card could be dropped there.
-      autoScroll={{ threshold: { x: 0.1, y: 0 } }}
+      autoScroll={AUTO_SCROLL}
       accessibility={{
         container: document.body,
         announcements,

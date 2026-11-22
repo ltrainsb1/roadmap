@@ -49,5 +49,8 @@ export function useDeleteAttachment(roadmapId: string, projectId: string) {
  */
 export async function downloadAttachment(roadmapId: string, projectId: string, id: string): Promise<void> {
   const { url } = await api<DownloadLink>(`${base(roadmapId, projectId)}/${encodeURIComponent(id)}/download`);
+  // Only a web link: never a script or inline document, whatever the answer held.
+  const { protocol } = new URL(url, window.location.origin);
+  if (protocol !== 'https:' && protocol !== 'http:') throw new Error('unsafe_download_link');
   window.location.assign(url);
 }

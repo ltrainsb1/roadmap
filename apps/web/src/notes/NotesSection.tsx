@@ -1,6 +1,6 @@
 import { can, NOTE_LIMITS, type Note, type Project, type Role } from '@roadmap/shared';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { errorCode, GENERIC_ERROR } from '../api/errors.ts';
+import { ARCHIVED_CONTENT, errorCode, GENERIC_ERROR } from '../api/errors.ts';
 import { formatWhen } from '../audit/dates.ts';
 import { focusRemaining } from '../projects/focusAfterRemove.ts';
 import type { MemberName } from '../projects/PanelLists.tsx';
@@ -11,7 +11,6 @@ import { Markdown } from './Markdown.tsx';
 import { NoteBox } from './NoteBox.tsx';
 import { useAddNote, useDeleteNote, useEditNote, useNotes } from './useNotes.ts';
 
-export const ARCHIVED_CONTENT = "This item is archived, so notes and files can't be added or changed.";
 const EMPTY_NOTE = 'Write something first.';
 const TOO_LONG = 'Notes can be up to 5,000 characters.';
 const SAVE_FAILED = "Couldn't save the note. Try again.";

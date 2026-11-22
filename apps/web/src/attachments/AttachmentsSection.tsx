@@ -1,11 +1,11 @@
 import { cleanFileName, formatFileSize, NOTE_LIMITS, type Attachment, type AttachmentList, type Project } from '@roadmap/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react';
-import { errorCode, GENERIC_ERROR } from '../api/errors.ts';
+import { ARCHIVED_CONTENT, errorCode, GENERIC_ERROR } from '../api/errors.ts';
 import { formatWhen } from '../audit/dates.ts';
-import { ARCHIVED_CONTENT } from '../notes/NotesSection.tsx';
 import { focusRemaining } from '../projects/focusAfterRemove.ts';
 import { PROJECTS_KEY } from '../projects/useProjects.ts';
+import { ROADMAPS_KEY } from '../roadmaps/useRoadmaps.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
@@ -60,6 +60,9 @@ export function AttachmentsSection({ roadmapId, item, editable, timeZone }: Atta
   const addId = `files-${item.id}-add`;
   const focusList = `files-${item.id}`;
   const section = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  // The control in this section that last had focus, to notice when a refresh removes it.
+  const lastFocused = useRef<HTMLElement | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   // Files chosen and not yet sent, in order; one is sent at a time.
@@ -78,6 +81,20 @@ export function AttachmentsSection({ roadmapId, item, editable, timeZone }: Atta
 
   const say = (message: string) => setMessages((m) => (m.includes(message) ? m : [...m, message]));
   const refreshItem = () => void queryClient.invalidateQueries({ queryKey: PROJECTS_KEY(roadmapId) });
+  /** After a `forbidden`, refetches what decides whether this person may change the item: the item and their role. */
+  const refreshAccess = () => {
+    refreshItem();
+    void queryClient.invalidateQueries({ queryKey: ROADMAPS_KEY });
+  };
+
+  // When a refresh removes the control that had focus ("Add file" or "Remove" once the item is archived or no
+  // longer theirs), focus goes to the heading rather than being lost. A remove places focus itself.
+  useEffect(() => {
+    const was = lastFocused.current;
+    if (!was || was.isConnected || focusAfterRemove) return;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    heading.current?.focus();
+  });
 
   useEffect(() => {
     if (!focusAfterRemove || !list) return;
@@ -100,10 +117,12 @@ export function AttachmentsSection({ roadmapId, item, editable, timeZone }: Atta
         await add.mutateAsync(file);
       } catch (err) {
         say(uploadErrorMessage(err, name));
-        if (errorCode(err) === 'item_archived') {
-          // Nothing more can be added to it.
+        const code = errorCode(err);
+        if (code === 'item_archived' || code === 'forbidden') {
+          // Nothing more can be added to it by this person.
           queue.current = [];
-          refreshItem();
+          if (code === 'item_archived') refreshItem();
+          else refreshAccess();
         }
       }
     }
@@ -156,6 +175,7 @@ export function AttachmentsSection({ roadmapId, item, editable, timeZone }: Atta
         }
         setRemoveError(code === 'item_archived' ? ARCHIVED_CONTENT : GENERIC_ERROR);
         if (code === 'item_archived') refreshItem();
+        if (code === 'forbidden') refreshAccess();
       },
     });
   };
@@ -164,8 +184,17 @@ export function AttachmentsSection({ roadmapId, item, editable, timeZone }: Atta
   const shown = item.archived ? messages.filter((m) => m !== ARCHIVED_CONTENT) : messages;
 
   return (
-    <section className="files-section" ref={section} aria-labelledby={headingId}>
-      <h3 id={headingId}>Files</h3>
+    <section
+      className="files-section"
+      ref={section}
+      aria-labelledby={headingId}
+      onFocus={(e) => {
+        lastFocused.current = e.target;
+      }}
+    >
+      <h3 id={headingId} ref={heading} tabIndex={-1}>
+        Files
+      </h3>
       {item.archived && <p>{ARCHIVED_CONTENT}</p>}
       {files.isError && !list && (
         <Alert>

@@ -443,6 +443,8 @@ select {
 }
 .dialog h2 {
   margin-top: 0;
+  /* A title can hold a long name with no break point, such as a file's. */
+  overflow-wrap: anywhere;
 }
 .dialog-actions {
   display: flex;

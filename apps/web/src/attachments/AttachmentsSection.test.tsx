@@ -81,13 +81,16 @@ function serve(files: () => Attachment[], answer: (method: string, path: string)
 function show(opts: { editable?: boolean; archived?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const invalidate = vi.spyOn(client, 'invalidateQueries');
-  const view = render(
+  const tree = (o: typeof opts) => (
     <QueryClientProvider client={client}>
-      <AttachmentsSection roadmapId="r1" item={item({ archived: opts.archived ?? false })} editable={opts.editable ?? true} timeZone="UTC" />
-    </QueryClientProvider>,
+      <AttachmentsSection roadmapId="r1" item={item({ archived: o.archived ?? false })} editable={o.editable ?? true} timeZone="UTC" />
+    </QueryClientProvider>
   );
+  const view = render(tree(opts));
   const input = view.container.querySelector<HTMLInputElement>('input[type="file"]');
-  return { client, invalidate, input };
+  /** Shows the section again as a refetch of the item would. */
+  const refresh = (o: typeof opts) => view.rerender(tree(o));
+  return { client, invalidate, input, refresh };
 }
 
 const fileOf = (name: string, size: number) => {
@@ -433,5 +436,85 @@ describe('AttachmentsSection', () => {
     serve(() => [attachment({ id: 'a1', name: 'plan.pdf' })]);
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByRole('button', { name: 'Download plan.pdf' })).toBeTruthy();
+  });
+
+  test.each([
+    ['a javascript: link', 'javascript:alert(1)'],
+    ['a data: link', 'data:text/html,<p>hi</p>'],
+  ])('FR-1.4: a download link that is %s is not followed, and the download says it failed', async (_what, url) => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    serve(
+      () => [attachment({ id: 'a1', name: 'plan.pdf' })],
+      () => Promise.resolve({ url }),
+    );
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Download plan.pdf' }));
+    await waitFor(() => expect(alertText()).toBe("Couldn't download plan.pdf. Try again."));
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  test.each(['/api/files/local?token=abc', 'https://files.example.com/key?X-Amz-Signature=s'])(
+    'FR-1.4: a download link %s is followed',
+    async (url) => {
+      const assign = vi.fn();
+      vi.stubGlobal('location', { ...window.location, assign });
+      serve(
+        () => [attachment({ id: 'a1', name: 'plan.pdf' })],
+        () => Promise.resolve({ url }),
+      );
+      show();
+      fireEvent.click(await screen.findByRole('button', { name: 'Download plan.pdf' }));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith(url));
+      expect(screen.queryByRole('alert')).toBeNull();
+    },
+  );
+
+  test('FR-1.4: an upload refused as forbidden says so and refreshes the item and the role; focus moves to the heading once "Add file" goes', async () => {
+    serve(() => []);
+    mockUpload.mockRejectedValue(new ApiError(403, 'forbidden'));
+    const { input, invalidate, refresh } = show();
+    await screen.findByText('No files yet.');
+    screen.getByRole('button', { name: 'Add file' }).focus();
+    choose(input, [fileOf('a.txt', 5)]);
+    await waitFor(() => expect(alertText()).toBe("Couldn't add a.txt. Try again."));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects', 'r1'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['roadmaps'] });
+    refresh({ editable: false });
+    expect(screen.queryByRole('button', { name: 'Add file' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Files' }));
+  });
+
+  test('FR-1.4: when an upload refused as archived hides "Add file", focus moves to the Files heading', async () => {
+    serve(() => []);
+    mockUpload.mockRejectedValue(new ApiError(409, 'item_archived'));
+    const { input, refresh } = show();
+    await screen.findByText('No files yet.');
+    screen.getByRole('button', { name: 'Add file' }).focus();
+    choose(input, [fileOf('a.txt', 5)]);
+    await waitFor(() => expect(alertText()).toBe(ARCHIVED));
+    refresh({ archived: true });
+    const heading = screen.getByRole('heading', { name: 'Files' });
+    expect(heading.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(heading);
+  });
+
+  test('FR-1.4: a remove refused as forbidden says so, refreshes the item and the role, and focus goes to the heading after the dialog', async () => {
+    serve(
+      () => [attachment({ id: 'a1', name: 'one.txt' })],
+      () => Promise.reject(new ApiError(403, 'forbidden')),
+    );
+    const { invalidate, refresh } = show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove one.txt' }));
+    const dialog = screen.getByRole('dialog');
+    within(dialog).getByRole('button', { name: 'Remove file' }).focus();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove file' }));
+    await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toBe('Something went wrong. Try again.'));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects', 'r1'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['roadmaps'] });
+    refresh({ editable: false });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('button', { name: 'Remove one.txt' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Files' }));
   });
 });

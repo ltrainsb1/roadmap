@@ -254,4 +254,16 @@ test('FR-1.4: at 375 px a 200-character file name causes no sideways scroll, and
   const remove = await files.getByRole('button', { name: `Remove ${longName}`, exact: true }).boundingBox();
   expect(remove?.width).toBeGreaterThanOrEqual(44);
   expect(remove?.height).toBeGreaterThanOrEqual(44);
+
+  // The remove dialog's title holds the whole name and still fits.
+  await files.getByRole('button', { name: `Remove ${longName}`, exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: `Remove ${longName}?` });
+  await expect(dialog).toBeVisible();
+  const overflow = await dialog.evaluate((d) => ({
+    dialog: d.scrollWidth - d.clientWidth,
+    title: d.querySelector('h2')!.scrollWidth - d.querySelector('h2')!.clientWidth,
+    page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  }));
+  expect(overflow).toEqual({ dialog: 0, title: 0, page: 0 });
+  await expectNoA11yViolations(page);
 });

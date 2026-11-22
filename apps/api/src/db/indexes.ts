@@ -3,7 +3,7 @@ import type { Db, IndexDescription } from 'mongodb';
 const AUDIT_TTL_SECONDS = 2592000; // 30 days
 
 // One createIndexes call per collection: each call is one round of index-build bookkeeping on the server,
-// so a fresh database (every test file makes one) costs 11 builds rather than 24.
+// so a fresh database (every test file makes one) costs 15 builds rather than 31.
 const INDEXES: Record<string, IndexDescription[]> = {
   users: [
     // Pre-auth lookups (not tenant-first by design).
@@ -38,6 +38,18 @@ const INDEXES: Record<string, IndexDescription[]> = {
     { key: { tenantId: 1, timestamp: -1 } },
     { key: { tenantId: 1, roadmapId: 1, timestamp: -1 } },
     { key: { timestamp: 1 }, expireAfterSeconds: AUDIT_TTL_SECONDS },
+  ],
+  snapshots: [
+    // Pre-auth lookup by the link's secret part (not tenant-first by design).
+    { key: { linkId: 1 }, unique: true },
+    { key: { tenantId: 1, roadmapId: 1, createdAt: -1 } },
+  ],
+  snapshotItems: [{ key: { tenantId: 1, snapshotId: 1 } }],
+  snapshotNotes: [{ key: { tenantId: 1, snapshotId: 1, itemId: 1, createdAt: 1 } }],
+  snapshotSessions: [
+    { key: { tokenHash: 1 }, unique: true },
+    { key: { tenantId: 1, snapshotId: 1 } },
+    { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
   ],
   webauthnChallenges: [{ key: { expiresAt: 1 }, expireAfterSeconds: 0 }],
 };

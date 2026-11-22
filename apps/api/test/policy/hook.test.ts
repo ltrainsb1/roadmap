@@ -344,17 +344,20 @@ describe('canEver', () => {
       for (const role of ROLES) {
         const roles = [undefined, ...ROLES];
         const any = [true, false, undefined].some((isAssigned) =>
-          roles.some((targetRole) =>
-            roles.some((newRole) =>
-              can({
-                role,
-                action,
-                ctx: {
-                  ...(isAssigned !== undefined && { isAssigned }),
-                  ...(targetRole && { targetRole }),
-                  ...(newRole && { newRole }),
-                },
-              }),
+          [true, false, undefined].some((isAuthor) =>
+            roles.some((targetRole) =>
+              roles.some((newRole) =>
+                can({
+                  role,
+                  action,
+                  ctx: {
+                    ...(isAssigned !== undefined && { isAssigned }),
+                    ...(isAuthor !== undefined && { isAuthor }),
+                    ...(targetRole && { targetRole }),
+                    ...(newRole && { newRole }),
+                  },
+                }),
+              ),
             ),
           ),
         );

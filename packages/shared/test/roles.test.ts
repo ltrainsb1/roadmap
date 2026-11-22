@@ -8,6 +8,6 @@ describe('shared roles and actions', () => {
 
   test('actions are unique and cover the PRD table', () => {
     expect(new Set(ACTIONS).size).toBe(ACTIONS.length);
-    expect(ACTIONS).toHaveLength(18);
+    expect(ACTIONS).toHaveLength(21);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../api/client.ts';
 import { errorCode, GENERIC_ERROR, messageFor } from '../api/errors.ts';
@@ -20,6 +20,12 @@ export function ViewerCard({ children }: { children: ReactNode }) {
 }
 
 export type LinkProblemKind = 'not_found' | 'expired';
+
+/**
+ * How a part of the snapshot page that loads on its own (an item's notes) reports that the link was revoked or has
+ * expired meanwhile, so the page shows the card in place of the snapshot. Outside a snapshot page it does nothing.
+ */
+export const ReportLinkProblem = createContext<(kind: LinkProblemKind) => void>(() => undefined);
 
 /** The card for a link that does not work, with no field and nothing about the roadmap. */
 export function LinkProblem({ kind }: { kind: LinkProblemKind }) {

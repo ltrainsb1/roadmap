@@ -95,3 +95,38 @@ test('FR-3.2: a session that ends while notes load returns to the password page'
   await waitFor(() => expect(locationOf(container)).toBe(`/s/${LINK}`));
   expect((await screen.findByRole('alert')).textContent).toBe('Enter the password again to keep viewing.');
 });
+
+test('FR-3.2: a link revoked or expired while notes load shows its card, not a "Try again" that cannot work', async () => {
+  const cards: Array<[number, string, string]> = [
+    [404, 'not_found', "This link doesn't work"],
+    [410, 'snapshot_expired', 'This link has expired'],
+  ];
+  for (const [status, code, heading] of cards) {
+    scriptApi(mockApi, { content: () => fullContent({ p1: 1 }), notes: () => new ApiError(status, code) });
+    const { container } = renderViewer(`/s/${LINK}/list`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Details for Launch site' }));
+    expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeTruthy();
+    expect(screen.queryByText("Couldn't load notes. Try again.")).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(screen.queryByRole('table')).toBeNull();
+    // The card stands where the snapshot was; the address stays.
+    expect(locationOf(container)).toBe(`/s/${LINK}/list`);
+    cleanup();
+  }
+});
+
+test('FR-3.2: a session that ends while notes load announces nothing before the password page', async () => {
+  scriptApi(mockApi, { content: () => fullContent({ p1: 1 }), notes: () => new ApiError(401, 'password_required') });
+  const { container } = renderViewer(`/s/${LINK}/list`);
+  const title = await screen.findByRole('button', { name: 'Details for Launch site' });
+  const alerts: string[] = [];
+  const observer = new MutationObserver(() => {
+    for (const a of container.querySelectorAll('[role="alert"]')) alerts.push(a.textContent ?? '');
+  });
+  observer.observe(container, { childList: true, subtree: true, characterData: true });
+  fireEvent.click(title);
+  await waitFor(() => expect(locationOf(container)).toBe(`/s/${LINK}`));
+  observer.disconnect();
+  expect(alerts.filter((text) => text.includes("Couldn't load notes"))).toEqual([]);
+  expect((await screen.findByRole('alert')).textContent).toBe('Enter the password again to keep viewing.');
+});

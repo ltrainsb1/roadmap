@@ -1,5 +1,5 @@
 import { buildTree, TIMELINE_ZOOMS, timelineRange, xOf, type SnapshotContent, type SnapshotItem, type TimelineZoom, type TreeNode } from '@roadmap/shared';
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DEFAULT_OPTIONS, viewOptionsFromSearch } from '../projects/filters.ts';
 import { Chevron } from '../projects/itemParts.tsx';
@@ -7,16 +7,16 @@ import { levelName, statusName, ZOOM_NAMES } from '../projects/names.ts';
 import { TimelineAxis } from '../projects/TimelineAxis.tsx';
 import { Track } from '../projects/timelineParts.tsx';
 import { SelectField } from '../ui/SelectField.tsx';
-import { NO_ITEMS } from './SnapshotList.tsx';
+import { NO_ITEMS, type Branches } from './SnapshotList.tsx';
 
 /**
  * A snapshot as the app's Timeline without its controls: the names, the axis, the bars and milestones, and a Zoom
  * select. The line the app draws at today sits on the "as of" date.
  */
-export function SnapshotTimeline({ content }: { content: SnapshotContent }) {
+export function SnapshotTimeline({ content, branches }: { content: SnapshotContent; branches: Branches }) {
   const [params, setParams] = useSearchParams();
   const { zoom } = viewOptionsFromSearch(params);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const { collapsed } = branches;
   const frame = useRef<HTMLDivElement>(null);
   const { items, asOf } = content;
   const range = useMemo(() => timelineRange(items, asOf, zoom), [items, asOf, zoom]);
@@ -57,13 +57,7 @@ export function SnapshotTimeline({ content }: { content: SnapshotContent }) {
                   type="button"
                   className="icon-btn"
                   aria-label={`${open ? 'Collapse' : 'Expand'} ${item.title}`}
-                  onClick={() =>
-                    setCollapsed((c) => {
-                      const next = new Set(c);
-                      if (!next.delete(item.id)) next.add(item.id);
-                      return next;
-                    })
-                  }
+                  onClick={() => branches.toggle(item.id)}
                 >
                   <Chevron open={open} />
                 </button>

@@ -5,7 +5,7 @@ import { formatDates, levelName, statusName } from '../projects/names.ts';
 import { hasDetails, SnapshotItemDetails } from './SnapshotItemDetails.tsx';
 
 /** Adds `id` to the set if it is not there, takes it out if it is. */
-const toggled = (set: ReadonlySet<string>, id: string): Set<string> => {
+export const toggled = (set: ReadonlySet<string>, id: string): Set<string> => {
   const next = new Set(set);
   if (!next.delete(id)) next.add(id);
   return next;
@@ -18,12 +18,18 @@ export const priorityText = (position: number, label: string | null): string => 
 
 export const NO_ITEMS = 'This snapshot has no items.';
 
+/** The branches collapsed in a snapshot, shared by its List and Timeline so a switch between them keeps them. */
+export interface Branches {
+  collapsed: ReadonlySet<string>;
+  toggle: (itemId: string) => void;
+}
+
 /**
  * A snapshot as a table, nested and collapsible as the app's List. An item's title opens its details in a row under
  * it. Nothing can be changed.
  */
-export function SnapshotList({ linkId, content }: { linkId: string; content: SnapshotContent }) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+export function SnapshotList({ linkId, content, branches }: { linkId: string; content: SnapshotContent; branches: Branches }) {
+  const { collapsed } = branches;
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const byId = useMemo(() => new Map(content.items.map((i) => [i.id, i])), [content.items]);
   const tree = useMemo(() => buildTree(content.items), [content.items]);
@@ -46,7 +52,7 @@ export function SnapshotList({ linkId, content }: { linkId: string; content: Sna
                   type="button"
                   className="icon-btn"
                   aria-label={`${showChildren ? 'Collapse' : 'Expand'} ${item.title}`}
-                  onClick={() => setCollapsed((c) => toggled(c, item.id))}
+                  onClick={() => branches.toggle(item.id)}
                 >
                   <Chevron open={showChildren} />
                 </button>

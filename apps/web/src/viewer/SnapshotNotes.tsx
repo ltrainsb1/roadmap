@@ -1,9 +1,10 @@
 import type { SnapshotNote } from '@roadmap/shared';
-import { useId } from 'react';
+import { useContext, useEffect, useId } from 'react';
 import { formatWhen } from '../audit/dates.ts';
 import { Markdown } from '../notes/Markdown.tsx';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
+import { linkProblemOf, ReportLinkProblem } from './SnapshotGate.tsx';
 import { useReturnToGate, useSnapshotNotes } from './useSnapshot.ts';
 
 const FORMER_MEMBER = 'Former member';
@@ -99,7 +100,15 @@ export function SnapshotNotes({ linkId, itemId, noteCount }: SnapshotNotesProps)
   const headingId = useId();
   const none = noteCount === 0;
   const notes = useSnapshotNotes(linkId, itemId, !none);
-  useReturnToGate(linkId, notes.error);
+  const leaving = useReturnToGate(linkId, notes.error);
+  // Revoked or expired since the page loaded: the page shows the card, as it does when its own content says so.
+  const problem = linkProblemOf(notes.error);
+  const report = useContext(ReportLinkProblem);
+  useEffect(() => {
+    if (problem) report(problem);
+  }, [problem, report]);
+  // Nothing here while the page goes back to the password page or turns into the card, so no alert is announced first.
+  if (leaving || problem) return null;
 
   let body;
   if (none || notes.data?.notes.length === 0) body = <p>No notes.</p>;

@@ -1,12 +1,12 @@
 import type { SnapshotContent, SnapshotView } from '@roadmap/shared';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { ApiError } from '../api/client.ts';
 import { formatDay } from '../projects/names.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
-import { LinkProblem, linkProblemOf, LoadFailed } from './SnapshotGate.tsx';
-import { SnapshotList } from './SnapshotList.tsx';
+import { LinkProblem, linkProblemOf, LoadFailed, ReportLinkProblem, type LinkProblemKind } from './SnapshotGate.tsx';
+import { SnapshotList, toggled, type Branches } from './SnapshotList.tsx';
 import { SnapshotTimeline } from './SnapshotTimeline.tsx';
 import {
   useDocumentTitle,
@@ -22,6 +22,15 @@ const VIEW_NAMES: Record<SnapshotView, string> = { list: 'List', timeline: 'Time
 export const PDF_PREPARING = 'Preparing the PDF…';
 export const PDF_FAILED = "Couldn't create the PDF. Try again.";
 export const PDF_BUSY = 'Other PDFs are being prepared. Try again in a minute.';
+export const PDF_TOO_LARGE = 'This snapshot is too large for a PDF. You can still read it here.';
+
+/** The message beside "Download PDF" for a refusal: busy, too large, or anything else. */
+function pdfMessage(err: unknown): string {
+  const code = err instanceof ApiError ? err.code : undefined;
+  if (code === 'pdf_busy') return PDF_BUSY;
+  if (code === 'pdf_too_large') return PDF_TOO_LARGE;
+  return PDF_FAILED;
+}
 
 function ViewerPage({ children }: { children: ReactNode }) {
   return <div className="page page-wide snapshot-page">{children}</div>;
@@ -78,6 +87,12 @@ export function SnapshotLayout({ view }: { view: SnapshotView }) {
   const leaving = leavingForContent || leavingForPdf;
   const data = content.data;
   useDocumentTitle(data && `${data.roadmapName}: snapshot`);
+  // Kept here, above both views, so a branch collapsed on the List is collapsed on the Timeline too, as in the app.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const toggle = useCallback((itemId: string) => setCollapsed((c) => toggled(c, itemId)), []);
+  const branches: Branches = useMemo(() => ({ collapsed, toggle }), [collapsed, toggle]);
+  // Set by a part that found the link revoked or expired (an item's notes); the whole page becomes the card.
+  const [partProblem, setPartProblem] = useState<LinkProblemKind | null>(null);
 
   if (content.isPending || leaving) {
     return (
@@ -88,9 +103,9 @@ export function SnapshotLayout({ view }: { view: SnapshotView }) {
       </ViewerPage>
     );
   }
-  // Revoked or expired since the page loaded: the PDF answer says so.
-  const pdfProblem = linkProblemOf(pdf.error);
-  if (pdfProblem) return <LinkProblem kind={pdfProblem} />;
+  // Revoked or expired since the page loaded: the PDF answer or an item's notes say so.
+  const linkProblem = linkProblemOf(pdf.error) ?? partProblem;
+  if (linkProblem) return <LinkProblem kind={linkProblem} />;
   if (content.isError) {
     const kind = linkProblemOf(content.error);
     if (kind) return <LinkProblem kind={kind} />;
@@ -135,11 +150,19 @@ export function SnapshotLayout({ view }: { view: SnapshotView }) {
       {pdf.isError && (
         <div className="snapshot-pdf-status">
           <Alert>
-            <p>{pdf.error instanceof ApiError && pdf.error.code === 'pdf_busy' ? PDF_BUSY : PDF_FAILED}</p>
+            <p>{pdfMessage(pdf.error)}</p>
           </Alert>
         </div>
       )}
-      <main>{view === 'list' ? <SnapshotList linkId={linkId} content={content.data} /> : <SnapshotTimeline content={content.data} />}</main>
+      <main>
+        <ReportLinkProblem.Provider value={setPartProblem}>
+          {view === 'list' ? (
+            <SnapshotList linkId={linkId} content={content.data} branches={branches} />
+          ) : (
+            <SnapshotTimeline content={content.data} branches={branches} />
+          )}
+        </ReportLinkProblem.Provider>
+      </main>
     </ViewerPage>
   );
 }

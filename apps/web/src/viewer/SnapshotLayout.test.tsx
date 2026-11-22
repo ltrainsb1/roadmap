@@ -180,3 +180,35 @@ test('FR-3.4: Download PDF on a link revoked meanwhile shows its card', async ()
   fireEvent.click(await screen.findByRole('button', { name: 'Download PDF' }));
   expect(await screen.findByRole('heading', { level: 1, name: "This link doesn't work" })).toBeTruthy();
 });
+
+test('FR-3.3: a branch collapsed in one view stays collapsed in the other, both ways', async () => {
+  scriptApi(mockApi, {});
+  const { container } = renderViewer(`/s/${LINK}/list`);
+  fireEvent.click(await screen.findByRole('button', { name: 'Collapse Launch site' }));
+  expect(screen.queryByText('Design')).toBeNull();
+
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'View' })).getByRole('link', { name: 'Timeline' }));
+  await waitFor(() => expect(locationOf(container)).toBe(`/s/${LINK}/timeline`));
+  const timeline = await screen.findByRole('table', { name: 'Timeline' });
+  expect(within(timeline).getByRole('button', { name: 'Expand Launch site' })).toBeTruthy();
+  expect(within(timeline).queryByText('Design')).toBeNull();
+
+  // Opened again on the timeline, it is open on the list too.
+  fireEvent.click(within(timeline).getByRole('button', { name: 'Expand Launch site' }));
+  expect(within(timeline).getByText('Design')).toBeTruthy();
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'View' })).getByRole('link', { name: 'List' }));
+  const list = await screen.findByRole('table', { name: 'List' });
+  expect(within(list).getByRole('button', { name: 'Collapse Launch site' })).toBeTruthy();
+  expect(within(list).getByText('Design')).toBeTruthy();
+});
+
+test('FR-3.4: a snapshot too large for a PDF says so beside Download PDF, and the snapshot stays readable', async () => {
+  scriptApi(mockApi, { pdf: () => new ApiError(422, 'pdf_too_large') });
+  renderViewer(`/s/${LINK}/list`);
+  const button = await screen.findByRole('button', { name: 'Download PDF' });
+  fireEvent.click(button);
+  expect((await screen.findByRole('alert')).textContent).toBe('This snapshot is too large for a PDF. You can still read it here.');
+  expect(button.getAttribute('aria-disabled')).toBeNull();
+  expect(screen.getByRole('table', { name: 'List' })).toBeTruthy();
+  expect(screen.getByRole('heading', { level: 1, name: 'Launch plan' })).toBeTruthy();
+});

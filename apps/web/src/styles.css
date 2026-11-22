@@ -1350,8 +1350,9 @@ select {
   margin-top: 12px;
 }
 .note-replies {
-  margin: 4px 0 0 16px;
-  padding-left: 12px;
+  /* Replies sit 16 px in from their note, the border included. */
+  margin: 4px 0 0;
+  padding-left: 14px;
   border-left: 2px solid var(--border);
 }
 .note {
@@ -1379,6 +1380,10 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 0 16px;
+}
+/* Short words like "Edit" still make a 44 by 44 px target. */
+.note-actions .btn {
+  min-width: var(--control-height);
 }
 .note-box {
   margin-top: 8px;

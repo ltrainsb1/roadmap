@@ -296,10 +296,52 @@ test('FR-1.5: at 375 px a note with a long unbroken word and a wide code block c
   await page.setViewportSize({ width: 375, height: 667 });
   const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Launch site');
-  await seedNote(call, id, itemId, `Word ${'x'.repeat(300)}\n\n\`\`\`\n${'const wide = 1; '.repeat(30)}\n\`\`\``);
+  const topId = await seedNote(call, id, itemId, `Word ${'x'.repeat(300)}\n\n\`\`\`\n${'const wide = 1; '.repeat(30)}\n\`\`\``);
   await page.goto(projectUrl(id, itemId));
   const notes = notesOf(page, 'Launch site');
   await expect(notes.locator('pre')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   await expectNoA11yViolations(page);
+
+  // Reply, Edit and Delete are 44 by 44 px targets.
+  const shown = noteWith(notes, 'Word');
+  for (const name of ['Reply', 'Edit', 'Delete']) {
+    const box = await shown.getByRole('button', { name, exact: true }).boundingBox();
+    expect(box?.width).toBeGreaterThanOrEqual(44);
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+  }
+  // Replies are indented 16 px from their note, behind a left border.
+  await seedNote(call, id, itemId, 'An answer', topId);
+  await page.reload();
+  const replies = notesOf(page, 'Launch site').locator('.note-replies');
+  const [topBox, replyBox] = await Promise.all([noteWith(notes, 'Word').boundingBox(), replies.getByRole('article').boundingBox()]);
+  expect(Math.round((replyBox?.x ?? 0) - (topBox?.x ?? 0))).toBe(16);
+  await expect(replies).toHaveCSS('border-left-style', 'solid');
+});
+
+test('FR-1.5: a reply to a note that was just deleted keeps the typed text', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const noteId = await seedNote(call, id, itemId, 'Soon gone');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  const p = chief.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+
+  await noteWith(notes, 'Soon gone').getByRole('button', { name: 'Reply', exact: true }).click();
+  const replyBox = notes.getByRole('textbox', { name: /^Reply to / });
+  await replyBox.fill('My careful answer');
+  // Someone else deletes the note while the reply is being written.
+  await call('DELETE', `/api/roadmaps/${id}/projects/${itemId}/notes/${noteId}`);
+  await notes.getByRole('button', { name: 'Add reply', exact: true }).click();
+
+  await expect(notes.getByRole('alert')).toHaveText('That note no longer exists.');
+  await expect(replyBox).toHaveCount(0);
+  await expect(notes.getByText('Soon gone')).toHaveCount(0);
+  await expect(newNoteBox(notes)).toHaveValue('My careful answer');
+  await expect(newNoteBox(notes)).toBeFocused();
+  // Still counted as unsaved.
+  await p.keyboard.press('Escape');
+  await expect(p.getByRole('dialog', { name: 'Discard your unsaved changes to Launch site?' })).toBeVisible();
+  await chief.context.close();
 });

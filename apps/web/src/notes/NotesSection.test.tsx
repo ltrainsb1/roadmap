@@ -268,7 +268,7 @@ describe('NotesSection', () => {
   test.each([
     [new ApiError(422, 'too_many_notes'), 'This item already has 500 notes.'],
     [new ApiError(422, 'unknown_note'), 'That note no longer exists.'],
-    [new ApiError(404, 'not_found'), 'That note no longer exists.'],
+    [new ApiError(404, 'not_found'), "This item no longer exists, or you don't have access to it."],
     [new ApiError(500, 'unknown'), "Couldn't save the note. Try again."],
   ])('FR-1.5: a refused save shows its message and keeps the text (%s)', async (err, message) => {
     serve([], () => Promise.reject(err));
@@ -288,6 +288,8 @@ describe('NotesSection', () => {
     expect(noteErrorMessage(new ApiError(422, 'too_many_notes'), 'x')).toBe('This item already has 500 notes.');
     expect(noteErrorMessage(new ApiError(422, 'unknown_note'), 'x')).toBe('That note no longer exists.');
     expect(noteErrorMessage(new ApiError(404, 'not_found'), 'x')).toBe('That note no longer exists.');
+    // On the new-note box a 404 means the item is gone.
+    expect(noteErrorMessage(new ApiError(404, 'not_found'), 'x', 'new')).toBe("This item no longer exists, or you don't have access to it.");
     expect(noteErrorMessage(new ApiError(409, 'item_archived'), 'x')).toBe(
       "This item is archived, so notes and files can't be added or changed.",
     );
@@ -376,5 +378,121 @@ describe('NotesSection', () => {
     });
     await waitFor(() => expect(onDraftChange).toHaveBeenLastCalledWith(true));
     expect(renders.count).toBe(before);
+  });
+
+  describe('fix round 1', () => {
+    const goneAlert = () => screen.queryAllByRole('alert').find((a) => a.textContent.includes('That note no longer exists.'));
+
+    test('FR-1.5: an edit of a note that was deleted meanwhile keeps the text in the bottom box, with the alert above it', async () => {
+      serve([note({ id: 'n1', body: 'Mine', authorId: ME }), note({ id: 'n2', body: 'Other' })], () => {
+        serve([note({ id: 'n2', body: 'Other' })]);
+        return Promise.reject(new ApiError(404, 'not_found'));
+      });
+      const { onDraftChange } = show();
+      await screen.findByText('Mine');
+      fireEvent.click(within(articleWith('Mine')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Edit your note' }), { target: { value: 'Mine, better' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+      // After the refetch: the note is gone from the list, and the text and the alert are at the bottom.
+      await waitFor(() => {
+        expect(screen.queryByRole('article')?.textContent).toContain('Other');
+        expect(screen.getAllByRole('article')).toHaveLength(1);
+        expect(goneAlert()).toBeTruthy();
+      });
+      expect(screen.queryByRole('textbox', { name: 'Edit your note' })).toBeNull();
+      const alert = goneAlert();
+      expect(alert).toBeTruthy();
+      // Directly above the bottom box.
+      expect(alert?.nextElementSibling?.contains(newBox())).toBe(true);
+      expect(valueOf(newBox())).toBe('Mine, better');
+      await waitFor(() => expect(document.activeElement).toBe(newBox()));
+      expect(onDraftChange).toHaveBeenLastCalledWith(true);
+    });
+
+    test('FR-1.5: a reply to a thread that is gone is added after the text already in the bottom box', async () => {
+      const added = note({ id: 'n9', body: 'Earlier\n\nMy reply', authorId: ME });
+      serve([note({ id: 'n1', body: 'Top' })], () => {
+        serve([], () => Promise.resolve(added));
+        return Promise.reject(new ApiError(422, 'unknown_note'));
+      });
+      const { onDraftChange } = show();
+      await screen.findByText('Top');
+      fireEvent.change(newBox(), { target: { value: 'Earlier' } });
+      fireEvent.click(within(articleWith('Top')).getByRole('button', { name: 'Reply' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Reply to Bob' }), { target: { value: 'My reply' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add reply' }));
+      await waitFor(() => {
+        expect(screen.queryByText('Top')).toBeNull();
+        expect(goneAlert()).toBeTruthy();
+      });
+      expect(screen.queryByRole('textbox', { name: 'Reply to Bob' })).toBeNull();
+      expect(valueOf(newBox())).toBe('Earlier\n\nMy reply');
+      await waitFor(() => expect(document.activeElement).toBe(newBox()));
+      expect(onDraftChange).toHaveBeenLastCalledWith(true);
+
+      // It stays until the next successful add.
+      fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+      expect(await screen.findByText('Note added.')).toBeTruthy();
+      expect(goneAlert()).toBeUndefined();
+    });
+
+    test('FR-1.5: with changed text in a reply box, Edit elsewhere keeps it open and says "Finish or cancel this one first."', async () => {
+      serve([note({ id: 'n1', body: 'Top' }), note({ id: 'n2', body: 'Mine', authorId: ME })]);
+      show();
+      await screen.findByText('Mine');
+      fireEvent.click(within(articleWith('Top')).getByRole('button', { name: 'Reply' }));
+      const reply = screen.getByRole('textbox', { name: 'Reply to Bob' });
+      fireEvent.change(reply, { target: { value: 'Half' } });
+      fireEvent.click(within(articleWith('Mine')).getByRole('button', { name: 'Edit' }));
+      expect(screen.queryByRole('textbox', { name: 'Edit your note' })).toBeNull();
+      expect(valueOf(reply)).toBe('Half');
+      expect(document.activeElement).toBe(reply);
+      expect(screen.getByRole('alert').textContent).toBe('Finish or cancel this one first.');
+      // The next keystroke clears it.
+      fireEvent.change(reply, { target: { value: 'Half done' } });
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    test('FR-1.5: an unchanged reply box is simply replaced by Edit', async () => {
+      serve([note({ id: 'n1', body: 'Top' }), note({ id: 'n2', body: 'Mine', authorId: ME })]);
+      show();
+      await screen.findByText('Mine');
+      fireEvent.click(within(articleWith('Top')).getByRole('button', { name: 'Reply' }));
+      fireEvent.click(within(articleWith('Mine')).getByRole('button', { name: 'Edit' }));
+      expect(screen.queryByRole('textbox', { name: 'Reply to Bob' })).toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Edit your note' }));
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    test('FR-1.5: while a reply is being sent, the bottom box still adds a note', async () => {
+      const sent: unknown[] = [];
+      serve([note({ id: 'n1', body: 'Top' })], (_m, _p, body) => {
+        sent.push(body);
+        // The reply never answers; the note does.
+        return (body as { parentId: string | null }).parentId === null
+          ? Promise.resolve(note({ id: 'n5', body: 'Separate', authorId: ME }))
+          : new Promise(() => undefined);
+      });
+      show();
+      await screen.findByText('Top');
+      fireEvent.click(within(articleWith('Top')).getByRole('button', { name: 'Reply' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Reply to Bob' }), { target: { value: 'Slow' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add reply' }));
+      fireEvent.change(newBox(), { target: { value: 'Separate' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+      expect(await screen.findByText('Note added.')).toBeTruthy();
+      expect(sent).toHaveLength(2);
+    });
+
+    test('FR-1.5: "Note added." clears when the person next types in a note box', async () => {
+      serve([], () => Promise.resolve(note({ id: 'n1', body: 'One', authorId: ME })));
+      show();
+      await screen.findByText('No notes yet.');
+      fireEvent.change(newBox(), { target: { value: 'One' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+      expect(await screen.findByText('Note added.')).toBeTruthy();
+      fireEvent.change(newBox(), { target: { value: 'T' } });
+      expect(screen.queryByText('Note added.')).toBeNull();
+    });
   });
 });

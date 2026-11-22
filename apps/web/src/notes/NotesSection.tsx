@@ -1,5 +1,5 @@
 import { can, NOTE_LIMITS, type Note, type Project, type Role } from '@roadmap/shared';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { errorCode, GENERIC_ERROR } from '../api/errors.ts';
 import { formatWhen } from '../audit/dates.ts';
 import { focusRemaining } from '../projects/focusAfterRemove.ts';
@@ -16,6 +16,8 @@ const EMPTY_NOTE = 'Write something first.';
 const TOO_LONG = 'Notes can be up to 5,000 characters.';
 const SAVE_FAILED = "Couldn't save the note. Try again.";
 const NOTE_GONE = 'That note no longer exists.';
+const ITEM_GONE = "This item no longer exists, or you don't have access to it.";
+const FINISH_FIRST = 'Finish or cancel this one first.';
 
 /** Why `body` can't be saved as a note, or undefined if it can. */
 function bodyProblem(body: string): string | undefined {
@@ -25,15 +27,16 @@ function bodyProblem(body: string): string | undefined {
   return undefined;
 }
 
-/** The message for a refused add, reply or edit of `body`. */
-export function noteErrorMessage(err: unknown, body: string): string {
+/** The message for a refused add, reply or edit of `body`; on the new-note box a 404 means the item is gone. */
+export function noteErrorMessage(err: unknown, body: string, box: 'new' | 'reply' | 'edit' = 'reply'): string {
   switch (errorCode(err)) {
     case 'validation':
       return bodyProblem(body) ?? SAVE_FAILED;
     case 'too_many_notes':
       return 'This item already has 500 notes.';
-    case 'unknown_note':
     case 'not_found':
+      return box === 'new' ? ITEM_GONE : NOTE_GONE;
+    case 'unknown_note':
       return NOTE_GONE;
     case 'item_archived':
       return ARCHIVED_CONTENT;
@@ -90,6 +93,17 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
   const [focusAfterDelete, setFocusAfterDelete] = useState<{ noteId: string; index: number } | null>(null);
   // After a box closes, the control that focus returns to.
   const [returnFocus, setReturnFocus] = useState<{ id: string } | null>(null);
+  // Which boxes have a save in flight.
+  const [pending, setPending] = useState<Record<BoxKey, boolean>>({ new: false, reply: false, edit: false });
+  // A reply or edit whose note vanished: its text moves to the bottom box, with this alert above it.
+  const [goneNotice, setGoneNotice] = useState(false);
+  const [handover, setHandover] = useState<{ text: string; n: number }>();
+  // Shown under an open box with changed text when another Reply or Edit is chosen.
+  const [finishFirst, setFinishFirst] = useState(false);
+  const typed = useCallback(() => {
+    setStatus('');
+    setFinishFirst(false);
+  }, []);
 
   const [drafts, setDrafts] = useState<Record<BoxKey, boolean>>({ new: false, reply: false, edit: false });
   const draftFor = useMemo(() => {
@@ -107,6 +121,14 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
   const canDelete = (n: Note) => writable && can({ role, action: 'note.delete', ctx: { isAuthor: n.authorId === myId } });
 
   const controlId = (noteId: string, control: 'reply' | 'edit') => `note-${noteId}-${control}`;
+  const boxId = (kind: 'reply' | 'edit') => `notes-${item.id}-${kind}`;
+
+  // A box whose note has left the list (deleted by someone else) is closed.
+  useEffect(() => {
+    if (!open || !list) return;
+    const target = open.kind === 'reply' ? open.to.id : open.note.id;
+    if (!list.some((n) => n.id === target && !n.deleted)) setOpen(null);
+  }, [open, list]);
 
   useEffect(() => {
     if (!focusAfterDelete || !list) return;
@@ -124,37 +146,60 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
   const setError = (key: BoxKey, message: string | undefined) => setErrors((e) => ({ ...e, [key]: message }));
 
   const openBox = (box: OpenBox) => {
+    if (open && drafts[open.kind]) {
+      document.getElementById(boxId(open.kind))?.focus();
+      setFinishFirst(true);
+      return;
+    }
+    setFinishFirst(false);
     setErrors((e) => ({ ...e, reply: undefined, edit: undefined }));
     setOpen(box);
   };
   const closeBox = () => {
+    setFinishFirst(false);
     if (open) setReturnFocus({ id: controlId(open.kind === 'reply' ? open.to.id : open.note.id, open.kind) });
     setOpen(null);
   };
 
   /** Checks the text, then runs `save`; shows any problem in the box named `key`. */
   const attempt = async (key: BoxKey, body: string, save: () => Promise<unknown>): Promise<boolean> => {
+    if (key === 'new') setGoneNotice(false);
+    else setFinishFirst(false);
     const problem = bodyProblem(body);
     if (problem) {
       setError(key, problem);
       return false;
     }
     setError(key, undefined);
+    setPending((p) => ({ ...p, [key]: true }));
     try {
       await save();
       return true;
     } catch (err) {
-      setError(key, noteErrorMessage(err, body));
       const code = errorCode(err);
-      if (code === 'not_found' || code === 'unknown_note') void notes.refetch();
+      const gone = code === 'not_found' || code === 'unknown_note';
+      if (gone && key !== 'new') {
+        // The note is gone, so its box goes; what was typed moves to the bottom box rather than being lost.
+        setOpen(null);
+        setHandover((h) => ({ text: body, n: (h?.n ?? 0) + 1 }));
+        setGoneNotice(true);
+      } else {
+        setError(key, noteErrorMessage(err, body, key));
+      }
+      if (gone) void notes.refetch();
       return false;
+    } finally {
+      setPending((p) => ({ ...p, [key]: false }));
     }
   };
 
   const addNote = (key: 'new' | 'reply', parentId: string | null) => async (body: string, mentionIds: string[]) => {
     setStatus('');
     const saved = await attempt(key, body, () => add.mutateAsync({ body, mentionIds, parentId }));
-    if (saved) setStatus('Note added.');
+    if (saved) {
+      setGoneNotice(false);
+      setStatus('Note added.');
+    }
     return saved;
   };
 
@@ -201,17 +246,20 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
           <NoteHeader note={n} timeZone={timeZone} />
           <NoteBox
             key={n.id}
+            id={boxId('edit')}
             label="Edit your note"
             submitLabel="Save note"
             initial={n.body}
             members={members}
-            busy={edit.isPending}
+            busy={pending.edit}
             error={errors.edit}
             onSubmit={saveEdit(n)}
             onCancel={closeBox}
             onDirtyChange={draftFor.edit}
+            onType={typed}
             autoFocus
           />
+          {finishFirst && <Alert>{FINISH_FIRST}</Alert>}
         </article>
       );
     }
@@ -219,16 +267,18 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
       <article className="note">
         <NoteHeader note={n} timeZone={timeZone} />
         <Markdown body={n.body} mentions={n.mentions} />
-        {canAdd && (
+        {(canAdd || canEdit(n) || canDelete(n)) && (
           <div className="note-actions">
-            <Button
-              variant="link"
-              id={controlId(n.id, 'reply')}
-              data-list={focusList}
-              onClick={() => openBox({ kind: 'reply', threadId: thread.note.id, to: n })}
-            >
-              Reply
-            </Button>
+            {canAdd && (
+              <Button
+                variant="link"
+                id={controlId(n.id, 'reply')}
+                data-list={focusList}
+                onClick={() => openBox({ kind: 'reply', threadId: thread.note.id, to: n })}
+              >
+                Reply
+              </Button>
+            )}
             {canEdit(n) && (
               <Button variant="link" id={controlId(n.id, 'edit')} onClick={() => openBox({ kind: 'edit', note: n })}>
                 Edit
@@ -270,36 +320,46 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
                 </ol>
               )}
               {open?.kind === 'reply' && open.threadId === thread.note.id && (
-                <NoteBox
-                  key={open.to.id}
-                  label={`Reply to ${open.to.authorName}`}
-                  submitLabel="Add reply"
-                  initial=""
-                  members={members}
-                  busy={add.isPending}
-                  error={errors.reply}
-                  onSubmit={addNote('reply', thread.note.id)}
-                  onCancel={closeBox}
-                  onDirtyChange={draftFor.reply}
-                  autoFocus
-                />
+                <>
+                  <NoteBox
+                    key={open.to.id}
+                    id={boxId('reply')}
+                    label={`Reply to ${open.to.authorName}`}
+                    submitLabel="Add reply"
+                    initial=""
+                    members={members}
+                    busy={pending.reply}
+                    error={errors.reply}
+                    onSubmit={addNote('reply', thread.note.id)}
+                    onCancel={closeBox}
+                    onDirtyChange={draftFor.reply}
+                    onType={typed}
+                    autoFocus
+                  />
+                  {finishFirst && <Alert>{FINISH_FIRST}</Alert>}
+                </>
               )}
             </li>
           ))}
         </ol>
       )}
       {canAdd && list && (
-        <NoteBox
-          id={newBoxId}
-          label="Add a note"
-          submitLabel="Add note"
-          initial=""
-          members={members}
-          busy={add.isPending}
-          error={errors.new}
-          onSubmit={addNote('new', null)}
-          onDirtyChange={draftFor.new}
-        />
+        <>
+          {goneNotice && <Alert>{NOTE_GONE}</Alert>}
+          <NoteBox
+            id={newBoxId}
+            label="Add a note"
+            submitLabel="Add note"
+            initial=""
+            members={members}
+            busy={pending.new}
+            error={errors.new}
+            onSubmit={addNote('new', null)}
+            onDirtyChange={draftFor.new}
+            onType={typed}
+            inject={handover}
+          />
+        </>
       )}
       {/* A polite live region; not role="status", so the panel's own "Saved." stays the panel's one status. */}
       <div aria-live="polite" className="saved notes-status">

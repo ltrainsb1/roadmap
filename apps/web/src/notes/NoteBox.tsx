@@ -23,10 +23,14 @@ interface NoteBoxProps {
   onDirtyChange?: (dirty: boolean) => void;
   /** Focus the text when the box opens. */
   autoFocus?: boolean;
+  /** Text handed over from another box: each new `n` adds it after a blank line (or fills an empty box) and focuses. */
+  inject?: { text: string; n: number } | undefined;
+  /** Called on every change to the text. */
+  onType?: () => void;
 }
 
 /** A labelled text box for a note, with the Markdown hint, its buttons and any error. */
-export function NoteBox({ label, submitLabel, initial, members, busy, error, onSubmit, onCancel, id, onDirtyChange, autoFocus = false }: NoteBoxProps) {
+export function NoteBox({ label, submitLabel, initial, members, busy, error, onSubmit, onCancel, id, onDirtyChange, autoFocus = false, inject, onType }: NoteBoxProps) {
   void members;
   const [text, setText] = useState(initial);
   const ownId = useId();
@@ -44,6 +48,14 @@ export function NoteBox({ label, submitLabel, initial, members, busy, error, onS
   useEffect(() => {
     if (autoFocus) box.current?.focus();
   }, [autoFocus]);
+
+  const injected = useRef(inject?.n);
+  useEffect(() => {
+    if (!inject || inject.n === injected.current) return;
+    injected.current = inject.n;
+    setText((t) => (t.trim() === '' ? inject.text : `${t}\n\n${inject.text}`));
+    box.current?.focus();
+  }, [inject]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -64,7 +76,10 @@ export function NoteBox({ label, submitLabel, initial, members, busy, error, onS
           value={text}
           aria-describedby={error ? `${hintId} ${errorId}` : hintId}
           aria-invalid={error ? true : undefined}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            onType?.();
+          }}
         />
         <p id={hintId} className="hint">
           {NOTE_HINT}

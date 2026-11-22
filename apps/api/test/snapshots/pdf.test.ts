@@ -205,18 +205,33 @@ describe('making a PDF', () => {
     const [ca, cb, cr] = [await open(a.linkId), await open(b.linkId), await open(ready.linkId)];
     expect((await pdf(ready.linkId, 'list', { cookie: cr })).statusCode).toBe(200);
 
-    const slot = () => ({ entered: deferred<void>(), done: deferred<Buffer>() });
-    const queue = [slot(), slot(), slot()];
-    let next = 0;
-    render = () => {
-      const s = queue[next++]!;
+    // One render per print path, so each request is held and released by its own promises, whichever order the
+    // requests reach the renderer in. (Handing out promises in arrival order let b's request take the one meant
+    // for a's, and the test then waited on a request nobody would release.)
+    const slots = new Map<string, { entered: ReturnType<typeof deferred<void>>; done: ReturnType<typeof deferred<Buffer>> }>();
+    const slot = (path: string) => {
+      let s = slots.get(path);
+      if (!s) {
+        s = { entered: deferred<void>(), done: deferred<Buffer>() };
+        slots.set(path, s);
+      }
+      return s;
+    };
+    let renders = 0;
+    render = (input) => {
+      renders += 1;
+      const s = slot(input.path);
       s.entered.resolve();
       return s.done.promise;
     };
+    const aList = slot(`/s/${a.linkId}/print/list`);
+    const bList = slot(`/s/${b.linkId}/print/list`);
+    const aTimeline = slot(`/s/${a.linkId}/print/timeline`);
+    const aPdf = async () => new FakePdfRenderer().render({ path: '', token: '' });
 
     const first = pdf(a.linkId, 'list', { cookie: ca });
     const second = pdf(b.linkId, 'list', { cookie: cb });
-    await Promise.all([queue[0]!.entered.promise, queue[1]!.entered.promise]);
+    await Promise.all([aList.entered.promise, bList.entered.promise]);
 
     const third = await pdf(a.linkId, 'timeline', { cookie: ca });
     expect(third.statusCode).toBe(503);
@@ -225,17 +240,17 @@ describe('making a PDF', () => {
     // A PDF that already exists is never refused as busy.
     expect((await pdf(ready.linkId, 'list', { cookie: cr })).statusCode).toBe(200);
 
-    queue[0]!.done.reject(new PdfFailedError('render_failed'));
+    aList.done.reject(new PdfFailedError('render_failed'));
     expect((await first).statusCode).toBe(502);
 
     const retry = pdf(a.linkId, 'timeline', { cookie: ca });
-    await queue[2]!.entered.promise;
-    queue[1]!.done.resolve(await new FakePdfRenderer().render({ path: '', token: '' }));
-    queue[2]!.done.resolve(await new FakePdfRenderer().render({ path: '', token: '' }));
+    await aTimeline.entered.promise;
+    bList.done.resolve(await aPdf());
+    aTimeline.done.resolve(await aPdf());
     expect((await second).statusCode).toBe(200);
     expect((await retry).statusCode).toBe(200);
     // Three renders: the refused request never reached the renderer.
-    expect(next).toBe(3);
+    expect(renders).toBe(3);
     expect(await renderSessions(a.id)).toBe(0);
     expect(await renderSessions(b.id)).toBe(0);
 

@@ -89,23 +89,29 @@ function serve(notes: Note[], answer: (method: string, path: string, body: unkno
   });
 }
 
-function show(opts: { role?: Role; archived?: boolean; onDraftChange?: (hasText: boolean) => void; members?: { userId: string; name: string }[] } = {}) {
+type ShowOpts = { role?: Role; archived?: boolean; onDraftChange?: (hasText: boolean) => void; members?: { userId: string; name: string }[] };
+
+function show(opts: ShowOpts = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidate = vi.spyOn(client, 'invalidateQueries');
   const onDraftChange = opts.onDraftChange ?? vi.fn();
-  render(
+  const tree = (o: ShowOpts) => (
     <QueryClientProvider client={client}>
       <NotesSection
         roadmapId="r1"
-        item={item({ archived: opts.archived ?? false })}
-        role={opts.role ?? 'contributor'}
+        item={item({ archived: o.archived ?? false })}
+        role={o.role ?? 'contributor'}
         myId={ME}
-        members={opts.members ?? []}
+        members={o.members ?? []}
         timeZone="UTC"
         onDraftChange={onDraftChange}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { onDraftChange, client };
+  const view = render(tree(opts));
+  /** Shows the section again as a refetch of the item would. */
+  const refresh = (o: ShowOpts) => view.rerender(tree({ ...opts, ...o }));
+  return { onDraftChange, client, invalidate, refresh };
 }
 
 const articleWith = (text: string) => {
@@ -396,6 +402,130 @@ describe('NotesSection', () => {
     });
     await waitFor(() => expect(onDraftChange).toHaveBeenLastCalledWith(true));
     expect(renders.count).toBe(before);
+  });
+
+  describe('refusals, as Files handles them', () => {
+    const ARCHIVED = "This item is archived, so notes and files can't be added or changed.";
+    const PROJECTS = { queryKey: ['projects', 'r1'] };
+    const ROADMAPS = { queryKey: ['roadmaps'] };
+    const alerts = () => screen.queryAllByRole('alert').map((a) => a.textContent);
+    const archivedLine = () => screen.getByText(ARCHIVED, { selector: 'p:not([role])' });
+    /** The read-only box labelled `label` holding the kept text, placed after the archived sentence. */
+    const keptBox = (label: string) => {
+      const box = screen.getByRole<HTMLTextAreaElement>('textbox', { name: label });
+      expect(box.readOnly).toBe(true);
+      expect(archivedLine().compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      return box;
+    };
+    const noControls = () => {
+      expect(screen.queryAllByRole('button')).toEqual([]);
+      for (const box of screen.queryAllByRole('textbox')) expect((box as HTMLTextAreaElement).readOnly).toBe(true);
+    };
+
+    test('FR-1.5: a note refused as archived says so and refreshes the item; the typed text stays, read-only, under the archived sentence', async () => {
+      serve([], () => Promise.reject(new ApiError(409, 'item_archived')));
+      const { invalidate, refresh } = show();
+      await screen.findByText('No notes yet.');
+      fireEvent.change(newBox(), { target: { value: 'Keep this' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+      await waitFor(() => expect(alerts()).toEqual([ARCHIVED]));
+      expect(invalidate).toHaveBeenCalledWith(PROJECTS);
+      expect(invalidate).not.toHaveBeenCalledWith(ROADMAPS);
+
+      refresh({ archived: true });
+      await waitFor(() => expect(keptBox('Add a note').value).toBe('Keep this'));
+      noControls();
+      expect(screen.queryByText('You can use Markdown. Type @ to mention someone.')).toBeNull();
+      expect(screen.getAllByText(ARCHIVED)).toHaveLength(1);
+    });
+
+    test('FR-1.5: a reply refused as archived keeps its text read-only once the item shows as archived', async () => {
+      serve([note({ id: 'n1', body: 'Top' })], () => Promise.reject(new ApiError(409, 'item_archived')));
+      const { invalidate, refresh } = show();
+      await screen.findByText('Top');
+      fireEvent.click(within(articleWith('Top')).getByRole('button', { name: 'Reply' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Reply to Bob' }), { target: { value: 'My answer' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add reply' }));
+      await waitFor(() => expect(alerts()).toEqual([ARCHIVED]));
+      expect(invalidate).toHaveBeenCalledWith(PROJECTS);
+
+      refresh({ archived: true });
+      await waitFor(() => expect(keptBox('Reply to Bob').value).toBe('My answer'));
+      noControls();
+      expect(screen.getByText('Top')).toBeTruthy();
+    });
+
+    test('FR-1.5: an edit refused as archived keeps its changed text read-only once the item shows as archived', async () => {
+      serve([note({ id: 'n1', body: 'Before', authorId: ME }), note({ id: 'n2', body: 'Other', authorId: ME })], () =>
+        Promise.reject(new ApiError(409, 'item_archived')),
+      );
+      const { invalidate, refresh } = show();
+      await screen.findByText('Before');
+      fireEvent.click(within(articleWith('Before')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Edit your note' }), { target: { value: 'After' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+      await waitFor(() => expect(alerts()).toEqual([ARCHIVED]));
+      expect(invalidate).toHaveBeenCalledWith(PROJECTS);
+
+      refresh({ archived: true });
+      await waitFor(() => expect(keptBox('Edit your note').value).toBe('After'));
+      noControls();
+      expect(screen.getByText('Before')).toBeTruthy();
+    });
+
+    test('FR-1.5: an item archived while an edit box is open but unchanged just closes the box', async () => {
+      serve([note({ id: 'n1', body: 'Before', authorId: ME })]);
+      const { refresh } = show();
+      await screen.findByText('Before');
+      fireEvent.click(within(articleWith('Before')).getByRole('button', { name: 'Edit' }));
+      refresh({ archived: true });
+      await waitFor(() => expect(screen.queryAllByRole('textbox')).toEqual([]));
+      expect(screen.getByText('Before')).toBeTruthy();
+    });
+
+    test('FR-1.5: a delete refused as archived says so in the dialog and refreshes the item', async () => {
+      serve([note({ id: 'n1', body: 'Mine', authorId: ME })], () => Promise.reject(new ApiError(409, 'item_archived')));
+      const { invalidate } = show();
+      await screen.findByText('Mine');
+      fireEvent.click(within(articleWith('Mine')).getByRole('button', { name: 'Delete' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Delete this note?', hidden: true });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete note', hidden: true }));
+      await waitFor(() => expect(within(dialog).getByRole('alert', { hidden: true }).textContent).toBe(ARCHIVED));
+      expect(invalidate).toHaveBeenCalledWith(PROJECTS);
+      expect(invalidate).not.toHaveBeenCalledWith(ROADMAPS);
+    });
+
+    test('FR-1.5: a note or edit refused as forbidden says it couldn\'t save and refreshes the item and the role', async () => {
+      serve([note({ id: 'n1', body: 'Before', authorId: ME })], () => Promise.reject(new ApiError(403, 'forbidden')));
+      const { invalidate } = show();
+      await screen.findByText('Before');
+      fireEvent.change(newBox(), { target: { value: 'New one' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+      await waitFor(() => expect(alerts()).toEqual(["Couldn't save the note. Try again."]));
+      expect(invalidate).toHaveBeenCalledWith(PROJECTS);
+      expect(invalidate).toHaveBeenCalledWith(ROADMAPS);
+      expect(valueOf(newBox())).toBe('New one');
+
+      invalidate.mockClear();
+      fireEvent.click(within(articleWith('Before')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Edit your note' }), { target: { value: 'After' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+      await waitFor(() => expect(alerts()).toContain("Couldn't save the note. Try again."));
+      expect(invalidate).toHaveBeenCalledWith(PROJECTS);
+      expect(invalidate).toHaveBeenCalledWith(ROADMAPS);
+    });
+
+    test('FR-1.5: a delete refused as forbidden shows the generic message and refreshes the item and the role', async () => {
+      serve([note({ id: 'n1', body: 'Mine', authorId: ME })], () => Promise.reject(new ApiError(403, 'forbidden')));
+      const { invalidate } = show();
+      await screen.findByText('Mine');
+      fireEvent.click(within(articleWith('Mine')).getByRole('button', { name: 'Delete' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Delete this note?', hidden: true });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete note', hidden: true }));
+      await waitFor(() => expect(within(dialog).getByRole('alert', { hidden: true }).textContent).toBe('Something went wrong. Try again.'));
+      expect(invalidate).toHaveBeenCalledWith(PROJECTS);
+      expect(invalidate).toHaveBeenCalledWith(ROADMAPS);
+    });
   });
 
   describe('fix round 1', () => {

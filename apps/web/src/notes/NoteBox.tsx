@@ -33,10 +33,14 @@ interface NoteBoxProps {
   inject?: { text: string; n: number; picks?: ReadonlyMap<string, string> } | undefined;
   /** Called with the new text, and who is picked for each name in it, on every change the person makes. */
   onType?: (text: string, picks: ReadonlyMap<string, string>) => void;
+  /** Called with the text whenever it changes, from the person or not (a handover, emptied after a save). */
+  onText?: (text: string) => void;
+  /** Shows `initial` as text that can be selected and copied but not changed or sent: no hint, list or buttons. */
+  readOnly?: boolean;
 }
 
 /** A labelled text box for a note, with the Markdown hint, its buttons and any error. */
-export function NoteBox({ label, submitLabel, initial, initialMentions, members, busy, error, onSubmit, onCancel, id, onDirtyChange, autoFocus = false, inject, onType }: NoteBoxProps) {
+export function NoteBox({ label, submitLabel, initial, initialMentions, members, busy, error, onSubmit, onCancel, id, onDirtyChange, autoFocus = false, inject, onType, onText, readOnly = false }: NoteBoxProps) {
   const [text, setText] = useState(initial);
   // Where the caret is, or null when the text was set from outside and the caret is not known.
   const [caret, setCaret] = useState<number | null>(null);
@@ -57,7 +61,7 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
   const optionId = useCallback((member: MemberName) => `${ownId}-person-${member.userId}`, [ownId]);
   const statusId = `${ownId}-people-status`;
 
-  const query = caret === null ? null : mentionQueryAt(text, caret);
+  const query = caret === null || readOnly ? null : mentionQueryAt(text, caret);
   const open =
     query !== null && !(dismissed && dismissed.start === query.start && query.query.startsWith(dismissed.query));
   const queryText = open ? query.query : null;
@@ -145,6 +149,10 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
     }
   };
 
+  useEffect(() => {
+    onText?.(text);
+  }, [text, onText]);
+
   const dirty = text !== initial;
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -167,7 +175,7 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy) return;
+    if (busy || readOnly) return;
     const saved = await onSubmit(text, mentionIdsIn(text));
     if (saved) {
       setText('');
@@ -187,7 +195,8 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
           ref={box}
           rows={3}
           value={text}
-          aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+          readOnly={readOnly}
+          aria-describedby={readOnly ? undefined : error ? `${hintId} ${errorId}` : hintId}
           aria-invalid={error ? true : undefined}
           // Stays a text box; while the @ list is open it points at it, and a live region says who is active.
           aria-autocomplete={open ? 'list' : undefined}
@@ -216,19 +225,23 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
         <div id={statusId} className="sr-only mention-status" aria-live="polite">
           {announcement}
         </div>
-        <p id={hintId} className="hint">
-          {NOTE_HINT}
-        </p>
+        {!readOnly && (
+          <p id={hintId} className="hint">
+            {NOTE_HINT}
+          </p>
+        )}
       </div>
       {error && (
         <div id={errorId}>
           <Alert>{error}</Alert>
         </div>
       )}
-      <div className="panel-actions">
-        <Button type="submit">{submitLabel}</Button>
-        {onCancel && <Button onClick={onCancel}>Cancel</Button>}
-      </div>
+      {!readOnly && (
+        <div className="panel-actions">
+          <Button type="submit">{submitLabel}</Button>
+          {onCancel && <Button onClick={onCancel}>Cancel</Button>}
+        </div>
+      )}
     </form>
   );
 }

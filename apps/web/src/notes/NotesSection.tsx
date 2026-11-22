@@ -1,9 +1,12 @@
 import { can, NOTE_LIMITS, type Note, type Project, type Role } from '@roadmap/shared';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ARCHIVED_CONTENT, errorCode, GENERIC_ERROR } from '../api/errors.ts';
 import { formatWhen } from '../audit/dates.ts';
 import { focusRemaining } from '../projects/focusAfterRemove.ts';
 import type { MemberName } from '../projects/PanelLists.tsx';
+import { PROJECTS_KEY } from '../projects/useProjects.ts';
+import { ROADMAPS_KEY } from '../roadmaps/useRoadmaps.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
@@ -78,6 +81,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
   const add = useAddNote(roadmapId, item.id);
   const edit = useEditNote(roadmapId, item.id);
   const del = useDeleteNote(roadmapId, item.id);
+  const queryClient = useQueryClient();
   const headingId = useId();
   const newBoxId = `notes-${item.id}-new`;
   const focusList = `notes-${item.id}`;
@@ -116,6 +120,17 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
     return { reply: track('reply'), edit: track('edit') };
   }, [typed]);
 
+  // The text in each box as it stands, so it can be kept on screen when the item is archived and the boxes go.
+  const latestText = useRef<Partial<Record<BoxKey, string>>>({});
+  const textFor = useMemo(() => {
+    const track = (key: BoxKey) => (text: string) => {
+      latestText.current[key] = text;
+    };
+    return { new: track('new'), reply: track('reply'), edit: track('edit') };
+  }, []);
+  // Text that was in a box when the item became archived, shown read-only until the panel closes.
+  const [kept, setKept] = useState<{ key: BoxKey; label: string; text: string }[]>([]);
+
   const [drafts, setDrafts] = useState<Record<BoxKey, boolean>>({ new: false, reply: false, edit: false });
   const draftFor = useMemo(() => {
     const mark = (key: BoxKey) => (dirty: boolean) => setDrafts((d) => (d[key] === dirty ? d : { ...d, [key]: dirty }));
@@ -130,6 +145,32 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
   const canAdd = writable && can({ role, action: 'note.create' });
   const canEdit = (n: Note) => writable && can({ role, action: 'note.edit', ctx: { isAuthor: n.authorId === myId } });
   const canDelete = (n: Note) => writable && can({ role, action: 'note.delete', ctx: { isAuthor: n.authorId === myId } });
+
+  // Once the item is archived, its boxes go. Text typed in them stays on screen, read-only, so it isn't lost.
+  const wasWritable = useRef(writable);
+  useEffect(() => {
+    if (wasWritable.current === writable) return;
+    wasWritable.current = writable;
+    if (writable) return;
+    const keep: { key: BoxKey; label: string; text: string }[] = [];
+    const typedText = (key: BoxKey) => latestText.current[key] ?? '';
+    if (open?.kind === 'reply' && typedText('reply').trim() !== '') {
+      keep.push({ key: 'reply', label: `Reply to ${open.to.authorName}`, text: typedText('reply') });
+    }
+    if (open?.kind === 'edit' && typedText('edit').trim() !== '' && typedText('edit') !== open.note.body) {
+      keep.push({ key: 'edit', label: 'Edit your note', text: typedText('edit') });
+    }
+    if (typedText('new').trim() !== '') keep.push({ key: 'new', label: 'Add a note', text: typedText('new') });
+    if (keep.length > 0) setKept((k) => [...k, ...keep]);
+    setOpen(null);
+  }, [writable, open]);
+
+  const refreshItem = () => void queryClient.invalidateQueries({ queryKey: PROJECTS_KEY(roadmapId) });
+  /** After a `forbidden`, refetches what decides what this person may do here: the item and their role. */
+  const refreshAccess = () => {
+    refreshItem();
+    void queryClient.invalidateQueries({ queryKey: ROADMAPS_KEY });
+  };
 
   const controlId = (noteId: string, control: 'reply' | 'edit') => `note-${noteId}-${control}`;
   const boxId = (kind: 'reply' | 'edit') => `notes-${item.id}-${kind}`;
@@ -210,6 +251,8 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
         setError(key, noteErrorMessage(err, body, key));
       }
       if (gone) void notes.refetch();
+      if (code === 'item_archived') refreshItem();
+      if (code === 'forbidden') refreshAccess();
       return false;
     } finally {
       setPending((p) => ({ ...p, [key]: false }));
@@ -252,9 +295,12 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
         setFocusAfterDelete({ noteId: target.note.id, index: target.index });
       },
       onError: (err) => {
-        const gone = errorCode(err) === 'not_found';
-        setDeleteError(gone ? NOTE_GONE : GENERIC_ERROR);
+        const code = errorCode(err);
+        const gone = code === 'not_found';
+        setDeleteError(gone ? NOTE_GONE : code === 'item_archived' ? ARCHIVED_CONTENT : GENERIC_ERROR);
         if (gone) void notes.refetch();
+        if (code === 'item_archived') refreshItem();
+        if (code === 'forbidden') refreshAccess();
       },
     });
   };
@@ -285,6 +331,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
             onCancel={closeBox}
             onDirtyChange={draftFor.edit}
             onType={typedIn.edit}
+            onText={textFor.edit}
             autoFocus
           />
           {finishFirst && <Alert>{FINISH_FIRST}</Alert>}
@@ -327,6 +374,19 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
     <section className="notes-section" ref={section} aria-labelledby={headingId}>
       <h3 id={headingId}>Notes</h3>
       {item.archived && <p>{ARCHIVED_CONTENT}</p>}
+      {kept.map((k, i) => (
+        <NoteBox
+          key={`${k.key}-${i}`}
+          label={k.label}
+          submitLabel=""
+          initial={k.text}
+          members={members}
+          busy={false}
+          error={undefined}
+          onSubmit={() => Promise.resolve(false)}
+          readOnly
+        />
+      ))}
       {notes.isError && !list && (
         <Alert>
           <p>Couldn't load notes. Try again.</p>
@@ -362,6 +422,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
                     onCancel={closeBox}
                     onDirtyChange={draftFor.reply}
                     onType={typedIn.reply}
+                    onText={textFor.reply}
                     autoFocus
                   />
                   {finishFirst && <Alert>{FINISH_FIRST}</Alert>}
@@ -385,6 +446,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
             onSubmit={addNote('new', null)}
             onDirtyChange={draftFor.new}
             onType={typed}
+            onText={textFor.new}
             inject={handover}
           />
         </>

@@ -81,6 +81,10 @@ export function errorMessage(code: string, ctx: ErrorContext = {}): string {
       return 'This roadmap already has 50 snapshots. Revoke one to create another.';
     case 'too_many_notes':
       return 'This roadmap has more than 5,000 notes. Create the snapshot without notes.';
+    case 'wrong_password':
+      return "That password isn't right.";
+    case 'snapshot_locked':
+      return 'Too many wrong passwords. Try again in 15 minutes.';
     default:
       return GENERIC_ERROR;
   }

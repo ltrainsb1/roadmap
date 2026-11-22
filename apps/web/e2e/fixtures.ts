@@ -59,6 +59,42 @@ export async function joinByApi(
   return { context, page, user: { email, name, secret, recoveryCodes } };
 }
 
+/** The password every snapshot made by `createSnapshotByApi` has. */
+export const SNAPSHOT_PASSWORD = 'a long enough password';
+
+/**
+ * Creates a snapshot of the roadmap through the API, as the Owner or Admin `call` acts for; returns its link id.
+ * "As of" is the UTC date, which the API always takes.
+ */
+export async function createSnapshotByApi(
+  call: ApiCall,
+  roadmapId: string,
+  opts: { name?: string; include?: { notes: boolean; assignees: boolean } } = {},
+): Promise<string> {
+  const { linkId } = await call<{ linkId: string }>('POST', `/api/roadmaps/${roadmapId}/snapshots`, {
+    name: opts.name ?? 'Board pack',
+    asOf: new Date().toISOString().slice(0, 10),
+    password: SNAPSHOT_PASSWORD,
+    expiresAt: null,
+    include: opts.include ?? { notes: false, assignees: false },
+  });
+  return linkId;
+}
+
+/** A new browser context with no account cookies, as a stakeholder's browser is, sized like the project's. */
+export async function strangerContext(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
+  const use = base.info().project.use;
+  const context = await browser.newContext({
+    ...(use.baseURL && { baseURL: use.baseURL }),
+    ...(use.viewport && { viewport: use.viewport }),
+    ...(use.isMobile !== undefined && { isMobile: use.isMobile }),
+    ...(use.hasTouch !== undefined && { hasTouch: use.hasTouch }),
+  });
+  const page = await context.newPage();
+  watchCsp(page);
+  return { context, page };
+}
+
 export const test = base.extend<{ owner: TestUser; call: ApiCall; roadmap: { id: string; name: string } }>({
   owner: async ({ page }, use) => {
     await use(await signUpByApi(page.context(), 'owner'));

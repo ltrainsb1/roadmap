@@ -70,7 +70,7 @@ export interface ViewOptions {
   level: 1 | 2 | 3 | 4;
 }
 
-const DEFAULT_OPTIONS: ViewOptions = { zoom: 'months', level: 1 };
+export const DEFAULT_OPTIONS: ViewOptions = { zoom: 'months', level: 1 };
 const LEVELS = ['1', '2', '3', '4'] as const;
 
 const isZoom = (value: string | null): value is TimelineZoom => value !== null && (TIMELINE_ZOOMS as readonly string[]).includes(value);

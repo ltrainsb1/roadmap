@@ -57,6 +57,17 @@ export function CreateSnapshotDialog({ roadmapId, open, onClose }: { roadmapId: 
   const [failedAt, setFailedAt] = useState(0);
   const [linkId, setLinkId] = useState<string | null>(null);
   const copyLink = useCopyLink();
+  // Each opening is dated by the clock at that moment, so a page left open past midnight offers the new day.
+  const [openSeen, setOpenSeen] = useState(open);
+  if (open !== openSeen) {
+    setOpenSeen(open);
+    if (open) {
+      const now = localToday();
+      setToday(now);
+      setAsOf(now);
+    }
+  }
+  const busy = useRef(false);
   const body = useRef<HTMLDivElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
 
@@ -65,12 +76,9 @@ export function CreateSnapshotDialog({ roadmapId, open, onClose }: { roadmapId: 
     if (linkId) title.current?.focus();
   }, [linkId]);
 
-  // Closing clears the form, so the next opening starts blank and dated today, and the password is gone.
+  // Closing clears the form, so the next opening starts blank and the password is gone, from the mutation's record too.
   const close = () => {
-    const now = localToday();
-    setToday(now);
     setName('');
-    setAsOf(now);
     setPassword('');
     setShowPassword(false);
     setExpires('never');
@@ -81,6 +89,7 @@ export function CreateSnapshotDialog({ roadmapId, open, onClose }: { roadmapId: 
     setFormError(undefined);
     setLinkId(null);
     copyLink.reset();
+    create.reset();
     onClose();
   };
 
@@ -91,8 +100,9 @@ export function CreateSnapshotDialog({ roadmapId, open, onClose }: { roadmapId: 
   };
 
   const submit = async () => {
-    // A second press while the first is on its way would make a second snapshot.
-    if (create.isPending) return;
+    // A second press while the first is on its way would make a second snapshot. A ref, not `isPending`: the
+    // mutation's state reaches the render only after a tick, and a double press is quicker.
+    if (busy.current) return;
     const found: Errors = {};
     if (!name.trim()) found.name = 'Enter a name.';
     if (password.length < SNAPSHOT_LIMITS.passwordMin) found.password = 'Use at least 10 characters.';
@@ -104,6 +114,7 @@ export function CreateSnapshotDialog({ roadmapId, open, onClose }: { roadmapId: 
     }
     if (Object.keys(found).length > 0) return fail(found);
 
+    busy.current = true;
     try {
       const created = await create.mutateAsync({ name: name.trim(), asOf, password, expiresAt, include: { notes, assignees } });
       setErrors({});
@@ -114,6 +125,10 @@ export function CreateSnapshotDialog({ roadmapId, open, onClose }: { roadmapId: 
       const fieldName = FIELD_CODES[errorCode(err)];
       if (fieldName) fail({ [fieldName]: messageFor(err) });
       else fail({}, messageFor(err));
+    } finally {
+      // The mutation keeps what it sent, password included; the form's own state is all a retry needs.
+      create.reset();
+      busy.current = false;
     }
   };
 

@@ -1,8 +1,9 @@
 import type { SnapshotSummary } from '@roadmap/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { api } from '../api/client.ts';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
+import { api, ApiError } from '../api/client.ts';
+import { endOfLocalDay } from './useSnapshots.ts';
 import { SnapshotsPage } from './SnapshotsPage.tsx';
 
 vi.mock('../api/client.ts', async (importOriginal) => ({
@@ -17,6 +18,23 @@ vi.mock('../auth/useMe.ts', () => ({
 }));
 
 const mockApi = vi.mocked(api);
+const startTz = process.env.TZ;
+
+// jsdom has no modal dialogs.
+beforeAll(() => {
+  process.env.TZ = 'UTC';
+  HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+    this.open = false;
+    this.dispatchEvent(new Event('close'));
+  };
+});
+afterAll(() => {
+  if (startTz === undefined) delete process.env.TZ;
+  else process.env.TZ = startTz;
+});
 
 beforeEach(() => {
   mockApi.mockReset();
@@ -26,6 +44,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  process.env.TZ = 'UTC';
 });
 
 const snapshot = (over: Partial<SnapshotSummary> & Pick<SnapshotSummary, 'id' | 'name'>): SnapshotSummary => ({
@@ -112,4 +131,49 @@ test("FR-3.5: a card's last line says what the snapshot shows, and is absent whe
   expect(lines(card('Names only'))[4]).toBe('Shows assignee names.');
   expect(lines(card('Plain'))).toHaveLength(4);
   expect(card('Plain').textContent).not.toContain('Shows');
+});
+
+test('FR-3.2: the expiry line reads as the day picked, in the browser\'s own zone, while other dates use the profile zone', async () => {
+  // The browser is in New York; the profile says UTC. The link was set to expire at the end of 1 Mar in New York.
+  process.env.TZ = 'America/New_York';
+  const expiresAt = endOfLocalDay('2027-03-01');
+  expect(expiresAt).toBe('2027-03-02T04:59:59.999Z');
+  const card = await renderPage([snapshot({ id: 'a', name: 'Late', expiresAt, createdAt: '2027-01-11T02:00:00.000Z' })]);
+  // Created at 02:00 UTC on the 11th, which is still the 10th in New York: the profile zone wins there.
+  expect(lines(card('Late'))).toEqual(['As of 10 Jan 2027', 'Created by Maria on 11 Jan 2027', 'Expires 1 Mar 2027', 'Not opened yet']);
+});
+
+test('FR-3.2: a second press on "Revoke snapshot" sends one request, and the next revoke dialog opens without an error', async () => {
+  let finish: () => void = () => undefined;
+  const list = { snapshots: [snapshot({ id: 'a', name: 'First' }), snapshot({ id: 'b', name: 'Second' })] };
+  mockApi.mockImplementation((path, opts) => {
+    if (opts?.method === 'DELETE') {
+      // The first delete answers when told to; any later one would find it gone.
+      if (mockApi.mock.calls.filter(([, o]) => o?.method === 'DELETE').length > 1) return Promise.reject(new ApiError(404, 'not_found'));
+      return new Promise<undefined>((resolve) => {
+        finish = () => resolve(undefined);
+      });
+    }
+    void path;
+    return Promise.resolve(list);
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <SnapshotsPage />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Revoke First' }));
+  const confirm = screen.getByRole('dialog', { name: 'Revoke First?' });
+  fireEvent.click(within(confirm).getByRole('button', { name: 'Revoke snapshot' }));
+  fireEvent.click(within(confirm).getByRole('button', { name: 'Revoke snapshot' }));
+  await waitFor(() => expect(mockApi.mock.calls.some(([, o]) => o?.method === 'DELETE')).toBe(true));
+  list.snapshots = list.snapshots.slice(1);
+  finish();
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Revoke First?' })).toBeNull());
+  expect(mockApi.mock.calls.filter(([, o]) => o?.method === 'DELETE')).toHaveLength(1);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Revoke Second' }));
+  const next = screen.getByRole('dialog', { name: 'Revoke Second?' });
+  expect(within(next).queryByRole('alert')).toBeNull();
 });

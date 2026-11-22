@@ -19,6 +19,9 @@ const COPY_LIST = 'snapshot-copy';
 /** An instant as the calendar day it falls on in `timeZone`: "12 Mar 2027". */
 const dayOf = (iso: string, timeZone: string) => formatDay(todayIn(timeZone, new Date(iso)));
 
+/** The browser's own zone: the one an expiry instant was built in, so it reads back as the day picked. */
+const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 /** An instant as a time of day in `timeZone`: "14:05". */
 function timeOf(iso: string, timeZone: string): string {
   const options = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } as const;
@@ -64,7 +67,7 @@ function SnapshotCard({ snapshot: s, now, timeZone, onRevoke }: { snapshot: Snap
         <li>
           Created by {s.createdByName ?? 'a former member'} on {dayOf(s.createdAt, timeZone)}
         </li>
-        <li>{s.expiresAt ? `Expires ${dayOf(s.expiresAt, timeZone)}` : 'No expiry'}</li>
+        <li>{s.expiresAt ? `Expires ${dayOf(s.expiresAt, browserZone())}` : 'No expiry'}</li>
         <li>{openedLine(s, timeZone)}</li>
         {shows && <li>{shows}</li>}
       </ul>
@@ -100,6 +103,7 @@ function SnapshotList({ roadmapId, timeZone }: { roadmapId: string; timeZone: st
   const [dialogError, setDialogError] = useState<string | undefined>();
   const [focusAt, setFocusAt] = useState<number | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  const revokeBusy = useRef(false);
 
   // After a revoke, once the card is gone and the dialog has closed (its effect runs first), keep focus in the list.
   useEffect(() => {
@@ -114,7 +118,10 @@ function SnapshotList({ roadmapId, timeZone }: { roadmapId: string; timeZone: st
   };
 
   const confirmRevoke = async () => {
-    if (!revoking) return;
+    // A second press while the first is on its way would come back "not found" and leave a stale error. A ref, not
+    // `isPending`: the mutation's state reaches the render only after a tick, and a double press is quicker.
+    if (!revoking || revokeBusy.current) return;
+    revokeBusy.current = true;
     try {
       await revoke.mutateAsync(revoking.snapshot.id);
       closeRevoke();
@@ -122,6 +129,8 @@ function SnapshotList({ roadmapId, timeZone }: { roadmapId: string; timeZone: st
     } catch (err) {
       setDialogError(messageFor(err));
       void snapshots.refetch();
+    } finally {
+      revokeBusy.current = false;
     }
   };
 
@@ -143,7 +152,10 @@ function SnapshotList({ roadmapId, timeZone }: { roadmapId: string; timeZone: st
       {items.length > 0 && (
         <ul className="snapshot-list" aria-label="Snapshots">
           {items.map((s, index) => (
-            <SnapshotCard key={s.id} snapshot={s} now={now} timeZone={timeZone} onRevoke={() => setRevoking({ snapshot: s, index })} />
+            <SnapshotCard key={s.id} snapshot={s} now={now} timeZone={timeZone} onRevoke={() => {
+                setDialogError(undefined);
+                setRevoking({ snapshot: s, index });
+              }} />
           ))}
         </ul>
       )}

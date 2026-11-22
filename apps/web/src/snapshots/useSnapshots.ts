@@ -13,11 +13,13 @@ export function useSnapshots(roadmapId: string) {
   return useQuery({ queryKey: SNAPSHOTS_KEY(roadmapId), queryFn: () => api<SnapshotList>(base(roadmapId)) });
 }
 
-/** Freezes the roadmap into a new snapshot, then refreshes the list. */
+/** Freezes the roadmap into a new snapshot, then refreshes the list. Reset it after it settles, so the password is not kept. */
 export function useCreateSnapshot(roadmapId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateSnapshotRequest) => api<{ id: string; linkId: string }>(base(roadmapId), { body }),
+    // The body holds the password: once the dialog resets the mutation, the cache drops it at once.
+    gcTime: 0,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: SNAPSHOTS_KEY(roadmapId) }),
   });
 }

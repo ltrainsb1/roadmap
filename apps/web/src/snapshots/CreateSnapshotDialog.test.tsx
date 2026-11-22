@@ -39,15 +39,28 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function renderDialog(onClose = vi.fn()) {
+function renderDialog(onClose = vi.fn(), open = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const tree = (isOpen: boolean) => (
     <QueryClientProvider client={client}>
-      <CreateSnapshotDialog roadmapId="r1" open onClose={onClose} />
-    </QueryClientProvider>,
+      <CreateSnapshotDialog roadmapId="r1" open={isOpen} onClose={onClose} />
+    </QueryClientProvider>
   );
-  return { dialog: screen.getByRole('dialog', { name: 'Create a snapshot' }), onClose };
+  const { rerender } = render(tree(open));
+  return {
+    dialog: open ? screen.getByRole('dialog', { name: 'Create a snapshot' }) : document.body,
+    onClose,
+    client,
+    setOpen: (isOpen: boolean) => rerender(tree(isOpen)),
+  };
 }
+
+/** Whether any mutation the query client still holds carries `text` in what it was sent. */
+const cacheHolds = (client: QueryClient, text: string) =>
+  client
+    .getMutationCache()
+    .getAll()
+    .some((m) => JSON.stringify(m.state.variables ?? null).includes(text));
 
 const input = (dialog: HTMLElement, label: string) => within(dialog).getByLabelText<HTMLInputElement>(label, { exact: true });
 const type = (dialog: HTMLElement, label: string, value: string) => fireEvent.change(input(dialog, label), { target: { value } });
@@ -190,4 +203,44 @@ test('FR-3.1: too_many_snapshots and too_many_notes show their own messages in t
   );
   expect(input(dialog, 'Name').value).toBe('Board pack');
   expect(screen.queryByRole('dialog', { name: 'Snapshot created' })).toBeNull();
+});
+
+test('FR-3.2: once a snapshot is created, the password is gone from the mutation cache', async () => {
+  mockApi.mockResolvedValue({ id: 's1', linkId: 'link-1' });
+  const { dialog, client, onClose, setOpen } = renderDialog();
+  fillValid(dialog);
+  submit(dialog);
+  const created = await screen.findByRole('dialog', { name: 'Snapshot created' });
+  await waitFor(() => expect(cacheHolds(client, PASSWORD)).toBe(false));
+
+  fireEvent.click(within(created).getByRole('button', { name: 'Done' }));
+  expect(onClose).toHaveBeenCalled();
+  setOpen(false);
+  expect(cacheHolds(client, PASSWORD)).toBe(false);
+});
+
+test('FR-3.2: after a refused create the form keeps the password, and closing leaves none in the mutation cache', async () => {
+  mockApi.mockRejectedValue(new ApiError(422, 'too_many_snapshots'));
+  const { dialog, client, setOpen } = renderDialog();
+  fillValid(dialog);
+  submit(dialog);
+  await waitFor(() => expect(within(dialog).getByRole('alert')).toBeTruthy());
+  expect(input(dialog, 'Password').value).toBe(PASSWORD);
+
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  setOpen(false);
+  await waitFor(() => expect(cacheHolds(client, PASSWORD)).toBe(false));
+});
+
+test('FR-3.1: the as-of date and its limit are today at the time the dialog opens, not when the page loaded', () => {
+  // The page loads late on the 15th and is left open past midnight.
+  vi.setSystemTime(new Date('2027-01-15T23:30:00Z'));
+  const { setOpen } = renderDialog(vi.fn(), false);
+  vi.setSystemTime(new Date('2027-01-16T08:00:00Z'));
+  setOpen(true);
+  const dialog = screen.getByRole('dialog', { name: 'Create a snapshot' });
+  expect(input(dialog, 'As of').value).toBe('2027-01-16');
+  expect(input(dialog, 'As of').max).toBe('2027-01-16');
+  fireEvent.click(within(dialog).getByLabelText('On a date'));
+  expect(input(dialog, 'Expiry date').min).toBe('2027-01-17');
 });

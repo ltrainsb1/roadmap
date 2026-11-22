@@ -53,6 +53,10 @@ export interface AppDeps {
   maxNotesPerItem?: number;
   /** Most files one item may hold; defaults to the shared limit. Tests lower it. */
   maxFilesPerItem?: number;
+  /** Uploads read at once; defaults to MAX_CONCURRENT_UPLOADS. Tests change it. */
+  maxConcurrentUploads?: number;
+  /** How long an upload's body may take to arrive; defaults to UPLOAD_READ_TIMEOUT_MS. Tests shorten it. */
+  uploadReadTimeoutMs?: number;
   /** Where attachments are kept; defaults to the store named in the config. */
   objectStore?: ObjectStore;
   /** Virus scanner for uploads; defaults to the scanner named in the config. */
@@ -170,6 +174,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     objectStore,
     scanner,
     ...(deps.maxFilesPerItem !== undefined && { maxFilesPerItem: deps.maxFilesPerItem }),
+    ...(deps.maxConcurrentUploads !== undefined && { maxConcurrentUploads: deps.maxConcurrentUploads }),
+    ...(deps.uploadReadTimeoutMs !== undefined && { uploadReadTimeoutMs: deps.uploadReadTimeoutMs }),
   });
 
   // Only stores that keep files on this server need the API to serve them; S3 links go straight to S3.

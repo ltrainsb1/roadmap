@@ -7,7 +7,8 @@ import {
   downloadLinkSchema,
   type Attachment,
 } from '@roadmap/shared';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { MultipartFile } from '@fastify/multipart';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { v7 as uuidv7 } from 'uuid';
@@ -26,7 +27,17 @@ export interface AttachmentRouteDeps {
   objectStore: ObjectStore;
   scanner: Scanner;
   maxFilesPerItem?: number;
+  /** Uploads read at once in this process; defaults to MAX_CONCURRENT_UPLOADS. */
+  maxConcurrentUploads?: number;
+  /** How long an upload's body may take to arrive; defaults to UPLOAD_READ_TIMEOUT_MS. */
+  uploadReadTimeoutMs?: number;
 }
+
+/** Each upload is held in memory (up to 25 MB, about twice that while it is copied), so only this many at once. */
+export const MAX_CONCURRENT_UPLOADS = 4;
+
+/** A body still arriving after this long is dropped, so a slow client can't hold a slot. */
+export const UPLOAD_READ_TIMEOUT_MS = 120_000;
 
 const attachmentParams = projectParams.extend({ attachmentId: z.string().min(1).max(100) });
 const noContent = { 204: z.null().describe('No content') };
@@ -63,30 +74,125 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
   const r = app.withTypeProvider<ZodTypeProvider>();
   const audit = createAuditLog();
   const maxFiles = deps.maxFilesPerItem ?? NOTE_LIMITS.filesPerItem;
+  const maxUploads = deps.maxConcurrentUploads ?? MAX_CONCURRENT_UPLOADS;
+  const readTimeoutMs = deps.uploadReadTimeoutMs ?? UPLOAD_READ_TIMEOUT_MS;
+  let uploadsInFlight = 0;
   const base = '/api/roadmaps/:roadmapId/projects/:projectId/attachments';
 
   /**
    * The one part named `file`, read into memory. The plugin's limits (one file, no fields, 25 MB) end the read
    * early: too large is 413 file_too_large; anything else that is not exactly one `file` part is 400 validation.
+   * A body that has not arrived within the time limit is 408 upload_timeout and the part is dropped.
    */
-  async function readUpload(req: FastifyRequest): Promise<{ rawName: string; body: Buffer }> {
+  async function readUpload(req: FastifyRequest, reply: FastifyReply): Promise<{ rawName: string; body: Buffer }> {
     if (!req.isMultipart()) throw validation();
     const { RequestFileTooLargeError, FilesLimitError, FieldsLimitError, PartsLimitError } = app.multipartErrors;
-    let found: { rawName: string; body: Buffer } | null = null;
-    try {
-      for await (const part of req.parts()) {
-        if (part.type !== 'file' || part.fieldname !== 'file' || found) throw validation();
-        found = { rawName: part.filename, body: await part.toBuffer() };
+    let current: MultipartFile | null = null;
+    const reading = (async () => {
+      let found: { rawName: string; body: Buffer } | null = null;
+      try {
+        for await (const part of req.parts()) {
+          if (part.type !== 'file' || part.fieldname !== 'file' || found) throw validation();
+          current = part;
+          found = { rawName: part.filename, body: await part.toBuffer() };
+        }
+      } catch (err) {
+        if (err instanceof RequestFileTooLargeError) throw new HttpError(413, 'file_too_large');
+        if (err instanceof FilesLimitError || err instanceof FieldsLimitError || err instanceof PartsLimitError) {
+          throw validation();
+        }
+        throw err;
       }
+      if (!found) throw validation();
+      return found;
+    })();
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new HttpError(408, 'upload_timeout')), readTimeoutMs);
+    });
+    try {
+      return await Promise.race([reading, timedOut]);
     } catch (err) {
-      if (err instanceof RequestFileTooLargeError) throw new HttpError(413, 'file_too_large');
-      if (err instanceof FilesLimitError || err instanceof FieldsLimitError || err instanceof PartsLimitError) {
-        throw validation();
+      if (err instanceof HttpError && err.code === 'upload_timeout') {
+        // Stop reading: drop what has arrived and close the connection once the answer is sent.
+        reading.catch(() => undefined);
+        (current as MultipartFile | null)?.file.destroy();
+        reply.header('connection', 'close');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Read, check, scan, store, record: in that order. Returns the new file. */
+  async function upload(req: FastifyRequest, reply: FastifyReply): Promise<Attachment> {
+    const actor = req.actor!;
+    const { roadmapId, projectId } = req.params as z.infer<typeof projectParams>;
+    const { rawName, body } = await readUpload(req, reply);
+    if (body.length === 0) throw new HttpError(422, 'empty_file');
+    const name = cleanFileName(rawName);
+
+    let verdict;
+    try {
+      verdict = await deps.scanner.scan(body);
+    } catch (err) {
+      if (err instanceof ScanUnavailableError) {
+        req.log.warn({ err }, 'virus scan unavailable');
+        throw new HttpError(503, 'scan_unavailable');
       }
       throw err;
     }
-    if (!found) throw validation();
-    return found;
+    if (!verdict.clean) {
+      await audit.record(actor.db, {
+        action: 'attachment.rejected',
+        actor: { type: 'user', userId: actor.userId },
+        roadmapId,
+        target: { type: 'project', id: projectId },
+        after: { name, size: body.length, signature: verdict.signature },
+        ip: req.ip,
+      });
+      throw new HttpError(422, 'file_infected');
+    }
+
+    const id = uuidv7();
+    // Ids only: the name the browser sent never reaches the store.
+    const key = `${actor.tenantId}/${roadmapId}/${id}`;
+    await deps.objectStore.put(key, body);
+    const nameOfUploader = async (s: ScopedDb) =>
+      (await s.collection('users').findOne({ _id: actor.userId }))?.name ?? FORMER_MEMBER;
+    try {
+      return await actor.db.withTransaction(async (s) => {
+        await assertOpenForContent(s, roadmapId, projectId);
+        const attachments = s.collection('attachments');
+        if ((await attachments.countDocuments({ roadmapId, projectId })) >= maxFiles) {
+          throw new HttpError(422, 'too_many_files');
+        }
+        const doc = await attachments.insertOne({
+          _id: id,
+          roadmapId,
+          projectId,
+          name,
+          size: body.length,
+          key,
+          uploadedById: actor.userId,
+          createdAt: deps.now(),
+        });
+        await audit.record(s, {
+          action: 'attachment.create',
+          actor: { type: 'user', userId: actor.userId },
+          roadmapId,
+          target: { type: 'attachment', id },
+          after: { projectId, name, size: doc.size },
+          ip: req.ip,
+        });
+        return toAttachmentDto(doc, await nameOfUploader(s));
+      });
+    } catch (err) {
+      // No record was committed, so the object must not stay behind.
+      await deleteStoredFiles(deps.objectStore, [key], req.log);
+      throw err;
+    }
   }
 
   r.get(
@@ -113,73 +219,17 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
       schema: { params: projectParams, response: { 201: attachmentSchema } },
     },
     async (req, reply) => {
-      const actor = req.actor!;
-      const { roadmapId, projectId } = req.params;
-      const { rawName, body } = await readUpload(req);
-      if (body.length === 0) throw new HttpError(422, 'empty_file');
-      const name = cleanFileName(rawName);
-
-      let verdict;
+      // Taken after the permission checks and before the body is read; refused, not queued, when none is free.
+      if (uploadsInFlight >= maxUploads) {
+        reply.header('connection', 'close');
+        throw new HttpError(503, 'uploads_busy');
+      }
+      uploadsInFlight += 1;
       try {
-        verdict = await deps.scanner.scan(body);
-      } catch (err) {
-        if (err instanceof ScanUnavailableError) {
-          req.log.warn({ err }, 'virus scan unavailable');
-          throw new HttpError(503, 'scan_unavailable');
-        }
-        throw err;
+        return reply.status(201).send(await upload(req, reply));
+      } finally {
+        uploadsInFlight -= 1;
       }
-      if (!verdict.clean) {
-        await audit.record(actor.db, {
-          action: 'attachment.rejected',
-          actor: { type: 'user', userId: actor.userId },
-          roadmapId,
-          target: { type: 'project', id: projectId },
-          after: { name, size: body.length, signature: verdict.signature },
-          ip: req.ip,
-        });
-        throw new HttpError(422, 'file_infected');
-      }
-
-      const id = uuidv7();
-      // Ids only: the name the browser sent never reaches the store.
-      const key = `${actor.tenantId}/${roadmapId}/${id}`;
-      await deps.objectStore.put(key, body);
-      let file: Attachment;
-      try {
-        file = await actor.db.withTransaction(async (s) => {
-          await assertOpenForContent(s, roadmapId, projectId);
-          const attachments = s.collection('attachments');
-          if ((await attachments.countDocuments({ roadmapId, projectId })) >= maxFiles) {
-            throw new HttpError(422, 'too_many_files');
-          }
-          const doc = await attachments.insertOne({
-            _id: id,
-            roadmapId,
-            projectId,
-            name,
-            size: body.length,
-            key,
-            uploadedById: actor.userId,
-            createdAt: deps.now(),
-          });
-          await audit.record(s, {
-            action: 'attachment.create',
-            actor: { type: 'user', userId: actor.userId },
-            roadmapId,
-            target: { type: 'attachment', id },
-            after: { projectId, name, size: doc.size },
-            ip: req.ip,
-          });
-          const uploader = await s.collection('users').findOne({ _id: actor.userId });
-          return toAttachmentDto(doc, uploader?.name ?? FORMER_MEMBER);
-        });
-      } catch (err) {
-        // No record was committed, so the object must not stay behind.
-        await deleteStoredFiles(deps.objectStore, [key], req.log);
-        throw err;
-      }
-      return reply.status(201).send(file);
     },
   );
 

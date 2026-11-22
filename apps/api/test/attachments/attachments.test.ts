@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { PassThrough } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { cleanFileName, NOTE_LIMITS, type Attachment } from '@roadmap/shared';
 import type { AttachmentDoc, AuditEventDoc, ProjectDoc, UserDoc } from '../../src/db/types.ts';
@@ -39,20 +40,43 @@ class RecordingStore extends MemoryObjectStore {
   }
 }
 
+/** A scanner that, while `gate` is set, waits on it after telling `reached`. */
+class GatedScanner implements Scanner {
+  readonly #inner = new FakeScanner();
+  gate: Promise<void> | null = null;
+  reached: (() => void) | null = null;
+  async scan(body: Buffer): Promise<ScanResult> {
+    calls.push('scan');
+    this.reached?.();
+    if (this.gate) await this.gate;
+    return this.#inner.scan(body);
+  }
+}
+
 let t: TestApp;
 let rec: TestApp;
 let limited: TestApp;
+let single: TestApp;
+let slow: TestApp;
 let store: RecordingStore;
+let singleStore: RecordingStore;
+let gated: GatedScanner;
 beforeAll(async () => {
   t = await makeTestApp({ now });
   store = new RecordingStore('http://localhost:5173');
   rec = await makeTestApp({ objectStore: store, scanner: new RecordingScanner() });
-  limited = await makeTestApp({ maxFilesPerItem: 1 });
+  limited = await makeTestApp({ maxFilesPerItem: 1, maxConcurrentUploads: 10 });
+  singleStore = new RecordingStore('http://localhost:5173');
+  gated = new GatedScanner();
+  single = await makeTestApp({ objectStore: singleStore, scanner: gated, maxConcurrentUploads: 1 });
+  slow = await makeTestApp({ maxConcurrentUploads: 1, uploadReadTimeoutMs: 100 });
 }, 120_000);
 afterAll(async () => {
   await t?.close();
   await rec?.close();
   await limited?.close();
+  await single?.close();
+  await slow?.close();
 });
 
 type Who = 'O' | 'A' | 'C' | 'D';
@@ -255,6 +279,7 @@ describe('uploading', () => {
     expect(await w.records().countDocuments({ projectId: item._id })).toBe(1);
   });
 });
+
 
 describe('upload checks, in order', () => {
   test('FR-1.4: the scanner runs before the store; an infected file is 422 file_infected, never stored, and audited', async () => {
@@ -621,6 +646,7 @@ describe('Tenant isolation', () => {
   });
 });
 
+
 describe('sessions', () => {
   test('FR-1.4: signed out is 401; upload and delete without the CSRF token are 403 csrf', async () => {
     const w = await world();
@@ -639,5 +665,116 @@ describe('sessions', () => {
       expect(res.json()).toEqual({ error: 'csrf' });
     }
     expect(await w.records().countDocuments({ projectId: item._id })).toBe(1);
+    for (const res of [
+      await t.app.inject({ method: 'POST', url, headers: { 'content-type': contentType }, payload }),
+      await t.app.inject({ method: 'DELETE', url: `${url}/${file._id}` }),
+    ]) {
+      expect(res.statusCode).toBe(401);
+      expect(res.json()).toEqual({ error: 'unauthenticated' });
+    }
+    expect(await w.records().countDocuments({ projectId: item._id })).toBe(1);
   });
 });
+
+describe('uploads in flight', () => {
+  test('FR-1.4: while the only upload slot is taken another upload is 503 uploads_busy and is not read; after it, uploads work again', async () => {
+    const w = await world(single);
+    const item = await w.item();
+    let open!: () => void;
+    gated.gate = new Promise((r) => (open = r));
+    const reached = new Promise<void>((r) => (gated.reached = r));
+    calls.length = 0;
+    const first = w.upload('O', item._id, 'first.txt');
+    try {
+      await reached;
+      const second = await w.upload('O', item._id, 'second.txt');
+      expect(second.statusCode).toBe(503);
+      expect(second.json()).toEqual({ error: 'uploads_busy' });
+      expect(calls).toEqual(['scan']);
+    } finally {
+      gated.gate = null;
+      gated.reached = null;
+      open();
+    }
+    expect((await first).statusCode).toBe(201);
+    expect((await w.upload('O', item._id, 'third.txt')).statusCode).toBe(201);
+    expect(calls.filter((c) => c.startsWith('put '))).toHaveLength(2);
+    expect((await w.list('O', item._id)).json<{ attachments: Attachment[] }>().attachments.map((f) => f.name)).toEqual([
+      'first.txt',
+      'third.txt',
+    ]);
+  });
+
+  test('FR-1.4: the upload slot is released after every failure', async () => {
+    const w = await world(single);
+    const item = await w.item();
+    const archived = await w.item({ archived: true });
+    const cases: Array<{ name: string; run: () => ReturnType<typeof w.upload>; status: number; error: string }> = [
+      { name: 'infected', run: () => w.upload('O', item._id, 'v.com', EICAR), status: 422, error: 'file_infected' },
+      { name: 'scanner down', run: () => w.upload('O', item._id, 'd.txt', 'SCANNER-DOWN'), status: 503, error: 'scan_unavailable' },
+      {
+        name: 'too large',
+        run: () => w.upload('O', item._id, 'big.bin', Buffer.alloc(NOTE_LIMITS.fileBytes + 1)),
+        status: 413,
+        error: 'file_too_large',
+      },
+      { name: 'empty', run: () => w.upload('O', item._id, 'e.txt', ''), status: 422, error: 'empty_file' },
+      {
+        name: 'store failure',
+        run: async () => {
+          singleStore.failPut = true;
+          try {
+            return await w.upload('O', item._id);
+          } finally {
+            singleStore.failPut = false;
+          }
+        },
+        status: 500,
+        error: 'internal',
+      },
+      { name: 'transaction failure', run: () => w.upload('O', archived._id), status: 409, error: 'item_archived' },
+    ];
+    for (const c of cases) {
+      const failed = await c.run();
+      expect(failed.statusCode, c.name).toBe(c.status);
+      expect(failed.json(), c.name).toEqual({ error: c.error });
+      const next = await w.upload('O', item._id, `after ${c.name}.txt`);
+      expect(next.statusCode, `upload after ${c.name}`).toBe(201);
+    }
+    expect(await w.records().countDocuments({ projectId: item._id })).toBe(cases.length);
+  });
+
+  test('FR-1.4: a body that stalls past the time limit is 408 upload_timeout, nothing is stored, and the slot is released', async () => {
+    const w = await world(slow);
+    const item = await w.item();
+    const { payload, contentType } = form([{ name: 'file', fileName: 'stall.txt', body: Buffer.alloc(64 * 1024, 1) }]);
+    const body = new PassThrough();
+    body.write(payload.subarray(0, payload.length - 1000));
+    try {
+      const res = await slow.app.inject({
+        method: 'POST',
+        url: w.base(item._id),
+        headers: { ...w.headers('O'), 'content-type': contentType },
+        payload: body,
+      });
+      expect(res.statusCode).toBe(408);
+      expect(res.json()).toEqual({ error: 'upload_timeout' });
+    } finally {
+      body.end();
+    }
+    expect(await w.records().countDocuments({ projectId: item._id })).toBe(0);
+    expect([...slow.files.objects.keys()].filter((k) => k.startsWith(`${w.tenantId}/`))).toEqual([]);
+    expect((await w.upload('O', item._id)).statusCode).toBe(201);
+  });
+
+  test('FR-1.4: five uploads at once to an item with room for one end with one file', async () => {
+    const w = await world(limited);
+    const item = await w.item();
+    const results = await Promise.all([1, 2, 3, 4, 5].map((i) => w.upload('O', item._id, `${i}.txt`)));
+    expect(results.map((r) => r.statusCode).sort()).toEqual([201, 422, 422, 422, 422]);
+    for (const r of results.filter((x) => x.statusCode === 422)) expect(r.json()).toEqual({ error: 'too_many_files' });
+    expect(await w.records().countDocuments({ projectId: item._id })).toBe(1);
+    expect([...limited.files.objects.keys()].filter((k) => k.startsWith(`${w.tenantId}/`))).toHaveLength(1);
+  });
+});
+

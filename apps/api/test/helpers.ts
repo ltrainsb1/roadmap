@@ -112,6 +112,10 @@ export interface TestAppOptions {
   scanner?: Scanner;
   /** Replaces the per-item file limit. */
   maxFilesPerItem?: number;
+  /** Replaces how many uploads the app reads at once. */
+  maxConcurrentUploads?: number;
+  /** Replaces how long the app waits for an upload's body. */
+  uploadReadTimeoutMs?: number;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -151,6 +155,8 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     ...(opts.maxProjectItems !== undefined ? { maxProjectItems: opts.maxProjectItems } : {}),
     ...(opts.maxNotesPerItem !== undefined ? { maxNotesPerItem: opts.maxNotesPerItem } : {}),
     ...(opts.maxFilesPerItem !== undefined ? { maxFilesPerItem: opts.maxFilesPerItem } : {}),
+    ...(opts.maxConcurrentUploads !== undefined ? { maxConcurrentUploads: opts.maxConcurrentUploads } : {}),
+    ...(opts.uploadReadTimeoutMs !== undefined ? { uploadReadTimeoutMs: opts.uploadReadTimeoutMs } : {}),
   });
   opts.routes?.(app);
 

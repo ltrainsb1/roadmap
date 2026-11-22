@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { field, seedNote, seedProject, useCspGuard } from './helpers.ts';
+import { expectNoA11yViolations, field, seedNote, seedProject, useCspGuard } from './helpers.ts';
 import { createSnapshotByApi, expect, SNAPSHOT_PASSWORD, strangerContext, test, type ApiCall } from './fixtures.ts';
 
 useCspGuard();
@@ -12,9 +12,12 @@ test.beforeEach(({ isMobile }) => {
   test.skip(isMobile, 'one PDF layout serves every device; the desktop project covers it');
 });
 
-/** The as-of date the header and footer show: the API's UTC date, which createSnapshotByApi sends. */
-const asOfText = () =>
-  `As of ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`))}`;
+/** Today's UTC date, read once per test before its snapshot is made, so a run that crosses midnight cannot disagree. */
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** The as-of date the header and footer show for a snapshot made with `asOf`. */
+const asOfText = (asOf: string) =>
+  `As of ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${asOf}T00:00:00Z`))}`;
 
 /** Each page's text, with runs of white space made one space. */
 async function pdfPages(bytes: Buffer): Promise<string[]> {
@@ -88,13 +91,14 @@ async function seeded(call: ApiCall, roadmapId: string) {
 
 test('FR-3.4: Download PDF on the list gives a PDF with the roadmap name, the as-of date, every item title and the notes', async ({ browser, call, owner, roadmap }) => {
   await seeded(call, roadmap.id);
-  const linkId = await createSnapshotByApi(call, roadmap.id, { include: { notes: true, assignees: true } });
+  const asOf = today();
+  const linkId = await createSnapshotByApi(call, roadmap.id, { include: { notes: true, assignees: true }, asOf });
   const { context, page } = await openSnapshot(browser, linkId, 'list');
 
   const pages = await pdfPages(await downloadPdf(page));
   const text = pages.join(' ');
   expect(pages[0]).toContain(roadmap.name);
-  expect(pages[0]).toContain(asOfText());
+  expect(pages[0]).toContain(asOfText(asOf));
   expect(pages[0]).toContain('Times are in UTC.');
   for (const title of ['Launch site', 'Design', 'Hire']) expect(text).toContain(title);
   for (const part of ['Description', 'Milestones', 'Links', 'Blocked by', 'Notes', 'Assigned to']) expect(text).toContain(part);
@@ -102,7 +106,7 @@ test('FR-3.4: Download PDF on the list gives a PDF with the roadmap name, the as
   expect(text).toContain('Agreed on scope');
   expect(text).toContain(owner.name);
   expect(text).toContain('Spec (https://example.com/spec)');
-  expect(pages[0]).toContain(`${roadmap.name} · ${asOfText()} · Page 1 of ${pages.length}`);
+  expect(pages[0]).toContain(`${roadmap.name} · ${asOfText(asOf)} · Page 1 of ${pages.length}`);
   // A page to download, not to use: no tabs or buttons are printed.
   expect(text).not.toContain('Download PDF');
   expect(text).not.toContain('Timeline');
@@ -114,17 +118,18 @@ test('FR-3.4: Download PDF on the timeline gives a one-page-wide PDF with every 
   // A long run, so the timeline is far wider than the page on screen.
   const long = await seedProject(call, roadmap.id, 'Ten-year plan');
   await call('PATCH', `/api/roadmaps/${roadmap.id}/projects/${long}`, { version: 1, startDate: '2020-01-01', endDate: '2030-12-31' });
-  const linkId = await createSnapshotByApi(call, roadmap.id);
+  const asOf = today();
+  const linkId = await createSnapshotByApi(call, roadmap.id, { asOf });
   const { context, page } = await openSnapshot(browser, linkId, 'timeline');
 
   const pages = await pdfPages(await downloadPdf(page));
   const text = pages.join(' ');
   expect(pages[0]).toContain(roadmap.name);
-  expect(pages[0]).toContain(asOfText());
+  expect(pages[0]).toContain(asOfText(asOf));
   for (const title of ['Launch site', 'Design', 'Hire', 'Ten-year plan']) expect(text).toContain(title);
   expect(text).toContain('As of');
   expect(text).not.toContain('Zoom');
-  expect(pages[0]).toContain(`${roadmap.name} · ${asOfText()} · Page 1 of ${pages.length}`);
+  expect(pages[0]).toContain(`${roadmap.name} · ${asOfText(asOf)} · Page 1 of ${pages.length}`);
 
   // The page the service printed fits the printable width of A4 landscape (273 mm, about 1,031 px) with nothing past it.
   await page.setViewportSize({ width: 1031, height: 730 });
@@ -136,7 +141,7 @@ test('FR-3.4: Download PDF on the timeline gives a one-page-wide PDF with every 
   await context.close();
 });
 
-test('FR-3.5: the PDF of a snapshot made without notes or names contains neither', async ({ browser, call, owner, roadmap }) => {
+test('FR-3.5: the list and timeline PDFs of a snapshot made without notes or names contain neither', async ({ browser, call, owner, roadmap }) => {
   await seeded(call, roadmap.id);
   const linkId = await createSnapshotByApi(call, roadmap.id, { include: { notes: false, assignees: false } });
   const { context, page } = await openSnapshot(browser, linkId, 'list');
@@ -150,6 +155,14 @@ test('FR-3.5: the PDF of a snapshot made without notes or names contains neither
   expect(text).not.toContain('Times are in UTC.');
   expect(text).not.toContain('Assigned to');
   expect(text).not.toContain(owner.name);
+
+  await page.getByRole('navigation', { name: 'View' }).getByRole('link', { name: 'Timeline' }).click();
+  await expect(page).toHaveURL(`/s/${linkId}/timeline`);
+  const timeline = (await pdfPages(await downloadPdf(page))).join(' ');
+  expect(timeline).toContain('Launch site');
+  expect(timeline).not.toContain('Kick-off went well');
+  expect(timeline).not.toContain('Agreed on scope');
+  expect(timeline).not.toContain(owner.name);
   await context.close();
 });
 
@@ -176,16 +189,52 @@ test('FR-3.4: 200 items with long titles and 300 notes still make a PDF of more 
     const batch = Array.from({ length: 10 }, (_, i) => start + i);
     await Promise.all(batch.map((n) => seedNote(call, roadmap.id, ids[n % 200]!, `Note ${String(n).padStart(3, '0')} says the work is on track.`)));
   }
-  const linkId = await createSnapshotByApi(call, roadmap.id, { include: { notes: true, assignees: true } });
+  const asOf = today();
+  const linkId = await createSnapshotByApi(call, roadmap.id, { include: { notes: true, assignees: true }, asOf });
   const { context, page } = await openSnapshot(browser, linkId, 'list');
 
   const pages = await pdfPages(await downloadPdf(page));
   expect(pages.length).toBeGreaterThan(1);
-  pages.forEach((p, i) => expect(p).toContain(`${roadmap.name} · ${asOfText()} · Page ${i + 1} of ${pages.length}`));
+  pages.forEach((p, i) => expect(p).toContain(`${roadmap.name} · ${asOfText(asOf)} · Page ${i + 1} of ${pages.length}`));
   const text = pages.join(' ');
   for (let n = 0; n < 200; n++) expect(text).toContain(`Item ${String(n).padStart(3, '0')}`);
   for (let n = 0; n < 300; n++) expect(text).toContain(`Note ${String(n).padStart(3, '0')}`);
   // Every page after the first starts with the column headings again.
   for (const p of pages.slice(1)) expect(p).toContain('Name Status Dates Priority Assigned to');
+  await context.close();
+});
+
+test('FR-3.4: "Preparing the PDF…", and the failed, busy and too-large messages beside Download PDF pass axe', async ({ browser, call, roadmap }) => {
+  await seeded(call, roadmap.id);
+  const linkId = await createSnapshotByApi(call, roadmap.id);
+  const { context, page } = await openSnapshot(browser, linkId, 'list');
+  const button = page.getByRole('button', { name: 'Download PDF' });
+
+  // Held: the request waits until the test lets it answer.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let answer: { status: number; json: { error: string } } = { status: 502, json: { error: 'pdf_failed' } };
+  await page.route(`**/api/snapshots/${linkId}/pdf`, async (route) => {
+    await held;
+    await route.fulfill(answer);
+  });
+  await button.click();
+  await expect(page.getByRole('status')).toHaveText('Preparing the PDF…');
+  await expect(button).toHaveAttribute('aria-disabled', 'true');
+  await expectNoA11yViolations(page);
+  release();
+
+  const messages: Array<[number, string, string]> = [
+    [502, 'pdf_failed', "Couldn't create the PDF. Try again."],
+    [503, 'pdf_busy', 'Other PDFs are being prepared. Try again in a minute.'],
+    [422, 'pdf_too_large', 'This snapshot is too large for a PDF. You can still read it here.'],
+  ];
+  for (const [status, error, text] of messages) {
+    answer = { status, json: { error } };
+    if (error !== 'pdf_failed') await button.click();
+    await expect(page.getByRole('alert')).toHaveText(text);
+    await expect(button).toBeEnabled();
+    await expectNoA11yViolations(page);
+  }
   await context.close();
 });

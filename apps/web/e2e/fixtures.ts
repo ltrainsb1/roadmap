@@ -69,11 +69,11 @@ export const SNAPSHOT_PASSWORD = 'a long enough password';
 export async function createSnapshotByApi(
   call: ApiCall,
   roadmapId: string,
-  opts: { name?: string; include?: { notes: boolean; assignees: boolean } } = {},
+  opts: { name?: string; include?: { notes: boolean; assignees: boolean }; asOf?: string } = {},
 ): Promise<string> {
   const { linkId } = await call<{ linkId: string }>('POST', `/api/roadmaps/${roadmapId}/snapshots`, {
     name: opts.name ?? 'Board pack',
-    asOf: new Date().toISOString().slice(0, 10),
+    asOf: opts.asOf ?? new Date().toISOString().slice(0, 10),
     password: SNAPSHOT_PASSWORD,
     expiresAt: null,
     include: opts.include ?? { notes: false, assignees: false },

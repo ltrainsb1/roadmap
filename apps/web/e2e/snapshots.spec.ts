@@ -158,6 +158,33 @@ test("FR-3.2: revoking asks first, removes the card and moves focus to the next 
   expect((await call<{ snapshots: unknown[] }>('GET', `/api/roadmaps/${roadmap.id}/snapshots`)).snapshots).toEqual([]);
 });
 
+test("FR-3.1: the Snapshots tab's load failure and a card's copy-failed line pass axe", async ({ page, call, roadmap }) => {
+  await seedSnapshot(call, roadmap.id, 'Board pack');
+  let failing = true;
+  await page.route(`**/api/roadmaps/${roadmap.id}/snapshots`, (route) =>
+    failing && route.request().method() === 'GET' ? route.fulfill({ status: 500, json: { error: 'unknown' } }) : route.continue(),
+  );
+  await page.goto(`/r/${roadmap.id}/snapshots`);
+  // The list query retries before it gives up, so this waits longer than usual.
+  await expect(page.getByRole('alert')).toHaveText("Couldn't load snapshots. Try again.", { timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expectNoA11yViolations(page);
+
+  failing = false;
+  await page.getByRole('button', { name: 'Try again' }).click();
+  const card = cardOf(page, 'Board pack');
+  await expect(card).toBeVisible();
+  // The clipboard refuses: the card says what to do and shows the link to copy by hand.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, 'writeText', { value: () => Promise.reject(new Error('denied')) });
+  });
+  await card.getByRole('button', { name: 'Copy link to Board pack' }).click();
+  await expect(card.getByRole('alert')).toHaveText("Couldn't copy the link. Select it and copy it yourself.");
+  await expect(card.getByRole('textbox', { name: 'Link' })).toBeVisible();
+  await expectNoA11yViolations(page);
+  await expectNoSidewaysScroll(page);
+});
+
 test('FR-3.1: a Contributor has no Snapshots tab, and the Snapshots address shows them what the Audit log address shows a Contributor', async ({
   browser,
   call,

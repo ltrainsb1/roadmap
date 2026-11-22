@@ -32,6 +32,9 @@ const ACTION_FILTERS: ReadonlyArray<[AuditActionName, string]> = [
   ['note.create', 'Note added'],
   ['note.update', 'Note edited'],
   ['note.delete', 'Note deleted'],
+  ['attachment.create', 'File added'],
+  ['attachment.delete', 'File removed'],
+  ['attachment.rejected', 'File blocked by the virus check'],
 ];
 
 export function AuditPage() {

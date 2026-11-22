@@ -145,4 +145,13 @@ describe('describeAuditEvent', () => {
     expect(describeAuditEvent(event({ action: 'note.update', target }), nameOf)).toBe('Maria edited a note.');
     expect(describeAuditEvent(event({ action: 'note.delete', target }), nameOf)).toBe('Maria deleted a note.');
   });
+
+  test('FR-1.4: file events say a file was added, removed, or refused by the virus check', () => {
+    const file = { type: 'attachment', id: 'a1' } as const;
+    expect(describeAuditEvent(event({ action: 'attachment.create', target: file, after: { name: 'x.txt' } }), nameOf)).toBe('Maria added a file.');
+    expect(describeAuditEvent(event({ action: 'attachment.delete', target: file }), nameOf)).toBe('Maria removed a file.');
+    expect(describeAuditEvent(event({ action: 'attachment.rejected', target: { type: 'project', id: 'p1' } }), nameOf)).toBe(
+      'Maria tried to add a file that failed the virus check.',
+    );
+  });
 });

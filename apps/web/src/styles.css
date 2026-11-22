@@ -1334,6 +1334,56 @@ select {
   white-space: pre-wrap;
 }
 
+/* Files in the item panel (FR-1.4): one row per file, its name downloads it. */
+.files-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.file-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.file-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 0;
+}
+.file-text {
+  flex: 1;
+  min-width: 0;
+}
+/* A long name wraps inside the row, never the panel. */
+.file-name {
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.file-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.file-remove {
+  flex: none;
+  min-width: var(--control-height);
+}
+.file-uploading .file-row {
+  color: var(--muted);
+}
+.files-section .alert {
+  margin: 8px 0;
+}
+.file-add {
+  margin-top: 8px;
+}
+.file-add .hint {
+  margin: 4px 0 0;
+}
+
 /* Notes in the item panel (FR-1.5): threads oldest first, replies indented under their note. */
 .notes-section {
   margin-top: 24px;

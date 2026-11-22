@@ -13,6 +13,7 @@ import {
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { errorCode, errorMessage, GENERIC_ERROR, ITEM_READ_ONLY, itemActionMessage, messageFor } from '../api/errors.ts';
+import { AttachmentsSection } from '../attachments/AttachmentsSection.tsx';
 import { NotesSection } from '../notes/NotesSection.tsx';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
@@ -77,7 +78,7 @@ interface PanelProps {
   onSetPriorityLabel: (itemId: string, label: PriorityLabel | null) => void;
   /** Tells the page whether the form, or a note box, has changes that are not saved. */
   onDirtyChange: (dirty: boolean) => void;
-  /** The signed-in person's time zone, for the times on notes. */
+  /** The signed-in person's time zone, for the times on notes and files. */
   timeZone: string;
 }
 
@@ -350,6 +351,7 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
           {saved ? 'Saved.' : ''}
         </div>
       </form>
+      <AttachmentsSection roadmapId={roadmapId} item={item} editable={editable} timeZone={timeZone} />
       <NotesSection
         roadmapId={roadmapId}
         item={item}

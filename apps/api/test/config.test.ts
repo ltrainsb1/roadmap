@@ -65,6 +65,7 @@ describe('loadConfig', () => {
       scanTimeoutMs: 30000,
       pdf: 'fake',
       pdfTimeoutMs: 60000,
+      trustedProxyCidrs: [],
     });
   });
 
@@ -130,6 +131,7 @@ describe('loadConfig: files and scanner (FR-1.4)', () => {
     CLAMD_HOST: 'clamav',
     PDF: 'service',
     PDF_URL: 'http://pdf:3000',
+    TRUSTED_PROXY_CIDR: '172.30.255.0/24',
   };
 
   test('FILES=local needs FILES_DIR and FILES_SIGNING_KEY', () => {
@@ -217,11 +219,46 @@ describe('loadConfig: PDFs (FR-3.4)', () => {
       S3_BUCKET: 'roadmap-files',
       SCANNER: 'clamd',
       CLAMD_HOST: 'clamav',
+      TRUSTED_PROXY_CIDR: '172.30.255.0/24',
     };
     expect(loadConfig({ ...production, PDF: 'service', PDF_URL: 'http://pdf:3000' }).pdf).toBe('service');
     for (const over of [{ PDF: 'fake' }, { PDF: undefined }]) {
       expect(() => loadConfig({ ...production, ...over }), JSON.stringify(over)).toThrow(ConfigError);
       expect(() => loadConfig({ ...production, ...over }), JSON.stringify(over)).toThrow(/PDF: must be service/);
+    }
+  });
+});
+
+describe('loadConfig: the trusted proxy (FR-3.6)', () => {
+  const production = {
+    ...valid,
+    FILES_DIR: undefined,
+    FILES_SIGNING_KEY: undefined,
+    NODE_ENV: 'production',
+    FILES: 's3',
+    S3_BUCKET: 'roadmap-files',
+    SCANNER: 'clamd',
+    CLAMD_HOST: 'clamav',
+    PDF: 'service',
+    PDF_URL: 'http://pdf:3200',
+  };
+
+  test('FR-3.6: production needs TRUSTED_PROXY_CIDR', () => {
+    expect(() => loadConfig(production)).toThrow(ConfigError);
+    expect(() => loadConfig(production)).toThrow(/TRUSTED_PROXY_CIDR: required in production/);
+    expect(loadConfig({ ...production, TRUSTED_PROXY_CIDR: '172.30.255.0/24' }).trustedProxyCidrs).toEqual([
+      '172.30.255.0/24',
+    ]);
+  });
+
+  test('FR-3.6: TRUSTED_PROXY_CIDR is one CIDR or a comma-separated list, IPv4 or IPv6', () => {
+    expect(loadConfig(valid).trustedProxyCidrs).toEqual([]);
+    expect(loadConfig({ ...valid, TRUSTED_PROXY_CIDR: ' 10.0.0.0/8 , fd00::/8' }).trustedProxyCidrs).toEqual([
+      '10.0.0.0/8',
+      'fd00::/8',
+    ]);
+    for (const bad of ['', 'nope', '10.0.0.1', '10.0.0.0/33', '10.0.0.0/', '300.0.0.0/8', 'fd00::/129', '10.0.0.0/8,']) {
+      expect(() => loadConfig({ ...valid, TRUSTED_PROXY_CIDR: bad }), bad).toThrow(/TRUSTED_PROXY_CIDR/);
     }
   });
 });

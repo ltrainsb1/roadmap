@@ -38,6 +38,7 @@ import { createObjectStore, LocalObjectStore, MemoryObjectStore, type ObjectStor
 import { createScanner, type Scanner } from './files/scanner.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { authPlugin } from './policy/hook.ts';
+import { addressMatcher } from './trusted-proxy.ts';
 
 export interface AppDeps {
   config: Config;
@@ -81,14 +82,16 @@ const RATE_LIMITED_ROUTES = new Set(['/api/snapshots/:linkId/unlock']);
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const production = deps.config.nodeEnv === 'production';
   // In production Caddy is the single proxy in front of the API and appends the client address to
-  // X-Forwarded-For. Trust that one hop only: entries the client supplied sit further left and must not count.
-  // (A numeric trustProxy is not used: this Fastify version treats a bare hop count as "trust nobody".)
-  // It trusts whatever peer is directly connected, whoever that is. That is safe only because the API port is
-  // not published: Caddy, on the Compose network, is the only thing that can connect.
-  const trustOneHop = (_address: string, hop: number) => hop < 1;
+  // X-Forwarded-For. Trust that one hop only (entries the client supplied sit further left and must not count), and
+  // only when the connected peer is inside TRUSTED_PROXY_CIDR, the network Caddy alone shares with the API. Any other
+  // peer (the PDF service, which also reaches the API directly) is taken at its own address, whatever it sends.
+  // (A numeric trustProxy is not used: this Fastify version treats a bare hop count as "trust nobody". The CIDR form
+  // is not used either: it would trust every hop inside the range, not just the first.)
+  const isTrustedProxy = addressMatcher(deps.config.trustedProxyCidrs);
+  const trustCaddyOneHop = (address: string, hop: number) => hop < 1 && isTrustedProxy(address);
   const app = Fastify({
     logger: production ? { serializers: { req: serializeRequest } } : false,
-    trustProxy: production ? trustOneHop : false,
+    trustProxy: production ? trustCaddyOneHop : false,
   });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);

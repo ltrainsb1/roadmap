@@ -4,7 +4,8 @@ import { makeTestApp, type TestApp } from './helpers.ts';
 let t: TestApp;
 beforeAll(async () => {
   t = await makeTestApp({
-    env: { NODE_ENV: 'production' },
+    // Production config needs the production drivers named; the test app still gets the memory store and fake scanner.
+    env: { NODE_ENV: 'production', FILES: 's3', S3_BUCKET: 'unused', SCANNER: 'clamd', CLAMD_HOST: 'unused' },
     routes: (app) => {
       app.get('/api/t/ip', { config: { auth: { level: 'public' } } }, (req) => ({ ip: req.ip }));
     },

@@ -28,6 +28,9 @@ import { registerPriorityRoutes } from './projects/priority-routes.ts';
 import { registerLifecycleRoutes } from './projects/lifecycle-routes.ts';
 import { registerProjectRoutes } from './projects/routes.ts';
 import { registerRoadmapRoutes } from './roadmaps/routes.ts';
+import { registerLocalFileRoutes } from './files/local-routes.ts';
+import { createObjectStore, LocalObjectStore, MemoryObjectStore, type ObjectStore } from './files/object-store.ts';
+import type { Scanner } from './files/scanner.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { authPlugin } from './policy/hook.ts';
 
@@ -46,6 +49,10 @@ export interface AppDeps {
   maxProjectItems?: number;
   /** Most notes one item may hold; defaults to the shared limit. Tests lower it. */
   maxNotesPerItem?: number;
+  /** Where attachments are kept; defaults to the store named in the config. */
+  objectStore?: ObjectStore;
+  /** Virus scanner for uploads; defaults to the scanner named in the config. Read by the attachment routes. */
+  scanner?: Scanner;
 }
 
 const AUTH_PREFIX = '/api/auth/';
@@ -150,6 +157,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerPriorityRoutes(app, { now });
   registerLifecycleRoutes(app);
   registerNoteRoutes(app, { now, ...(deps.maxNotesPerItem !== undefined && { maxNotesPerItem: deps.maxNotesPerItem }) });
+
+  const objectStore = deps.objectStore ?? createObjectStore(deps.config);
+  // Only stores that keep files on this server need the API to serve them; S3 links go straight to S3.
+  if (objectStore instanceof LocalObjectStore || objectStore instanceof MemoryObjectStore) {
+    registerLocalFileRoutes(app, objectStore);
+  }
 
   app.get('/api/openapi.json', { config: { auth: { level: 'public' } } }, () => app.swagger());
 

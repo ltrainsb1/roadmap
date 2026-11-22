@@ -26,6 +26,7 @@ const env = {
   NODE_ENV: 'test',
   MONGO_URI: 'mongodb://unused',
   APP_ORIGIN: 'https://roadmap.example.com',
+  FILES: 'memory',
   TOTP_ENC_KEY: Buffer.alloc(32, 1).toString('base64'),
   MAIL_FROM: 'Roadmap <no-reply@roadmap.example.com>',
 };

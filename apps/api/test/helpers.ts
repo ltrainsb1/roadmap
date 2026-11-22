@@ -14,6 +14,8 @@ import { connectDb, type Db } from '../src/db/client.ts';
 import { ensureIndexes } from '../src/db/indexes.ts';
 import { scoped } from '../src/db/scoped.ts';
 import type { MembershipDoc, NoteDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
+import { MemoryObjectStore, type ObjectStore } from '../src/files/object-store.ts';
+import { FakeScanner } from '../src/files/scanner.ts';
 import { MemoryMailer } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
@@ -70,6 +72,10 @@ export interface TestApp {
   config: Config;
   /** What the app emailed. */
   mail: MemoryMailer;
+  /** The app's object store, unless `objectStore` replaced it. */
+  files: MemoryObjectStore;
+  /** The app's virus scanner. */
+  scanner: FakeScanner;
   seed: Seeder;
   close(): Promise<void>;
 }
@@ -89,6 +95,8 @@ export interface TestAppOptions {
   maxProjectItems?: number;
   /** Replaces the per-item note limit. */
   maxNotesPerItem?: number;
+  /** Replaces the memory object store the app is given (`TestApp.files` is then unused by the app). */
+  objectStore?: ObjectStore;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -103,6 +111,8 @@ export const TEST_ENV = {
   TOTP_ENC_KEY: TEST_TOTP_KEY.toString('base64'),
   MAILER: 'memory',
   HIBP_ENABLED: 'false',
+  FILES: 'memory',
+  SCANNER: 'fake',
 };
 
 export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
@@ -112,10 +122,14 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   const { client, db } = await connectDb(mongo.uri, dbName);
   await ensureIndexes(db);
   const mail = new MemoryMailer();
+  const files = new MemoryObjectStore(config.appOrigin, opts.now);
+  const scanner = new FakeScanner();
   const app = await buildApp({
     config,
     db,
     mailer: mail,
+    objectStore: opts.objectStore ?? files,
+    scanner,
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
@@ -228,6 +242,8 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     db,
     config,
     mail,
+    files,
+    scanner,
     seed,
     async close() {
       await app.close();

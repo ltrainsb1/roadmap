@@ -36,8 +36,13 @@ export interface AttachmentRouteDeps {
 /** Each upload is held in memory (up to 25 MB, about twice that while it is copied), so only this many at once. */
 export const MAX_CONCURRENT_UPLOADS = 4;
 
-/** A body still arriving after this long is dropped, so a slow client can't hold a slot. */
-export const UPLOAD_READ_TIMEOUT_MS = 120_000;
+/**
+ * A body still arriving after this long is dropped, so a slow client can't hold a slot. 300 s lets 25 MB arrive at
+ * about 0.7 Mbit/s. Nothing in front cuts it sooner: Fastify's requestTimeout and connectionTimeout are 0 (off) and
+ * its keepAliveTimeout only applies between requests; Caddy has no read or write timeout on reverse_proxy and only
+ * drops an upload that stalls for 1 minute (read_body_idle, in recent Caddy 2 releases).
+ */
+export const UPLOAD_READ_TIMEOUT_MS = 300_000;
 
 const attachmentParams = projectParams.extend({ attachmentId: z.string().min(1).max(100) });
 const noContent = { 204: z.null().describe('No content') };

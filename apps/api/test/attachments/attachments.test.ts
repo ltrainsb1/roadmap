@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { cleanFileName, NOTE_LIMITS, type Attachment } from '@roadmap/shared';
 import type { AttachmentDoc, AuditEventDoc, ProjectDoc, UserDoc } from '../../src/db/types.ts';
+import { UPLOAD_READ_TIMEOUT_MS } from '../../src/attachments/routes.ts';
 import { contentDisposition, MemoryObjectStore } from '../../src/files/object-store.ts';
 import { EICAR, FakeScanner, type ScanResult, type Scanner } from '../../src/files/scanner.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
@@ -742,6 +743,12 @@ describe('uploads in flight', () => {
       expect(next.statusCode, `upload after ${c.name}`).toBe(201);
     }
     expect(await w.records().countDocuments({ projectId: item._id })).toBe(cases.length);
+  });
+
+  test('FR-1.4: by default an upload may take 300 seconds to arrive, enough for 25 MB at about 0.7 Mbit/s', () => {
+    expect(UPLOAD_READ_TIMEOUT_MS).toBe(300_000);
+    const bitsPerSecond = (NOTE_LIMITS.fileBytes * 8) / (UPLOAD_READ_TIMEOUT_MS / 1000);
+    expect(bitsPerSecond).toBeLessThan(750_000);
   });
 
   test('FR-1.4: a body that stalls past the time limit is 408 upload_timeout, nothing is stored, and the slot is released', async () => {

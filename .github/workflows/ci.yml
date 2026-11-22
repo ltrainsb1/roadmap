@@ -79,6 +79,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @roadmap/web exec playwright install --with-deps chromium
+      # The PDF service's Chromium tests, which reuse the browser installed above.
+      - run: TEST_PDF=chromium pnpm --filter @roadmap/pdf test
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: failure()

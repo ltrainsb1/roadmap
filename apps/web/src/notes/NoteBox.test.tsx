@@ -43,19 +43,29 @@ const list = () => screen.queryByRole('listbox', { name: 'People' });
 const options = () => within(list()!).queryAllByRole('option');
 const active = (box: HTMLElement) => box.getAttribute('aria-activedescendant');
 const submit = () => fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+/** What the box's polite live region says. */
+const said = () => document.querySelector('.mention-status')?.textContent;
+const none = () => document.querySelector('.mention-none');
+const POPUP_ATTRS = ['aria-autocomplete', 'aria-haspopup', 'aria-controls', 'aria-activedescendant'];
 
 describe('NoteBox @ list', () => {
   test('FR-1.5: typing "@a" opens a listbox named "People" with the matches and the first one active', () => {
     const { box } = setup();
-    expect(box.getAttribute('role')).toBeNull();
-    expect(box.hasAttribute('aria-expanded')).toBe(false);
+    for (const attr of POPUP_ATTRS) expect(box.hasAttribute(attr)).toBe(false);
+    expect(said()).toBe('');
     type(box, '@a');
     const people = list();
     expect(people).toBeTruthy();
     expect(options().map((o) => o.textContent)).toEqual(['Ann Lee', 'Bo Park', 'Cara Diaz']);
-    expect(screen.getByRole('combobox', { name: 'Add a note' })).toBe(box);
-    expect(box.getAttribute('aria-expanded')).toBe('true');
+    // The text box keeps its role; it points at the list.
+    expect(screen.getByRole('textbox', { name: 'Add a note' })).toBe(box);
+    expect(box.hasAttribute('role')).toBe(false);
+    expect(box.hasAttribute('aria-expanded')).toBe(false);
+    expect(box.getAttribute('aria-autocomplete')).toBe('list');
+    expect(box.getAttribute('aria-haspopup')).toBe('listbox');
     expect(box.getAttribute('aria-controls')).toBe(people!.id);
+    expect(said()).toBe('Ann Lee');
+    expect(document.querySelector('.mention-status')!.getAttribute('aria-live')).toBe('polite');
     expect(active(box)).toBe(options()[0]!.id);
     expect(options().map((o) => o.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false']);
     // Rendered next to the text box, placed in window coordinates.
@@ -69,6 +79,7 @@ describe('NoteBox @ list', () => {
     const ids = options().map((o) => o.id);
     fireEvent.keyDown(box, { key: 'ArrowDown' });
     expect(active(box)).toBe(ids[1]);
+    expect(said()).toBe('Bo Park');
     fireEvent.keyDown(box, { key: 'ArrowDown' });
     expect(active(box)).toBe(ids[2]);
     fireEvent.keyDown(box, { key: 'ArrowDown' });
@@ -84,6 +95,47 @@ describe('NoteBox @ list', () => {
     expect(active(box)).toBe(ids[1]);
   });
 
+  test('FR-1.5: the active option\'s id follows the person, so a new top match is pointed at and announced', () => {
+    const { box } = setup();
+    type(box, '@a');
+    const first = active(box);
+    expect(first).toBe(screen.getByRole('option', { name: 'Ann Lee' }).id);
+    expect(first).toContain('u-ann');
+    type(box, '@b');
+    expect(active(box)).not.toBe(first);
+    expect(active(box)).toBe(screen.getByRole('option', { name: 'Bo Park' }).id);
+    expect(said()).toBe('Bo Park');
+  });
+
+  test('FR-1.5: picking a name that is already in place puts the caret after it, and the next keystroke is left alone', () => {
+    const { box } = setup();
+    type(box, '@Ann Lee there');
+    box.setSelectionRange(8, 8);
+    fireEvent.keyUp(box, { key: 'ArrowLeft' });
+    expect(options().map((o) => o.textContent)).toEqual(['Ann Lee']);
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(box.value).toBe('@Ann Lee there');
+    expect(box.selectionStart).toBe(9);
+    expect(list()).toBeNull();
+    fireEvent.change(box, { target: { value: '@Ann Lee xthere', selectionStart: 10, selectionEnd: 10 } });
+    expect(box.selectionStart).toBe(10);
+  });
+
+  test('FR-1.5: pressing the list outside an option (its scrollbar, padding or message) keeps it open and focus in the box', () => {
+    const { box } = setup();
+    type(box, '@a');
+    const picker = document.querySelector('.mention-picker')!;
+    expect(fireEvent.mouseDown(picker)).toBe(false);
+    fireEvent.mouseUp(picker);
+    expect(list()).toBeTruthy();
+    expect(document.activeElement).toBe(box);
+    expect(options().every((o) => !o.hasAttribute('tabindex'))).toBe(true);
+    type(box, '@zzz');
+    expect(fireEvent.mouseDown(none()!)).toBe(false);
+    fireEvent.mouseUp(none()!);
+    expect(list()).toBeTruthy();
+  });
+
   test('FR-1.5: Enter inserts the name and does not submit', () => {
     const { box, onSubmit } = setup();
     type(box, 'hi @a');
@@ -92,8 +144,8 @@ describe('NoteBox @ list', () => {
     expect(box.value).toBe('hi @Bo Park ');
     expect(box.selectionStart).toBe(12);
     expect(list()).toBeNull();
-    expect(box.getAttribute('role')).toBeNull();
-    expect(box.hasAttribute('aria-activedescendant')).toBe(false);
+    for (const attr of POPUP_ATTRS) expect(box.hasAttribute(attr)).toBe(false);
+    expect(said()).toBe('');
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -126,7 +178,8 @@ describe('NoteBox @ list', () => {
   test('FR-1.5: "No one matches." shows for "@zzz" and Enter then adds a new line as usual', () => {
     const { box, onSubmit } = setup();
     type(box, '@zzz');
-    expect(screen.getByText('No one matches.')).toBeTruthy();
+    expect(none()?.textContent).toBe('No one matches.');
+    expect(said()).toBe('No one matches.');
     expect(options()).toEqual([]);
     expect(box.hasAttribute('aria-activedescendant')).toBe(false);
     expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(true);
@@ -204,6 +257,7 @@ describe('NoteBox @ list', () => {
       const { box, onSubmit } = setup({ members: twins });
       type(box, '@ann');
       expect(options().map((o) => o.textContent)).toEqual(['Ann Lee ann.one@example.com', 'Ann Lee ann.two@example.com']);
+      expect(said()).toBe('Ann Lee ann.one@example.com');
       // The only Bo shows no email.
       type(box, '@b');
       expect(options().map((o) => o.textContent)).toEqual(['Bo Park']);
@@ -245,7 +299,7 @@ describe('NoteBox @ list', () => {
       submit();
       expect(onSubmit).toHaveBeenLastCalledWith('ask @Ann Lee and @Old Name today', ['u-ann2']);
       type(box, '@Ol');
-      expect(screen.getByText('No one matches.')).toBeTruthy();
+      expect(none()?.textContent).toBe('No one matches.');
     });
   });
 

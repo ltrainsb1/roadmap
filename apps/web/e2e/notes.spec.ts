@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 import { apiAs, expectNoA11yViolations, field, seedNote, seedProject, useCspGuard } from './helpers.ts';
 import { expect, joinByApi, test } from './fixtures.ts';
@@ -302,6 +303,9 @@ test('FR-1.5: at 375 px a note with a long unbroken word and a wide code block c
   await expect(notes.locator('pre')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   await expectNoA11yViolations(page);
+  // With the list open, the best-practice rules pass too (no role is put on the textarea).
+  const best = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']).analyze();
+  expect(best.violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(' ')) }))).toEqual([]);
 
   // Reply, Edit and Delete are 44 by 44 px targets.
   const shown = noteWith(notes, 'Word');
@@ -368,13 +372,19 @@ test('FR-1.5: a Contributor types "@", picks an Admin with the keyboard and adds
   await p.keyboard.type('Over to @');
   const people = p.getByRole('listbox', { name: 'People', exact: true });
   await expect(people).toBeVisible();
-  const combo = notes.getByRole('combobox', { name: 'Add a note', exact: true });
-  await expect(combo).toHaveAttribute('aria-expanded', 'true');
-  await expect(combo).toHaveAttribute('aria-controls', (await people.getAttribute('id'))!);
+  // The box stays a text box and points at the list.
+  await expect(box).not.toHaveAttribute('role');
+  await expect(box).not.toHaveAttribute('aria-expanded');
+  await expect(box).toHaveAttribute('aria-autocomplete', 'list');
+  await expect(box).toHaveAttribute('aria-haspopup', 'listbox');
+  await expect(box).toHaveAttribute('aria-controls', (await people.getAttribute('id'))!);
   await expectNoA11yViolations(p);
-  await arrowTo(combo, p, 'chief user');
+  await arrowTo(box, p, 'chief user');
+  await expect(notes.locator('.mention-status')).toHaveText('chief user');
   await p.keyboard.press('Enter');
   await expect(people).toHaveCount(0);
+  await expect(box).not.toHaveAttribute('aria-controls');
+  await expect(notes.locator('.mention-status')).toHaveText('');
   await expect(box).toHaveValue('Over to @chief user ');
   await expect(box).toBeFocused();
   await p.keyboard.type('please');
@@ -428,6 +438,7 @@ test('FR-1.5: at 375 px the @ list is inside the viewport and passes axe, a tap 
   await box.fill('');
   await page.keyboard.type('@zzz');
   await expect(frame).toContainText('No one matches.');
+  await expect(notes.locator('.mention-status')).toHaveText('No one matches.');
   await page.keyboard.press('Escape');
   await expect(frame).toHaveCount(0);
   await expect(box).toHaveValue('@zzz');

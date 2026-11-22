@@ -28,10 +28,11 @@ interface NoteBoxProps {
   onDirtyChange?: (dirty: boolean) => void;
   /** Focus the text when the box opens. */
   autoFocus?: boolean;
-  /** Text handed over from another box: each new `n` adds it after a blank line (or fills an empty box) and focuses. */
-  inject?: { text: string; n: number } | undefined;
-  /** Called with the new text on every change the person makes to it. */
-  onType?: (text: string) => void;
+  /** Text handed over from another box: each new `n` adds it after a blank line (or fills an empty box) and focuses.
+   * `picks` are who was picked there for each name. */
+  inject?: { text: string; n: number; picks?: ReadonlyMap<string, string> } | undefined;
+  /** Called with the new text, and who is picked for each name in it, on every change the person makes. */
+  onType?: (text: string, picks: ReadonlyMap<string, string>) => void;
 }
 
 /** A labelled text box for a note, with the Markdown hint, its buttons and any error. */
@@ -52,7 +53,9 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
   const errorId = `${ownId}-error`;
   const box = useRef<HTMLTextAreaElement>(null);
   const listId = `${ownId}-people`;
-  const optionId = useCallback((index: number) => `${ownId}-person-${index}`, [ownId]);
+  // From the person, not the place in the list, so a new top match is a new active option.
+  const optionId = useCallback((member: MemberName) => `${ownId}-person-${member.userId}`, [ownId]);
+  const statusId = `${ownId}-people-status`;
 
   const query = caret === null ? null : mentionQueryAt(text, caret);
   const open =
@@ -67,6 +70,13 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
   }, [members]);
   const queryKey = open ? `${query.start}:${query.query}` : '';
   const activeIndex = active.key === queryKey ? active.index : 0;
+  const activeMember = open ? matches[activeIndex] : undefined;
+  // Said by the polite live region: the active person, as the list shows them, or that no one matches.
+  const announcement = !open
+    ? ''
+    : activeMember
+      ? activeMember.name + (sharedNames.has(activeMember.name) && activeMember.email ? ` ${activeMember.email}` : '')
+      : 'No one matches.';
 
   useLayoutEffect(() => {
     if (pendingCaret.current === null) return;
@@ -98,14 +108,16 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
     for (const [name, userId] of picked.current) {
       if (mentionRanges(value, [{ name, userId }]).length === 0) picked.current.delete(name);
     }
-    onType?.(value);
+    onType?.(value, picked.current);
   };
 
   const pick = (member: MemberName) => {
     if (!query) return;
     const next = insertMention(text, query, member.name);
     if (!picked.current.has(member.name)) picked.current.set(member.name, member.userId);
-    pendingCaret.current = next.caret;
+    // Same text (the name was already in place): no render will apply the caret, so apply it now.
+    if (next.text === text) box.current?.setSelectionRange(next.caret, next.caret);
+    else pendingCaret.current = next.caret;
     change(next.text, next.caret);
     setDismissed(mentionQueryAt(next.text, next.caret));
     box.current?.focus();
@@ -148,6 +160,7 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
     if (!inject || inject.n === injected.current) return;
     injected.current = inject.n;
     setText((t) => (t.trim() === '' ? inject.text : `${t}\n\n${inject.text}`));
+    for (const [name, userId] of inject.picks ?? []) if (!picked.current.has(name)) picked.current.set(name, userId);
     setCaret(null);
     box.current?.focus();
   }, [inject]);
@@ -176,11 +189,11 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
           value={text}
           aria-describedby={error ? `${hintId} ${errorId}` : hintId}
           aria-invalid={error ? true : undefined}
-          // A combobox only while the @ list is open.
-          role={open ? 'combobox' : undefined}
-          aria-expanded={open ? true : undefined}
+          // Stays a text box; while the @ list is open it points at it, and a live region says who is active.
+          aria-autocomplete={open ? 'list' : undefined}
+          aria-haspopup={open ? 'listbox' : undefined}
           aria-controls={open ? listId : undefined}
-          aria-activedescendant={open && matches.length > 0 ? optionId(activeIndex) : undefined}
+          aria-activedescendant={activeMember ? optionId(activeMember) : undefined}
           onChange={(e) => change(e.target.value, e.target.selectionStart)}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onKeyDown={onKeyDown}
@@ -200,6 +213,9 @@ export function NoteBox({ label, submitLabel, initial, initialMentions, members,
             onDismiss={dismiss}
           />
         )}
+        <div id={statusId} className="sr-only mention-status" aria-live="polite">
+          {announcement}
+        </div>
         <p id={hintId} className="hint">
           {NOTE_HINT}
         </p>

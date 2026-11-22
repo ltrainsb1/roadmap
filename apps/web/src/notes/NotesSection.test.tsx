@@ -562,6 +562,31 @@ describe('NotesSection', () => {
       expect(valueOf(newBox())).toBe('');
     });
 
+    test('FR-1.5: text handed over from a reply box keeps who was picked there', async () => {
+      const sent: unknown[] = [];
+      const twins = [
+        { userId: 'u-ann1', name: 'Ann Lee' },
+        { userId: 'u-ann2', name: 'Ann Lee' },
+      ];
+      serve([note({ id: 'n1', body: 'Top' })]);
+      const { client } = show({ members: twins });
+      await screen.findByText('Top');
+      fireEvent.click(within(articleWith('Top')).getByRole('button', { name: 'Reply' }));
+      const reply = screen.getByRole('textbox', { name: 'Reply to Bob' });
+      fireEvent.change(reply, { target: { value: 'ask @ann' } });
+      fireEvent.keyDown(reply, { key: 'ArrowDown' });
+      fireEvent.keyDown(reply, { key: 'Enter' });
+      expect(valueOf(reply)).toBe('ask @Ann Lee ');
+      serve([], (_m, _p, body) => {
+        sent.push(body);
+        return new Promise(() => undefined);
+      });
+      await act(() => client.invalidateQueries());
+      await waitFor(() => expect(valueOf(newBox())).toBe('ask @Ann Lee '));
+      fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+      await waitFor(() => expect(sent).toEqual([{ body: 'ask @Ann Lee ', mentionIds: ['u-ann2'], parentId: null }]));
+    });
+
     test('FR-1.5: "Note added." clears when the person next types in a note box', async () => {
       serve([], () => Promise.resolve(note({ id: 'n1', body: 'One', authorId: ME })));
       show();

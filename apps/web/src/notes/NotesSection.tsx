@@ -97,7 +97,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
   const [pending, setPending] = useState<Record<BoxKey, boolean>>({ new: false, reply: false, edit: false });
   // A reply or edit whose note vanished: its text moves to the bottom box, with this alert above it.
   const [goneNotice, setGoneNotice] = useState(false);
-  const [handover, setHandover] = useState<{ text: string; n: number }>();
+  const [handover, setHandover] = useState<{ text: string; n: number; picks?: ReadonlyMap<string, string> }>();
   // Shown under an open box with changed text when another Reply or Edit is chosen.
   const [finishFirst, setFinishFirst] = useState(false);
   const typed = useCallback(() => {
@@ -106,9 +106,12 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
   }, []);
   // What the person has typed in the open reply or edit box, to hand over if its note vanishes in a refetch.
   const boxText = useRef<Partial<Record<'reply' | 'edit', string>>>({});
+  // And who was picked there for each name, so the handed-over mentions still mean the same people.
+  const boxPicks = useRef<Partial<Record<'reply' | 'edit', ReadonlyMap<string, string>>>>({});
   const typedIn = useMemo(() => {
-    const track = (key: 'reply' | 'edit') => (text: string) => {
+    const track = (key: 'reply' | 'edit') => (text: string, picks: ReadonlyMap<string, string>) => {
       boxText.current[key] = text;
+      boxPicks.current[key] = new Map(picks);
       typed();
     };
     return { reply: track('reply'), edit: track('edit') };
@@ -141,7 +144,8 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
     const text = boxText.current[open.kind] ?? '';
     const initial = open.kind === 'edit' ? open.note.body : '';
     if (text !== initial && text.trim() !== '') {
-      setHandover((h) => ({ text, n: (h?.n ?? 0) + 1 }));
+      const picks = boxPicks.current[open.kind];
+      setHandover((h) => ({ text, n: (h?.n ?? 0) + 1, picks }));
       setGoneNotice(true);
     }
     setOpen(null);
@@ -171,6 +175,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
     setFinishFirst(false);
     setErrors((e) => ({ ...e, reply: undefined, edit: undefined }));
     boxText.current = {};
+    boxPicks.current = {};
     setOpen(box);
   };
   const closeBox = () => {
@@ -199,7 +204,8 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
       if (gone && key !== 'new') {
         // The note is gone, so its box goes; what was typed moves to the bottom box rather than being lost.
         setOpen(null);
-        setHandover((h) => ({ text: body, n: (h?.n ?? 0) + 1 }));
+        const picks = boxPicks.current[key];
+        setHandover((h) => ({ text: body, n: (h?.n ?? 0) + 1, picks }));
         setGoneNotice(true);
       } else {
         setError(key, noteErrorMessage(err, body, key));
@@ -215,7 +221,10 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
     setStatus('');
     const saved = await attempt(key, body, () => add.mutateAsync({ body, mentionIds, parentId }));
     if (saved) {
-      if (key === 'reply') boxText.current.reply = '';
+      if (key === 'reply') {
+        boxText.current.reply = '';
+        boxPicks.current.reply = new Map();
+      }
       setGoneNotice(false);
       setStatus('Note added.');
     }

@@ -5,8 +5,8 @@ import { placeList } from '../ui/Menu.tsx';
 interface MentionPickerProps {
   /** The listbox's id, for the text box's `aria-controls`. */
   id: string;
-  /** The id of the option at `index`, for the text box's `aria-activedescendant`. */
-  optionId: (index: number) => string;
+  /** The id of a member's option, for the text box's `aria-activedescendant`. */
+  optionId: (member: MemberName) => string;
   /** The text box the list belongs to: it keeps focus, and the list is placed under it. */
   anchor: RefObject<HTMLTextAreaElement | null>;
   matches: readonly MemberName[];
@@ -67,22 +67,22 @@ export function MentionPicker({ id, optionId, anchor, matches, active, sharedNam
   }, [anchor]);
 
   return (
+    // Pressing anywhere in the list (an option, its padding, its scrollbar or its message) must not take focus from
+    // the text box, which would close it.
     <div
       ref={frame}
       className="mention-picker"
       style={{ position: 'fixed', top: place.top, left: place.left, maxHeight: place.maxHeight }}
+      onMouseDown={(e) => e.preventDefault()}
     >
       <ul id={id} role="listbox" aria-label="People" className="mention-list">
         {matches.map((m, i) => (
           <li
             key={m.userId}
-            id={optionId(i)}
+            id={optionId(m)}
             role="option"
             aria-selected={i === active}
-            tabIndex={-1}
             className="mention-option"
-            // Pressing an option must not take focus from the text box.
-            onMouseDown={(e) => e.preventDefault()}
             onClick={() => onPick(m)}
           >
             {m.name}

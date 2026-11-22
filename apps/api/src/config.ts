@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { z } from 'zod';
+import { RENDER_TOKEN_MS } from './snapshots/access.ts';
 
 export interface Config {
   nodeEnv: 'development' | 'test' | 'production';
@@ -63,20 +64,24 @@ const key32 = z.string().transform((v, ctx) => {
   return key;
 });
 
-/** One CIDR (IPv4 or IPv6, with its prefix length), as text. */
+/**
+ * One CIDR (IPv4 or IPv6, with its prefix length), as text. A range wider than /8 (IPv4) or /32 (IPv6) is refused:
+ * the proxy's network is never that big, and 0.0.0.0/0 or ::/0 would quietly trust every peer.
+ */
 function isCidr(text: string): boolean {
   const match = /^([^/]+)\/(\d{1,3})$/.exec(text);
   if (!match) return false;
   const version = isIP(match[1]!);
   const prefix = Number(match[2]);
-  return version !== 0 && prefix <= (version === 4 ? 32 : 128);
+  if (version === 4) return prefix >= 8 && prefix <= 32;
+  return version === 6 && prefix >= 32 && prefix <= 128;
 }
 
 const cidrList = z.string().transform((v, ctx) => {
   const cidrs = v.split(',').map((c) => c.trim());
   const bad = cidrs.filter((c) => !isCidr(c));
   if (bad.length > 0) {
-    ctx.addIssue({ code: 'custom', message: `must be CIDRs separated by commas, e.g. 172.30.255.0/24 (not ${JSON.stringify(bad.join(','))})` });
+    ctx.addIssue({ code: 'custom', message: `must be CIDRs separated by commas, no wider than /8 (IPv4) or /32 (IPv6), e.g. 10.254.254.0/24 (not ${JSON.stringify(bad.join(','))})` });
     return z.NEVER;
   }
   return cidrs;
@@ -123,6 +128,10 @@ function crossChecks(e: Env): string[] {
   if (e.FILES === 'local' && !e.FILES_SIGNING_KEY) issues.push('FILES_SIGNING_KEY: required when FILES=local');
   if (e.SCANNER === 'clamd' && !e.CLAMD_HOST) issues.push('CLAMD_HOST: required when SCANNER=clamd');
   if (e.PDF === 'service' && !e.PDF_URL) issues.push('PDF_URL: required when PDF=service');
+  // The render token the PDF service's browser carries must outlive the API's wait for that render.
+  if (e.PDF_TIMEOUT_MS >= RENDER_TOKEN_MS) {
+    issues.push(`PDF_TIMEOUT_MS: must be less than ${RENDER_TOKEN_MS}, the render token's lifetime (is ${e.PDF_TIMEOUT_MS})`);
+  }
   if (e.NODE_ENV === 'production') {
     if (e.FILES !== 's3') issues.push(`FILES: must be s3 in production (is ${e.FILES})`);
     if (e.SCANNER !== 'clamd') issues.push(`SCANNER: must be clamd in production (is ${e.SCANNER})`);

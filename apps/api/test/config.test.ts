@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { ConfigError, loadConfig } from '../src/config.ts';
+import { RENDER_TOKEN_MS } from '../src/snapshots/access.ts';
 
 const key = Buffer.alloc(32, 7).toString('base64');
 const valid = {
@@ -229,6 +230,15 @@ describe('loadConfig: PDFs (FR-3.4)', () => {
   });
 });
 
+test('FR-3.4: PDF_TIMEOUT_MS must end before the render token does, or a slow render would outlive its own token', () => {
+  expect(RENDER_TOKEN_MS).toBe(120_000);
+  for (const late of [String(RENDER_TOKEN_MS), String(RENDER_TOKEN_MS + 1), '600000']) {
+    expect(() => loadConfig({ ...valid, PDF_TIMEOUT_MS: late }), late).toThrow(ConfigError);
+    expect(() => loadConfig({ ...valid, PDF_TIMEOUT_MS: late }), late).toThrow(/PDF_TIMEOUT_MS: must be less than 120000/);
+  }
+  expect(loadConfig({ ...valid, PDF_TIMEOUT_MS: String(RENDER_TOKEN_MS - 1) }).pdfTimeoutMs).toBe(RENDER_TOKEN_MS - 1);
+});
+
 describe('loadConfig: the trusted proxy (FR-3.6)', () => {
   const production = {
     ...valid,
@@ -253,12 +263,23 @@ describe('loadConfig: the trusted proxy (FR-3.6)', () => {
 
   test('FR-3.6: TRUSTED_PROXY_CIDR is one CIDR or a comma-separated list, IPv4 or IPv6', () => {
     expect(loadConfig(valid).trustedProxyCidrs).toEqual([]);
-    expect(loadConfig({ ...valid, TRUSTED_PROXY_CIDR: ' 10.0.0.0/8 , fd00::/8' }).trustedProxyCidrs).toEqual([
+    expect(loadConfig({ ...valid, TRUSTED_PROXY_CIDR: ' 10.0.0.0/8 , fd00::/64' }).trustedProxyCidrs).toEqual([
       '10.0.0.0/8',
-      'fd00::/8',
+      'fd00::/64',
     ]);
     for (const bad of ['', 'nope', '10.0.0.1', '10.0.0.0/33', '10.0.0.0/', '300.0.0.0/8', 'fd00::/129', '10.0.0.0/8,']) {
       expect(() => loadConfig({ ...valid, TRUSTED_PROXY_CIDR: bad }), bad).toThrow(/TRUSTED_PROXY_CIDR/);
     }
+  });
+
+  test('FR-3.6: TRUSTED_PROXY_CIDR refuses a range wider than /8 (IPv4) or /32 (IPv6), so it cannot trust everyone', () => {
+    for (const wide of ['0.0.0.0/0', '10.0.0.0/7', '::/0', 'fd00::/31', '10.254.254.0/24,0.0.0.0/0']) {
+      expect(() => loadConfig({ ...valid, TRUSTED_PROXY_CIDR: wide }), wide).toThrow(/TRUSTED_PROXY_CIDR/);
+    }
+    expect(loadConfig({ ...valid, TRUSTED_PROXY_CIDR: '10.0.0.0/8,fd00::/32' }).trustedProxyCidrs).toEqual([
+      '10.0.0.0/8',
+      'fd00::/32',
+    ]);
+    expect(loadConfig({ ...valid, TRUSTED_PROXY_CIDR: '10.254.254.0/24' }).trustedProxyCidrs).toEqual(['10.254.254.0/24']);
   });
 });

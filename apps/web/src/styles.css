@@ -1496,3 +1496,55 @@ select {
 .note-box .alert {
   margin-bottom: 8px;
 }
+
+/* Snapshots: a create button, then one card per snapshot. */
+.snapshot-create {
+  margin-bottom: 16px;
+}
+.snapshot-error {
+  margin-bottom: 16px;
+}
+.snapshot-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.snapshot-card {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border: 1px solid #d5d9e0;
+  border-radius: 6px;
+}
+.snapshot-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+}
+.snapshot-head h2 {
+  margin: 0;
+  /* A name can be one long word. */
+  overflow-wrap: anywhere;
+}
+.snapshot-facts {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+.snapshot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+a.btn {
+  text-decoration: none;
+}
+.dialog-extra {
+  margin-bottom: 16px;
+}
+/* A hint under a checkbox lines up with its label. */
+.check-hint {
+  margin: -12px 0 8px 32px;
+}

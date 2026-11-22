@@ -71,6 +71,16 @@ export function errorMessage(code: string, ctx: ErrorContext = {}): string {
       return 'Finish signing in first.';
     case 'rate_limited':
       return 'Too many attempts. Wait a minute and try again.';
+    case 'as_of_in_future':
+      return 'Choose today or an earlier date.';
+    case 'expiry_in_past':
+      return 'Choose a date after today.';
+    case 'expiry_too_far':
+      return 'Choose a date within two years.';
+    case 'too_many_snapshots':
+      return 'This roadmap already has 50 snapshots. Revoke one to create another.';
+    case 'too_many_notes':
+      return 'This roadmap has more than 5,000 notes. Create the snapshot without notes.';
     default:
       return GENERIC_ERROR;
   }

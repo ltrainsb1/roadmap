@@ -16,6 +16,7 @@ import type { ProjectView } from './projects/ViewSwitcher.tsx';
 import { PickerPage } from './roadmaps/PickerPage.tsx';
 import { RoadmapIndex, RoadmapLayout } from './roadmaps/RoadmapLayout.tsx';
 import { SecurityPage } from './settings/SecurityPage.tsx';
+import { SnapshotsPage } from './snapshots/SnapshotsPage.tsx';
 
 const queryClient = new QueryClient();
 
@@ -78,6 +79,7 @@ export function App() {
             <Route path="timeline/:projectId?" element={<ProjectsRoute view="timeline" />} />
             <Route path="board/:projectId?" element={<ProjectsRoute view="board" />} />
             <Route path="members" element={<MembersPage />} />
+            <Route path="snapshots" element={<SnapshotsPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>
           <Route

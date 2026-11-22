@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode, type Ref } from 'react';
 import { Alert } from './Alert.tsx';
 import { Button } from './Button.tsx';
 
@@ -8,7 +8,7 @@ interface ConfirmDialogProps {
   /** What the person is about to do and what follows from it. */
   children: ReactNode;
   confirmLabel: string;
-  /** The dismiss button's text; "Cancel" unless the person is better served by another word. */
+  /** The dismiss button's text; "Cancel" ("Close" when `informOnly`) unless the person is better served by another word. */
   cancelLabel?: string;
   onConfirm: () => void;
   onClose: () => void;
@@ -18,6 +18,8 @@ interface ConfirmDialogProps {
   informOnly?: boolean;
   /** Danger styling for the confirm button; the default is the primary one. */
   danger?: boolean;
+  /** Makes the title focusable and hands it to the parent, for a dialog that moves focus to it when its content changes. */
+  titleRef?: Ref<HTMLHeadingElement>;
 }
 
 /**
@@ -29,12 +31,13 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel,
-  cancelLabel = 'Cancel',
+  cancelLabel,
   onConfirm,
   onClose,
   error,
   informOnly = false,
   danger = true,
+  titleRef,
 }: ConfirmDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -66,11 +69,13 @@ export function ConfirmDialog({
           }}
           noValidate
         >
-          <h2 id={titleId}>{title}</h2>
+          <h2 id={titleId} ref={titleRef} tabIndex={titleRef ? -1 : undefined}>
+            {title}
+          </h2>
           {error && <Alert>{error}</Alert>}
           {children}
           <div className="dialog-actions">
-            <Button onClick={onClose}>{informOnly ? 'Close' : cancelLabel}</Button>
+            <Button onClick={onClose}>{cancelLabel ?? (informOnly ? 'Close' : 'Cancel')}</Button>
             {!informOnly && (
               <Button type="submit" variant={danger ? 'danger' : 'primary'}>
                 {confirmLabel}

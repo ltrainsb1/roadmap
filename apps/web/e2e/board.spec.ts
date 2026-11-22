@@ -437,6 +437,8 @@ test('FR-1.9: a card can be moved by touch at 375 px', async ({ page, call, road
   await page.setViewportSize({ width: 375, height: 667 });
   await seeded(call, roadmap.id);
   await openBoard(page, roadmap.id);
+  // At 375 px the section tabs take two lines, which can push the card below the fold; touches land only on screen.
+  await handle(page, 'Hire').scrollIntoViewIfNeeded();
   const from = centre(await box(handle(page, 'Hire')));
   const next = await box(column(page, 'In progress, 1 item'));
   const frame = await box(board(page));

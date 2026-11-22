@@ -35,6 +35,10 @@ const ACTION_FILTERS: ReadonlyArray<[AuditActionName, string]> = [
   ['attachment.create', 'File added'],
   ['attachment.delete', 'File removed'],
   ['attachment.rejected', 'File blocked by the virus check'],
+  ['snapshot.create', 'Snapshot created'],
+  ['snapshot.revoke', 'Snapshot revoked'],
+  ['snapshot.access', 'Snapshot opened'],
+  ['snapshot.locked', 'Snapshot link locked'],
 ];
 
 export function AuditPage() {

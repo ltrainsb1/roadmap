@@ -12,7 +12,7 @@ test('FR-1.7: a new roadmap opens on Projects and shows the empty message for an
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible();
 
   const tabs = page.getByRole('navigation', { name: 'Roadmap sections' }).getByRole('link');
-  await expect(tabs).toHaveText(['Projects', 'Members', 'Audit log']);
+  await expect(tabs).toHaveText(['Projects', 'Members', 'Snapshots', 'Audit log']);
 
   await page.goto(`/r/${id}`);
   await expect(page).toHaveURL(`/r/${id}/projects`);

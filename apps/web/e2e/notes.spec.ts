@@ -158,6 +158,40 @@ test('FR-1.5: an Admin deletes a note that has a reply; "This note was deleted."
   await chief.context.close();
 });
 
+test('FR-1.5: after an Admin deletes a note that has a reply, "Reply" on that reply adds a second reply under "This note was deleted."', async ({ browser, call, owner, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const writer = await joinByApi(browser, call, id, 'contributor', 'writer');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  const top = await seedNote(await apiAs(writer.page), id, itemId, 'Contributor idea');
+  await seedNote(call, id, itemId, 'Owner reply', top);
+
+  const p = chief.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+  await noteWith(notes, 'Contributor idea').getByRole('button', { name: 'Delete', exact: true }).click();
+  await p.getByRole('dialog', { name: 'Delete this note?' }).getByRole('button', { name: 'Delete note', exact: true }).click();
+  await expect(noteWith(notes, 'This note was deleted.')).toBeVisible();
+
+  await noteWith(notes, 'Owner reply').getByRole('button', { name: 'Reply', exact: true }).click();
+  await notes.getByRole('textbox', { name: `Reply to ${owner.name}`, exact: true }).fill('Still worth doing');
+  await notes.getByRole('button', { name: 'Add reply', exact: true }).click();
+  await expect(notes.getByText('Note added.', { exact: true })).toBeVisible();
+  await expect(notes.getByRole('alert')).toHaveCount(0);
+
+  const thread = notes.locator('.note-thread').filter({ has: p.getByText('This note was deleted.', { exact: true }) });
+  const replies = thread.locator('.note-replies').getByRole('article');
+  await expect(replies).toHaveCount(2);
+  await expect(replies.nth(1)).toContainText('Still worth doing');
+
+  await p.reload();
+  const reloaded = notesOf(p, 'Launch site');
+  await expect(reloaded.locator('.note-replies').getByRole('article')).toHaveText([/Owner reply/, /Still worth doing/]);
+  await expect(noteWith(reloaded, 'This note was deleted.')).toBeVisible();
+  await writer.context.close();
+  await chief.context.close();
+});
+
 test('FR-1.5: an empty note says "Write something first."; a 5,001-character note shows the length message and keeps the text', async ({ page, call, roadmap }) => {
   const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Launch site');

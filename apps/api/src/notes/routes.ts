@@ -122,7 +122,9 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
         await assertOpenForContent(s, roadmapId, projectId);
         const notes = s.collection('notes');
         if (parentId !== null) {
-          const parent = await notes.findOne({ _id: parentId, roadmapId, projectId, parentId: null, deletedAt: null });
+          // A deleted top-level note is kept only while it has replies, so it can take more. The delete of its last
+          // reply runs assertOpenForContent too, so the two transactions conflict and never leave a reply orphaned.
+          const parent = await notes.findOne({ _id: parentId, roadmapId, projectId, parentId: null });
           if (!parent) throw new HttpError(422, 'unknown_note');
         }
         if ((await notes.countDocuments({ roadmapId, projectId })) >= maxNotes) {

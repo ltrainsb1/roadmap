@@ -258,16 +258,68 @@ describe('deleting notes', () => {
       [r2.id, false, 'r2', []],
     ]);
 
-    // A deleted note can't be edited, deleted again or replied to.
+    // A deleted note can't be edited or deleted again.
     expect((await w.edit('C', item._id, top.id, { body: 'back' })).statusCode).toBe(404);
     expect((await w.remove('O', item._id, top.id)).statusCode).toBe(404);
-    const reply = await w.add('C', item._id, { body: 'late', parentId: top.id });
-    expect(reply.statusCode).toBe(422);
-    expect(reply.json()).toEqual({ error: 'unknown_note' });
 
     expect((await w.remove('O', item._id, r2.id)).statusCode).toBe(204);
     expect(await w.notes().countDocuments({ projectId: item._id })).toBe(0);
     expect((await w.list('D', item._id)).json()).toEqual({ notes: [] });
+  });
+
+  test('FR-1.5: a reply to a deleted note that still has replies is 201 and lists under it', async () => {
+    const w = await world();
+    const item = await w.item();
+    const top = (await w.add('C', item._id, { body: 'top' })).json<Note>();
+    const r1 = (await w.add('A', item._id, { body: 'r1', parentId: top.id })).json<Note>();
+    expect((await w.remove('C', item._id, top.id)).statusCode).toBe(204);
+
+    const late = await w.add('D', item._id, { body: 'late', parentId: top.id });
+    expect(late.statusCode).toBe(201);
+    expect(late.json<Note>().parentId).toBe(top.id);
+    const listed = (await w.list('O', item._id)).json<{ notes: Note[] }>().notes;
+    expect(listed.map((n) => [n.id, n.parentId, n.deleted])).toEqual([
+      [top.id, null, true],
+      [r1.id, top.id, false],
+      [late.json<Note>().id, top.id, false],
+    ]);
+
+    // With one reply left, deleting the other keeps the placeholder; deleting the last removes it.
+    expect((await w.remove('A', item._id, r1.id)).statusCode).toBe(204);
+    expect(await w.stored(top.id)).not.toBeNull();
+    expect((await w.remove('D', item._id, late.json<Note>().id)).statusCode).toBe(204);
+    expect(await w.notes().countDocuments({ projectId: item._id })).toBe(0);
+    const gone = await w.add('D', item._id, { body: 'after', parentId: top.id });
+    expect(gone.statusCode).toBe(422);
+    expect(gone.json()).toEqual({ error: 'unknown_note' });
+  });
+
+  test('FR-1.5: a reply added while the last reply under a deleted note is deleted never loses its parent', async () => {
+    const w = await world();
+    const item = await w.item();
+    for (let i = 0; i < 20; i += 1) {
+      const top = (await w.add('C', item._id, { body: `top ${i}` })).json<Note>();
+      const last = (await w.add('A', item._id, { body: `last ${i}`, parentId: top.id })).json<Note>();
+      expect((await w.remove('C', item._id, top.id)).statusCode).toBe(204);
+      const [deleted, added] = await Promise.all([
+        w.remove('A', item._id, last.id),
+        w.add('D', item._id, { body: `race ${i}`, parentId: top.id }),
+      ]);
+      expect(deleted.statusCode).toBe(204);
+      expect([201, 422]).toContain(added.statusCode);
+      const thread = await w.notes().find({ projectId: item._id, $or: [{ _id: top.id }, { parentId: top.id }] }).toArray();
+      if (added.statusCode === 201) {
+        expect(thread.map((n) => n._id).sort()).toEqual([top.id, added.json<Note>().id].sort());
+        expect(thread.find((n) => n._id === top.id)!.deletedAt).toBeInstanceOf(Date);
+      } else {
+        expect(added.json()).toEqual({ error: 'unknown_note' });
+        expect(thread).toEqual([]);
+      }
+    }
+    // No reply anywhere points at a note that is gone.
+    const all = await w.notes().find({ projectId: item._id }).toArray();
+    const ids = new Set(all.map((n) => n._id));
+    expect(all.filter((n) => n.parentId !== null && !ids.has(n.parentId))).toEqual([]);
   });
 });
 

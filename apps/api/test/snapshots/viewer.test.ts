@@ -247,7 +247,7 @@ describe('wrong passwords', () => {
     expect((await unlock(linkId, PASSWORD)).statusCode).toBe(204);
   });
 
-  test('FR-3.6: twenty wrong passwords at once leave the link locked', { timeout: 60_000 }, async () => {
+  test('FR-3.6: twenty wrong passwords at once leave the link locked, and the right one works once the lock ends', { timeout: 60_000 }, async () => {
     const w = await world(t);
     const { id, linkId } = await make(w);
     const burst = await Promise.all(Array.from({ length: 20 }, () => unlock(linkId, WRONG)));
@@ -256,6 +256,11 @@ describe('wrong passwords', () => {
     const res = await unlock(linkId, PASSWORD);
     expect(res.statusCode).toBe(423);
     expect(res.cookies).toEqual([]);
+
+    clock = new Date((await stored(id))!.lockedUntil!.getTime() + SEC);
+    const after = await unlock(linkId, PASSWORD);
+    expect(after.statusCode).toBe(204);
+    expect(after.cookies.some((c) => c.name === SNAPSHOT_COOKIE)).toBe(true);
   });
 
   test('FR-3.6: a right password resets the count', async () => {

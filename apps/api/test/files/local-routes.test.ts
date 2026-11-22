@@ -36,6 +36,7 @@ describe('GET /api/files/local (FR-1.4)', () => {
     expect(res.headers['content-type']).toBe('application/octet-stream');
     expect(res.headers['content-disposition']).toBe(contentDisposition('ré sumé".html'));
     expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['cache-control']).toBe('private, no-store');
   });
 
   test('a changed, missing, expired or deleted-object token is 404', async () => {

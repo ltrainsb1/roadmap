@@ -18,6 +18,9 @@ export const DOWNLOAD_SECONDS = 60;
 
 const OCTET_STREAM = 'application/octet-stream';
 
+/** Downloads are never kept by the browser or a shared cache. */
+export const DOWNLOAD_CACHE_CONTROL = 'private, no-store';
+
 /** RFC 5987 attr-chars that encodeURIComponent leaves alone but the extended value may not contain. */
 function encodeExtValue(s: string): string {
   return encodeURIComponent(s).replace(/['()*!]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -204,6 +207,7 @@ export class S3ObjectStore implements ObjectStore {
       Key: key,
       ResponseContentDisposition: contentDisposition(opts.fileName),
       ResponseContentType: OCTET_STREAM,
+      ResponseCacheControl: DOWNLOAD_CACHE_CONTROL,
     });
     return getSignedUrl(this.#client, command, { expiresIn: opts.expiresSeconds, signingDate: this.#now() });
   }

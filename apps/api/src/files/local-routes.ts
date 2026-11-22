@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { HttpError } from '../errors.ts';
-import { contentDisposition, type LocalObjectStore, type MemoryObjectStore } from './object-store.ts';
+import { contentDisposition, DOWNLOAD_CACHE_CONTROL, type LocalObjectStore, type MemoryObjectStore } from './object-store.ts';
 
 /** Longer than any link this app signs (a 200-character name is well under it); longer ones are not looked at. */
 const MAX_TOKEN = 4096;
@@ -27,6 +27,7 @@ export function registerLocalFileRoutes(app: FastifyInstance, store: LocalObject
         .header('content-type', 'application/octet-stream')
         .header('content-disposition', contentDisposition(found.fileName))
         .header('x-content-type-options', 'nosniff')
+        .header('cache-control', DOWNLOAD_CACHE_CONTROL)
         .send(found.body);
     },
   );

@@ -182,6 +182,7 @@ describe('S3ObjectStore (FR-1.4)', () => {
     expect(url.pathname).toContain('t/r/a');
     expect(url.searchParams.get('response-content-disposition')).toBe(contentDisposition('plan 🚀.md'));
     expect(url.searchParams.get('response-content-type')).toBe('application/octet-stream');
+    expect(url.searchParams.get('response-cache-control')).toBe('private, no-store');
     expect(url.searchParams.get('X-Amz-Expires')).toBe('60');
   });
 

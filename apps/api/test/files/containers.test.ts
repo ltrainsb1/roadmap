@@ -28,7 +28,8 @@ describe.skipIf(process.env.TEST_S3 !== 'container')('S3ObjectStore against MinI
       .withEnvironment({ MINIO_ROOT_USER: MINIO_USER, MINIO_ROOT_PASSWORD: MINIO_PASSWORD })
       .withExposedPorts(9000)
       .withWaitStrategy(Wait.forHttp('/minio/health/live', 9000))
-      .withStartupTimeout(120_000)
+      // A 2-vCPU CI runner, possibly pulling the image cold.
+      .withStartupTimeout(180_000)
       .start();
     s3 = new S3Client({
       region: 'us-east-1',
@@ -37,7 +38,7 @@ describe.skipIf(process.env.TEST_S3 !== 'container')('S3ObjectStore against MinI
       credentials: { accessKeyId: MINIO_USER, secretAccessKey: MINIO_PASSWORD },
     });
     await s3.send(new CreateBucketCommand({ Bucket: bucket }));
-  }, 180_000);
+  }, 240_000);
   afterAll(async () => {
     s3?.destroy();
     await container?.stop();
@@ -77,10 +78,11 @@ describe.skipIf(process.env.TEST_CLAMAV !== 'container')('ClamdScanner against C
     container = await new GenericContainer(CLAMAV_IMAGE)
       .withExposedPorts(3310)
       .withWaitStrategy(Wait.forHealthCheck())
-      .withStartupTimeout(180_000)
+      // A 2-vCPU CI runner with a cold pull, and freshclam's first download of the signatures.
+      .withStartupTimeout(300_000)
       .start();
     scanner = new ClamdScanner({ host: container.getHost(), port: container.getMappedPort(3310), timeoutMs: 30_000 });
-  }, 240_000);
+  }, 360_000);
   afterAll(async () => {
     await container?.stop();
   });

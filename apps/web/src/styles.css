@@ -1277,3 +1277,55 @@ select {
       'status status status';
   }
 }
+
+/* A note's text (FR-1.5). Long words and code wrap or scroll inside the note, never the panel. */
+.markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre {
+  margin: 0 0 8px;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 24px;
+}
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.markdown code,
+.markdown pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  background: var(--surface);
+  border-radius: 4px;
+}
+.markdown code {
+  padding: 0 4px;
+}
+.markdown pre {
+  max-width: 100%;
+  padding: 8px 12px;
+  overflow-x: auto;
+  overflow-wrap: normal;
+}
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+.markdown a {
+  color: var(--primary);
+}
+.mention {
+  font-weight: 600;
+  color: var(--primary);
+}

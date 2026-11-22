@@ -1,3 +1,4 @@
+import type { Collection, Db } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import type { SnapshotSummary } from '@roadmap/shared';
 import { scoped } from '../../src/db/scoped.ts';
@@ -11,15 +12,59 @@ const FIXED = new Date('2026-03-10T23:30:00.000Z');
 let t: TestApp;
 let clocked: TestApp;
 let limited: TestApp;
+let paused: TestApp;
+
+/** One-shot hooks on the `snapshots` collection of the `paused` app. */
+const snapshotHooks: { beforeInsert: (() => Promise<void>) | null; onFind: (() => void) | null } = {
+  beforeInsert: null,
+  onFind: null,
+};
+
+/** The app's database, with `snapshots.insertOne` and `snapshots.find` passing through `snapshotHooks` first. */
+function withSnapshotHooks(db: Db): Db {
+  const hooked = (col: Collection) =>
+    new Proxy(col, {
+      get(target, prop) {
+        if (prop === 'insertOne') {
+          return async (...args: Parameters<Collection['insertOne']>) => {
+            const hook = snapshotHooks.beforeInsert;
+            snapshotHooks.beforeInsert = null;
+            await hook?.();
+            return target.insertOne(...args);
+          };
+        }
+        if (prop === 'find') {
+          return (...args: Parameters<Collection['find']>) => {
+            snapshotHooks.onFind?.();
+            return target.find(...args);
+          };
+        }
+        const value: unknown = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+  return new Proxy(db, {
+    get(target, prop) {
+      if (prop === 'collection') {
+        return (name: string) => (name === 'snapshots' ? hooked(target.collection(name)) : target.collection(name));
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
 beforeAll(async () => {
   t = await makeTestApp();
   clocked = await makeTestApp({ now: () => FIXED });
   limited = await makeTestApp({ maxSnapshots: 2, maxSnapshotNotes: 3 });
+  paused = await makeTestApp({ wrapDb: withSnapshotHooks });
 }, 120_000);
 afterAll(async () => {
   await t?.close();
   await clocked?.close();
   await limited?.close();
+  await paused?.close();
 });
 
 const events = (app: TestApp, tenantId: string, action: string) =>
@@ -263,6 +308,67 @@ describe('revoking', () => {
 
     expect((await rowCounts(t, other._id)).snapshots).toBe(1);
     expect(t.files.objects.has(otherKey)).toBe(true);
+  });
+});
+
+describe('creating while the roadmap changes', () => {
+  const body = { name: 'Race', asOf: '2026-01-01', password: PASSWORD, expiresAt: null, include: { notes: true, assignees: true } };
+
+  /** A new roadmap in the world's tenant, owned by O with A as an Admin, holding one item with one note. */
+  async function freshRoadmap(app: TestApp, w: Awaited<ReturnType<typeof world>>, name: string) {
+    const roadmap = await app.seed.roadmap(w.tenantId, w.ids.O, name);
+    await app.seed.member(w.tenantId, roadmap._id, w.ids.A, 'admin');
+    const item = await app.seed.project(w.tenantId, roadmap._id);
+    await app.seed.note(w.tenantId, roadmap._id, item._id, w.ids.A);
+    const create = () =>
+      app.app.inject({ method: 'POST', url: `/api/roadmaps/${roadmap._id}/snapshots`, headers: w.headers('A'), payload: body });
+    return { roadmap, create };
+  }
+
+  test("FR-3.2: a create racing the roadmap's delete leaves no snapshot behind", { timeout: 60_000 }, async () => {
+    const w = await world(paused);
+    for (let round = 1; round <= 20; round += 1) {
+      const { roadmap, create } = await freshRoadmap(paused, w, `Doomed ${round}`);
+      // The create waits, inside its transaction, just before it inserts the snapshot; the delete starts then, and
+      // the create goes on once the delete is looking for the roadmap's snapshots.
+      let atInsert!: () => void;
+      const reachedInsert = new Promise<void>((resolve) => (atInsert = resolve));
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      snapshotHooks.beforeInsert = () => {
+        atInsert();
+        return released;
+      };
+      snapshotHooks.onFind = release;
+      const creating = create();
+      await reachedInsert;
+      const [created, deleted] = await Promise.all([
+        creating,
+        paused.app.inject({
+          method: 'DELETE',
+          url: `/api/roadmaps/${roadmap._id}`,
+          headers: w.headers('O'),
+          payload: { confirmName: `Doomed ${round}` },
+        }),
+      ]);
+      snapshotHooks.onFind = null;
+      expect(deleted.statusCode, deleted.body).toBe(204);
+      expect([201, 404], created.body).toContain(created.statusCode);
+      expect(await paused.db.collection('roadmaps').countDocuments({ _id: roadmap._id as never })).toBe(0);
+      expect(await rowCounts(paused, roadmap._id)).toEqual({ snapshots: 0, items: 0, notes: 0 });
+    }
+  });
+
+  test('FR-3.1: two creates at the limit at once never pass the limit', { timeout: 60_000 }, async () => {
+    const w = await world(limited);
+    for (let round = 1; round <= 20; round += 1) {
+      const { roadmap, create } = await freshRoadmap(limited, w, `Full ${round}`);
+      expect((await create()).statusCode).toBe(201);
+      const results = await Promise.all([create(), create()]);
+      expect(results.map((r) => r.statusCode).sort()).toEqual([201, 422]);
+      expect(results.find((r) => r.statusCode === 422)!.json()).toEqual({ error: 'too_many_snapshots' });
+      expect(await rowCounts(limited, roadmap._id)).toEqual({ snapshots: 2, items: 2, notes: 2 });
+    }
   });
 });
 

@@ -120,6 +120,8 @@ export interface TestAppOptions {
   maxSnapshots?: number;
   /** Replaces the most notes one snapshot may hold. */
   maxSnapshotNotes?: number;
+  /** Wraps the database the app is given (seeding still uses the plain one), so a test can pause a query. */
+  wrapDb?: (db: Db) => Db;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -149,7 +151,7 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   const scanner = new FakeScanner();
   const app = await buildApp({
     config,
-    db,
+    db: opts.wrapDb ? opts.wrapDb(db) : db,
     mailer: mail,
     objectStore: opts.objectStore ?? files,
     scanner: opts.scanner ?? scanner,

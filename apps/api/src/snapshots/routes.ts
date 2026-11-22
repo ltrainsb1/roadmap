@@ -91,7 +91,12 @@ export function registerSnapshotRoutes(app: FastifyInstance, deps: SnapshotRoute
       const id = uuidv7();
       const linkId = randomBytes(24).toString('base64url');
       await actor.db.withTransaction(async (s) => {
-        const roadmap = await s.collection('roadmaps').findOne({ _id: roadmapId });
+        // Every create writes the roadmap document, and so does the roadmap's delete. Two creates at once, or a
+        // create and the delete, conflict and one retries: the count below sees the other create, and no snapshot is
+        // left behind for a roadmap that is gone. Nothing matched: the roadmap was deleted after the auth hook passed.
+        const roadmap = await s
+          .collection('roadmaps')
+          .findOneAndUpdate({ _id: roadmapId }, { $inc: { snapshotRevision: 1 } });
         if (!roadmap) throw new HttpError(404, 'not_found');
         const snapshots = s.collection('snapshots');
         if ((await snapshots.countDocuments({ roadmapId })) >= maxSnapshots) {

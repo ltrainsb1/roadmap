@@ -63,6 +63,8 @@ export interface RoadmapDoc {
   membershipRevision?: number;
   /** Bumped by every reorder that writes, so two reorders in one roadmap conflict and run one after the other. */
   orderRevision?: number;
+  /** Bumped by every snapshot create, so concurrent creates (and a create and the roadmap's delete) conflict and run one after the other. */
+  snapshotRevision?: number;
   createdAt: Date;
 }
 

@@ -36,6 +36,22 @@ import { PdfBusyError, looksLikePdf, type PdfRenderer } from './pdf-renderer.ts'
 /** PDFs being made at once by this process; a request past it is refused at once, never queued. */
 export const MAX_PDF_RENDERS = 2;
 
+/**
+ * The most rows one PDF may print: items plus notes for the list, items for the timeline. A larger snapshot is
+ * refused with 422 pdf_too_large before anything is rendered. Measured on the devbox with the PDF service's 1 GB
+ * limit: one list PDF of 2,000 items ran Chromium out of memory, 1,200 items peaked at 795 MiB, and two lists of
+ * 800 items made at once at 894 MiB. At 700, two PDFs made at once stay under 900 MiB (785 MiB measured), each in
+ * about a second.
+ */
+export const MAX_PDF_SIZE = 700;
+
+/** How long a pdf_failed is remembered: a retry within it is refused at once, so retries cannot hold the slots. */
+export const PDF_FAILURE_MEMORY_MS = 60_000;
+
+/** The rows a view prints: the timeline shows no notes. */
+const printedSize = (snapshot: SnapshotDoc, view: SnapshotView) =>
+  snapshot.itemCount + (view === 'list' && snapshot.include.notes ? snapshot.noteCount : 0);
+
 const linkParams = z.object({ linkId: z.string().min(1).max(128) });
 const itemParams = linkParams.extend({ itemId: z.string().min(1).max(100) });
 const contentQuery = z.object({ notes: z.literal('all').optional() });
@@ -113,6 +129,13 @@ export function registerSnapshotPublicRoutes(app: FastifyInstance, deps: Snapsho
   const maxRenders = deps.maxPdfRenders ?? MAX_PDF_RENDERS;
   // Counts only renders in flight: a PDF already stored is answered from the store and never takes a slot.
   let rendersInFlight = 0;
+  // When each snapshot's view last failed with pdf_failed, in this process. Entries go once they are older than
+  // PDF_FAILURE_MEMORY_MS, so the map holds at most the failures of the last minute.
+  const recentFailures = new Map<string, number>();
+  const failedRecently = (key: string, now: Date) => {
+    for (const [k, at] of recentFailures) if (now.getTime() - at >= PDF_FAILURE_MEMORY_MS) recentFailures.delete(k);
+    return recentFailures.has(key);
+  };
 
   r.get(
     base,
@@ -241,6 +264,8 @@ export function registerSnapshotPublicRoutes(app: FastifyInstance, deps: Snapsho
 
     const key = `${snapshot.tenantId}/${snapshot.roadmapId}/snapshots/${snapshot._id}/${view}.pdf`;
     await deps.objectStore.put(key, bytes);
+    // Safe against a revoke running meanwhile only because deleteSnapshots reads `pdfs` and deletes the snapshot in one
+    // transaction: either it sees this key and deletes the file, or this update matches nothing and we delete it below.
     const { matched } = await s.collection('snapshots').updateOne({ _id: snapshot._id }, { $set: { [`pdfs.${view}`]: key } });
     if (matched === 0) {
       // Revoked while it was being made: its revoke could not know about this file, so it goes now.
@@ -264,15 +289,22 @@ export function registerSnapshotPublicRoutes(app: FastifyInstance, deps: Snapsho
       const { view } = req.body;
       let key = snapshot.pdfs[view];
       if (key === undefined) {
+        if (printedSize(snapshot, view) > MAX_PDF_SIZE) throw new HttpError(422, 'pdf_too_large');
+        const failureKey = `${snapshot._id}:${view}`;
+        if (failedRecently(failureKey, now)) throw new HttpError(502, 'pdf_failed');
         if (rendersInFlight >= maxRenders) throw new HttpError(503, 'pdf_busy');
         rendersInFlight += 1;
         try {
           key = await makePdf(db, snapshot, view, now);
+        } catch (err) {
+          if (err instanceof HttpError && err.code === 'pdf_failed') recentFailures.set(failureKey, deps.now().getTime());
+          throw err;
         } finally {
           rendersInFlight -= 1;
         }
       }
-      const fileName = cleanFileName(`${snapshot.roadmapName} ${view} ${snapshot.asOf}.pdf`);
+      // cleanFileName keeps only what follows the last slash, so a slash or backslash in the roadmap's name becomes "-" first.
+      const fileName = cleanFileName(`${snapshot.roadmapName.replace(/[/\\]/g, '-')} ${view} ${snapshot.asOf}.pdf`);
       return { url: await deps.objectStore.signedGetUrl(key, { fileName, expiresSeconds: DOWNLOAD_SECONDS }) };
     },
   );

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { loadConfig } from '../../src/config.ts';
-import type { SnapshotDoc, SnapshotSessionDoc } from '../../src/db/types.ts';
+import type { RoadmapDoc, SnapshotDoc, SnapshotSessionDoc } from '../../src/db/types.ts';
 import { RENDER_HEADER, RENDER_TOKEN_MS, SNAPSHOT_COOKIE } from '../../src/snapshots/access.ts';
 import {
   FakePdfRenderer,
@@ -10,6 +10,7 @@ import {
   createPdfRenderer,
   type PdfRenderer,
 } from '../../src/snapshots/pdf-renderer.ts';
+import { MAX_PDF_SIZE, PDF_FAILURE_MEMORY_MS } from '../../src/snapshots/public-routes.ts';
 import { TEST_ENV, makeTestApp, type TestApp } from '../helpers.ts';
 import { PASSWORD, world } from './world.ts';
 
@@ -254,8 +255,9 @@ describe('making a PDF', () => {
     expect(await renderSessions(a.id)).toBe(0);
     expect(await renderSessions(b.id)).toBe(0);
 
-    // Both slots are free again.
+    // Both slots are free again (a's list failed, so first move past the memory of that failure).
     render = (input) => fake.render(input);
+    advance(PDF_FAILURE_MEMORY_MS);
     const again = await Promise.all([pdf(a.linkId, 'list', { cookie: ca }), pdf(b.linkId, 'timeline', { cookie: cb })]);
     expect(again.map((r) => r.statusCode)).toEqual([200, 200]);
   });
@@ -272,6 +274,8 @@ describe('making a PDF', () => {
       [() => Promise.resolve(Buffer.alloc(0)), 502, 'pdf_failed'],
     ];
     for (const [impl, status, error] of cases) {
+      // Past the memory of the previous case's failure, so each case reaches the renderer.
+      advance(PDF_FAILURE_MEMORY_MS);
       render = impl;
       const res = await pdf(s.linkId, 'list', { cookie });
       expect(res.statusCode, error).toBe(status);
@@ -282,6 +286,7 @@ describe('making a PDF', () => {
     }
 
     render = (input) => fake.render(input);
+    advance(PDF_FAILURE_MEMORY_MS);
     expect((await pdf(s.linkId, 'list', { cookie })).statusCode).toBe(200);
     expect(fake.calls).toHaveLength(1);
     expect(keysOf(s.id)).toHaveLength(1);
@@ -302,6 +307,93 @@ describe('making a PDF', () => {
     expect(keysOf(s.id)).toEqual([]);
     expect(await stored(s.id)).toBeNull();
     expect(await renderSessions(s.id)).toBe(0);
+  });
+
+  test('FR-3.4: the file name keeps the whole roadmap name, with slashes and backslashes made into dashes', async () => {
+    const w = await world(t);
+    await t.db.collection<RoadmapDoc>('roadmaps').updateOne({ _id: w.roadmap._id }, { $set: { name: 'Plan A/B\\C' } });
+    const s = await make(w, { asOf: '2026-11-01' });
+    const cookie = await open(s.linkId);
+    const res = await pdf(s.linkId, 'list', { cookie });
+    expect(res.statusCode).toBe(200);
+    const disposition = (await download(res.json<{ url: string }>().url)).headers['content-disposition'];
+    expect(disposition).toContain('filename="Plan A-B-C list 2026-11-01.pdf"');
+  });
+
+  test('FR-3.4: a snapshot larger than a PDF can hold is refused with pdf_too_large, without rendering', async () => {
+    const w = await world(t);
+    const s = await make(w, { include: { notes: true, assignees: false } });
+    const cookie = await open(s.linkId);
+    const sizes = (itemCount: number, noteCount: number) =>
+      t.db.collection<SnapshotDoc>('snapshots').updateOne({ _id: s.id }, { $set: { itemCount, noteCount } });
+
+    // The list prints items and notes; the timeline prints items only.
+    await sizes(MAX_PDF_SIZE - 100, 101);
+    const list = await pdf(s.linkId, 'list', { cookie });
+    expect(list.statusCode).toBe(422);
+    expect(list.json()).toEqual({ error: 'pdf_too_large' });
+    expect(list.headers['cache-control']).toBe('no-store');
+    expect(fake.calls).toHaveLength(0);
+    expect((await pdf(s.linkId, 'timeline', { cookie })).statusCode).toBe(200);
+    expect(fake.calls.map((c) => c.path)).toEqual([`/s/${s.linkId}/print/timeline`]);
+
+    await sizes(MAX_PDF_SIZE - 100, 100);
+    expect((await pdf(s.linkId, 'list', { cookie })).statusCode).toBe(200);
+    expect(fake.calls).toHaveLength(2);
+
+    const big = await make(w, { name: 'Big' });
+    const bigCookie = await open(big.linkId);
+    await t.db.collection<SnapshotDoc>('snapshots').updateOne({ _id: big.id }, { $set: { itemCount: MAX_PDF_SIZE + 1 } });
+    for (const view of ['list', 'timeline']) {
+      const res = await pdf(big.linkId, view, { cookie: bigCookie });
+      expect(res.statusCode, view).toBe(422);
+      expect(res.json()).toEqual({ error: 'pdf_too_large' });
+    }
+    expect(fake.calls).toHaveLength(2);
+    expect(await renderSessions(big.id)).toBe(0);
+    expect((await stored(big.id))?.pdfs).toEqual({});
+  });
+
+  test('FR-3.4: a PDF that failed less than a minute ago is refused at once with pdf_failed, for that snapshot and view only', async () => {
+    const w = await world(t);
+    const s = await make(w);
+    const other = await make(w, { name: 'Other' });
+    const [cookie, otherCookie] = [await open(s.linkId), await open(other.linkId)];
+    let renders = 0;
+    let fail = true;
+    render = (input) => {
+      renders += 1;
+      return fail ? Promise.reject(new PdfFailedError('render_failed')) : fake.render(input);
+    };
+
+    expect((await pdf(s.linkId, 'list', { cookie })).statusCode).toBe(502);
+    expect(renders).toBe(1);
+    fail = false;
+    advance(PDF_FAILURE_MEMORY_MS - 1000);
+    const again = await pdf(s.linkId, 'list', { cookie });
+    expect(again.statusCode).toBe(502);
+    expect(again.json()).toEqual({ error: 'pdf_failed' });
+    expect(renders).toBe(1);
+    expect(await renderSessions(s.id)).toBe(0);
+
+    // The other view of the same snapshot, and the same view of another snapshot, still render.
+    expect((await pdf(s.linkId, 'timeline', { cookie })).statusCode).toBe(200);
+    expect((await pdf(other.linkId, 'list', { cookie: otherCookie })).statusCode).toBe(200);
+    expect(renders).toBe(3);
+
+    advance(1000);
+    expect((await pdf(s.linkId, 'list', { cookie })).statusCode).toBe(200);
+    expect(renders).toBe(4);
+  });
+
+  test('FR-3.4: a busy refusal is not remembered as a failure', async () => {
+    const w = await world(t);
+    const s = await make(w);
+    const cookie = await open(s.linkId);
+    render = () => Promise.reject(new PdfBusyError('busy'));
+    expect((await pdf(s.linkId, 'list', { cookie })).statusCode).toBe(503);
+    render = (input) => fake.render(input);
+    expect((await pdf(s.linkId, 'list', { cookie })).statusCode).toBe(200);
   });
 
   test("FR-3.4: a PDF needs the viewer's cookie", async () => {

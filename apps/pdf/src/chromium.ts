@@ -33,10 +33,24 @@ export function footerTemplate(text: string | null): string {
 /** Starts one headless Chromium; every render gets its own browser context, closed when the render ends. */
 export async function createChromiumRender(opts: {
   renderOrigin: string;
+  /**
+   * Called once when the browser is wedged: still connected, but a new context did not arrive by the render's
+   * deadline, or a context did not finish closing within CLOSE_GRACE_MS. A page that is merely slow is not a wedge.
+   */
+  onWedged?: () => void;
+  /** Tests only: a browser to use instead of launching one. */
+  browser?: Browser;
 }): Promise<{ render: Render; close(): Promise<void>; browser: Browser }> {
   const { renderOrigin } = opts;
   // Playwright turns Chromium's sandbox off by default; the pages it prints are ours, but it stays on regardless.
-  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+  const browser = opts.browser ?? (await chromium.launch({ headless: true, chromiumSandbox: true }));
+
+  let wedged = false;
+  const reportWedged = () => {
+    if (wedged || !browser.isConnected()) return;
+    wedged = true;
+    opts.onWedged?.();
+  };
 
   // Closes a context, waiting for it to be really gone (close() returns early while another close is under way), but
   // never longer than CLOSE_GRACE_MS: a browser that hangs must not hold a render slot forever.
@@ -48,8 +62,9 @@ export async function createChromiumRender(opts: {
       // A browser that has gone away takes its contexts with it, and emits nothing more.
       if (browser.isConnected()) await closed;
     })();
-    await Promise.race([closing, grace]);
+    const done = await Promise.race([closing.then(() => true), grace.then(() => false)]);
     clearTimeout(timer);
+    if (!done) reportWedged();
   };
 
   const print = async (context: BrowserContext, url: string, token: string, left: () => number) => {
@@ -107,6 +122,11 @@ export async function createChromiumRender(opts: {
       timer = setTimeout(() => reject(new RenderTimeoutError()), timeoutMs);
     });
     const creating = browser.newContext({ serviceWorkers: 'block', acceptDownloads: false });
+    let creatingSettled = false;
+    void creating.then(
+      () => (creatingSettled = true),
+      () => (creatingSettled = true),
+    );
     let context: BrowserContext | undefined;
     let closed: Promise<void> | undefined;
 
@@ -121,8 +141,12 @@ export async function createChromiumRender(opts: {
     } finally {
       clearTimeout(timer);
       if (context && closed) await closeWithin(context, closed);
-      // A context that arrives after the deadline is closed as soon as it exists.
-      else void creating.then((late) => late.close()).catch(() => undefined);
+      else {
+        // A context that had not even arrived by the deadline means the browser is wedged, not that the page is slow.
+        if (!creatingSettled) reportWedged();
+        // A context that arrives after the deadline is closed as soon as it exists.
+        void creating.then((late) => late.close()).catch(() => undefined);
+      }
     }
   };
 

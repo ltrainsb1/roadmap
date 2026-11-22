@@ -2,7 +2,9 @@ import { buildPdfApp, loadPdfConfig } from './app.ts';
 import { createChromiumRender } from './chromium.ts';
 
 const config = loadPdfConfig(process.env);
-const chromium = await createChromiumRender({ renderOrigin: config.renderOrigin });
+// A wedged browser (connected, but contexts no longer open or close) ends where a stuck render does: a restart.
+let onWedged: () => void = () => undefined;
+const chromium = await createChromiumRender({ renderOrigin: config.renderOrigin, onWedged: () => onWedged() });
 
 let closing = false;
 // Exits with `code` once the browser is closed, or after 5 s if closing it hangs.
@@ -13,6 +15,12 @@ const closeBrowserAndExit = (code: number) => {
     () => process.exit(code),
     () => process.exit(1),
   );
+};
+
+onWedged = () => {
+  if (closing) return;
+  app.log.error('chromium is wedged: restarting');
+  closeBrowserAndExit(1);
 };
 
 const app = buildPdfApp({

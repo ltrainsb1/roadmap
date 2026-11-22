@@ -277,3 +277,32 @@ test('FR-3.4: a render that settles in time leaves the health check ok', async (
     vi.useRealTimers();
   }
 });
+
+test('FR-3.4: closing the app drops its stuck watch, so a hung render cannot fire it later', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    let stuckCalls = 0;
+    let entered!: () => void;
+    const inRender = new Promise<void>((resolve) => (entered = resolve));
+    const app = buildPdfApp({
+      render: () => {
+        entered();
+        return new Promise<Buffer>(() => undefined);
+      },
+      renderOrigin: ORIGIN,
+      maxRenders: 1,
+      timeoutMs: 1_000,
+      stuckGraceMs: 1_000,
+      onStuck: () => (stuckCalls += 1),
+    });
+    const reply = post(app, { path: `/s/${LINK}/print/list`, token: 'tok' });
+    await inRender;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await reply).statusCode).toBe(504);
+    await app.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(stuckCalls).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});

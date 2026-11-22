@@ -91,17 +91,27 @@ export function buildPdfApp(deps: {
   // left alone every slot would end up taken for good: health fails, and the server is told once, to restart.
   const stuckAfterMs = deps.timeoutMs + (deps.stuckGraceMs ?? DEFAULT_STUCK_GRACE_MS);
   let stuck = false;
+  const watching = new Set<NodeJS.Timeout>();
+  // A hung job must not keep a closing process alive.
+  app.addHook('onClose', (_instance, done) => {
+    for (const timer of watching) clearTimeout(timer);
+    watching.clear();
+    done();
+  });
   const watch = (job: Promise<unknown>) => {
     const timer = setTimeout(() => {
+      watching.delete(timer);
       if (stuck) return;
       stuck = true;
       app.log.error('a render is stuck past its deadline');
       deps.onStuck?.();
     }, stuckAfterMs);
-    void job.then(
-      () => clearTimeout(timer),
-      () => clearTimeout(timer),
-    );
+    watching.add(timer);
+    const settle = () => {
+      clearTimeout(timer);
+      watching.delete(timer);
+    };
+    void job.then(settle, settle);
   };
 
   app.get('/health', (_req, reply) =>

@@ -116,6 +116,10 @@ export interface TestAppOptions {
   maxConcurrentUploads?: number;
   /** Replaces how long the app waits for an upload's body. */
   uploadReadTimeoutMs?: number;
+  /** Replaces the per-roadmap snapshot limit. */
+  maxSnapshots?: number;
+  /** Replaces the most notes one snapshot may hold. */
+  maxSnapshotNotes?: number;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -157,6 +161,8 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     ...(opts.maxFilesPerItem !== undefined ? { maxFilesPerItem: opts.maxFilesPerItem } : {}),
     ...(opts.maxConcurrentUploads !== undefined ? { maxConcurrentUploads: opts.maxConcurrentUploads } : {}),
     ...(opts.uploadReadTimeoutMs !== undefined ? { uploadReadTimeoutMs: opts.uploadReadTimeoutMs } : {}),
+    ...(opts.maxSnapshots !== undefined ? { maxSnapshots: opts.maxSnapshots } : {}),
+    ...(opts.maxSnapshotNotes !== undefined ? { maxSnapshotNotes: opts.maxSnapshotNotes } : {}),
   });
   opts.routes?.(app);
 

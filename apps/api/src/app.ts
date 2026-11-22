@@ -30,6 +30,7 @@ import { registerPriorityRoutes } from './projects/priority-routes.ts';
 import { registerLifecycleRoutes } from './projects/lifecycle-routes.ts';
 import { registerProjectRoutes } from './projects/routes.ts';
 import { registerRoadmapRoutes } from './roadmaps/routes.ts';
+import { registerSnapshotRoutes } from './snapshots/routes.ts';
 import { registerLocalFileRoutes } from './files/local-routes.ts';
 import { createObjectStore, LocalObjectStore, MemoryObjectStore, type ObjectStore } from './files/object-store.ts';
 import { createScanner, type Scanner } from './files/scanner.ts';
@@ -57,6 +58,10 @@ export interface AppDeps {
   maxConcurrentUploads?: number;
   /** How long an upload's body may take to arrive; defaults to UPLOAD_READ_TIMEOUT_MS. Tests shorten it. */
   uploadReadTimeoutMs?: number;
+  /** Most snapshots one roadmap may hold; defaults to the shared limit. Tests lower it. */
+  maxSnapshots?: number;
+  /** Most notes one snapshot may hold; defaults to the shared limit. Tests lower it. */
+  maxSnapshotNotes?: number;
   /** Where attachments are kept; defaults to the store named in the config. */
   objectStore?: ObjectStore;
   /** Virus scanner for uploads; defaults to the scanner named in the config. */
@@ -176,6 +181,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     ...(deps.maxFilesPerItem !== undefined && { maxFilesPerItem: deps.maxFilesPerItem }),
     ...(deps.maxConcurrentUploads !== undefined && { maxConcurrentUploads: deps.maxConcurrentUploads }),
     ...(deps.uploadReadTimeoutMs !== undefined && { uploadReadTimeoutMs: deps.uploadReadTimeoutMs }),
+  });
+
+  registerSnapshotRoutes(app, {
+    now,
+    objectStore,
+    ...(deps.maxSnapshots !== undefined && { maxSnapshots: deps.maxSnapshots }),
+    ...(deps.maxSnapshotNotes !== undefined && { maxNotes: deps.maxSnapshotNotes }),
   });
 
   // Only stores that keep files on this server need the API to serve them; S3 links go straight to S3.

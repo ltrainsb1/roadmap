@@ -38,7 +38,7 @@ export interface TimelineRange {
   width: number;
 }
 
-export function timelineRange(items: readonly Project[], today: string, zoom: TimelineZoom): TimelineRange {
+export function timelineRange(items: readonly Pick<Project, 'startDate' | 'endDate' | 'milestones'>[], today: string, zoom: TimelineZoom): TimelineRange {
   let min = dayNumber(today);
   let max = min;
   const take = (date: string | null) => {
@@ -60,6 +60,23 @@ export function timelineRange(items: readonly Project[], today: string, zoom: Ti
   // Rounded down so days × dayWidth never passes the cap through float error.
   const dayWidth = Math.min(DAY_WIDTH[zoom], Math.floor((MAX_AXIS_WIDTH / days) * 1e6) / 1e6);
   return { start: dateOf(startDay), end: dateOf(endDay), days, dayWidth, width: days * dayWidth };
+}
+
+const WEEKS_MAX_DAYS = 120;
+const MONTHS_MAX_DAYS = 1100;
+
+/** The whole range scaled to exactly `width` px. Zoom by span: up to 120 days 'weeks', up to 1,100 'months', else 'quarters'. */
+export function fitTimeline(
+  items: readonly Pick<Project, 'startDate' | 'endDate' | 'milestones'>[],
+  today: string,
+  width: number,
+): { range: TimelineRange; zoom: TimelineZoom } {
+  const { days } = timelineRange(items, today, 'weeks'); // the span does not depend on the zoom
+  const zoom: TimelineZoom = days <= WEEKS_MAX_DAYS ? 'weeks' : days <= MONTHS_MAX_DAYS ? 'months' : 'quarters';
+  const range = timelineRange(items, today, zoom);
+  // Rounded down so days × dayWidth never passes the width through float error.
+  const dayWidth = Math.floor((width / range.days) * 1e6) / 1e6;
+  return { range: { ...range, dayWidth, width: range.days * dayWidth }, zoom };
 }
 
 /** Pixels from the axis start to the left edge of `date`. */

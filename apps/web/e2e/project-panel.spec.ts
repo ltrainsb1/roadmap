@@ -1,27 +1,16 @@
-import { expect, test, type Page } from '@playwright/test';
-import {
-  apiAs,
-  createRoadmap,
-  createSignedInUser,
-  expectNoA11yViolations,
-  inviteAndJoin,
-  openProject,
-  projectRow,
-  seedProject,
-  useCspGuard,
-} from './helpers.ts';
+import type { Page } from '@playwright/test';
+import { apiAs, expectNoA11yViolations, openProject, projectRow, seedProject, useCspGuard } from './helpers.ts';
+import { expect, joinByApi, test } from './fixtures.ts';
 
 useCspGuard();
 
 const panelOf = (page: Page, title: string) => page.getByRole('region', { name: title, exact: true });
 const projectUrl = (roadmapId: string, projectId: string) => `/r/${roadmapId}/projects/${projectId}`;
 
-test('FR-1.4: an Admin opens an item, changes title, description, status and dates, saves, and the row and a reload show them', async ({ page, browser }, testInfo) => {
+test('FR-1.4: an Admin opens an item, changes title, description, status and dates, saves, and the row and a reload show them', async ({ page, browser, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'editor');
-  const id = await createRoadmap(page, 'Edit plan');
-  const admin = await inviteAndJoin(page, browser, testInfo, 'Edit plan', 'chief', 'Admin');
-  const call = await apiAs(page);
+  const id = roadmap.id;
+  const admin = await joinByApi(browser, call, id, 'admin', 'chief');
   const itemId = await seedProject(call, id, 'Launch site');
 
   const p = admin.page;
@@ -64,13 +53,11 @@ test('FR-1.4: an Admin opens an item, changes title, description, status and dat
   await admin.context.close();
 });
 
-test('the status pill in the row changes status without opening the panel', async ({ page }) => {
+test('the status pill in the row changes status without opening the panel', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'pill');
-  const id = await createRoadmap(page, 'Pill plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   await seedProject(call, id, 'Write copy');
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
 
   const pill = page.getByRole('button', { name: /^Status of Write copy/ });
   await expect(pill).toContainText('Not started');
@@ -96,12 +83,10 @@ test('the status pill in the row changes status without opening the panel', asyn
   await expect(page.getByRole('menu')).toHaveCount(0);
 });
 
-test('Review focus 1: when someone else saved first, Save shows the conflict message, and Reload brings in their change', async ({ page, browser }, testInfo) => {
+test('Review focus 1: when someone else saved first, Save shows the conflict message, and Reload brings in their change', async ({ page, browser, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'racer');
-  const id = await createRoadmap(page, 'Race plan');
-  const other = await inviteAndJoin(page, browser, testInfo, 'Race plan', 'rival', 'Admin');
-  const call = await apiAs(page);
+  const id = roadmap.id;
+  const other = await joinByApi(browser, call, id, 'admin', 'rival');
   const itemId = await seedProject(call, id, 'Original');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Original');
@@ -132,11 +117,9 @@ test('Review focus 1: when someone else saved first, Save shows the conflict mes
   await other.context.close();
 });
 
-test('Review focus 4: an end date before the start date shows "The end date is before the start date." under End date', async ({ page }) => {
+test('Review focus 4: an end date before the start date shows "The end date is before the start date." under End date', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'dates');
-  const id = await createRoadmap(page, 'Date plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Season');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Season');
@@ -171,11 +154,9 @@ test('Review focus 4: an end date before the start date shows "The end date is b
   await expect(panel.getByText('The end date is before the start date.')).toHaveCount(0);
 });
 
-test('an empty title shows "Enter a title." under Title and sends nothing', async ({ page }) => {
+test('an empty title shows "Enter a title." under Title and sends nothing', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'blank2');
-  const id = await createRoadmap(page, 'Blank plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Keep me');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Keep me');
@@ -188,11 +169,9 @@ test('an empty title shows "Enter a title." under Title and sends nothing', asyn
   await expect(projectRow(page, 'Keep me')).toBeVisible();
 });
 
-test('a child outside its parent\'s dates saves and shows "Dates fall outside {parent}\'s dates." and the row shows the warning icon', async ({ page }) => {
+test('a child outside its parent\'s dates saves and shows "Dates fall outside {parent}\'s dates." and the row shows the warning icon', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'warner2');
-  const id = await createRoadmap(page, 'Warn plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const parent = await seedProject(call, id, 'Season');
   const child = await seedProject(call, id, 'Opening night', parent);
   await call('PATCH', `/api/roadmaps/${id}/projects/${parent}`, { version: 1, startDate: '2027-03-01', endDate: '2027-03-31' });
@@ -209,14 +188,12 @@ test('a child outside its parent\'s dates saves and shows "Dates fall outside {p
   await expect(projectRow(page, 'Opening night').getByRole('img', { name: 'Has warnings' })).toBeVisible();
 });
 
-test('a Contributor who is not assigned sees the fields read-only with the explanation, and one who is assigned can save', async ({ page, browser }, testInfo) => {
-  await createSignedInUser(page, 'lead2');
-  const id = await createRoadmap(page, 'Rights plan');
-  const guest = await inviteAndJoin(page, browser, testInfo, 'Rights plan', 'helper2', 'Contributor');
-  const call = await apiAs(page);
+test('a Contributor who is not assigned sees the fields read-only with the explanation, and one who is assigned can save', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const guest = await joinByApi(browser, call, id, 'contributor', 'helper2');
   const mine = await seedProject(call, id, 'Mine');
   const theirs = await seedProject(call, id, 'Theirs');
-  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.email)!;
+  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.user.email)!;
 
   const p = guest.page;
   await p.setViewportSize({ width: 1280, height: 800 });
@@ -248,13 +225,11 @@ test('a Contributor who is not assigned sees the fields read-only with the expla
   await guest.context.close();
 });
 
-test('the status pill reports a stale version with the conflict message and refreshes the list', async ({ page }) => {
+test('the status pill reports a stale version with the conflict message and refreshes the list', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'stale');
-  const id = await createRoadmap(page, 'Stale plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Moving');
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
   await expect(projectRow(page, 'Moving')).toBeVisible();
   await call('PATCH', `/api/roadmaps/${id}/projects/${itemId}`, { version: 1, title: 'Moved' });
 
@@ -265,10 +240,8 @@ test('the status pill reports a stale version with the conflict message and refr
   await expect(projectRow(page, 'Moved')).toContainText('Not started');
 });
 
-test('the panel is a side panel at 1280 px and a full screen with "Back to projects" at 375 px', async ({ page }) => {
-  await createSignedInUser(page, 'sizer');
-  const id = await createRoadmap(page, 'Size plan');
-  const call = await apiAs(page);
+test('the panel is a side panel at 1280 px and a full screen with "Back to projects" at 375 px', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await seedProject(call, id, 'Beta');
 
@@ -298,11 +271,9 @@ test('the panel is a side panel at 1280 px and a full screen with "Back to proje
   await expect(page.getByRole('link', { name: 'Alpha', exact: true })).toBeFocused();
 });
 
-test('opening the panel\'s address directly shows the item, and an unknown id says the item no longer exists', async ({ page }) => {
+test('opening the panel\'s address directly shows the item, and an unknown id says the item no longer exists', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'direct');
-  const id = await createRoadmap(page, 'Direct plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const parent = await seedProject(call, id, 'Alpha');
   const child = await seedProject(call, id, 'Beta', parent);
 
@@ -322,12 +293,10 @@ test('opening the panel\'s address directly shows the item, and an unknown id sa
   await expect(page.getByText("This item no longer exists, or you don't have access to it.")).toHaveCount(0);
 });
 
-test('saving an item that another session deleted explains it and shows the missing-item panel', async ({ page, browser }, testInfo) => {
+test('saving an item that another session deleted explains it and shows the missing-item panel', async ({ page, browser, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'vanish');
-  const id = await createRoadmap(page, 'Vanish plan');
-  const other = await inviteAndJoin(page, browser, testInfo, 'Vanish plan', 'remover', 'Admin');
-  const call = await apiAs(page);
+  const id = roadmap.id;
+  const other = await joinByApi(browser, call, id, 'admin', 'remover');
   const itemId = await seedProject(call, id, 'Doomed draft');
   await seedProject(call, id, 'Survivor');
   await page.goto(projectUrl(id, itemId));
@@ -344,13 +313,11 @@ test('saving an item that another session deleted explains it and shows the miss
   await other.context.close();
 });
 
-test('saving after being unassigned explains it', async ({ page, browser }, testInfo) => {
-  await createSignedInUser(page, 'unassigner');
-  const id = await createRoadmap(page, 'Unassign plan');
-  const guest = await inviteAndJoin(page, browser, testInfo, 'Unassign plan', 'dropped', 'Contributor');
-  const call = await apiAs(page);
+test('saving after being unassigned explains it', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const guest = await joinByApi(browser, call, id, 'contributor', 'dropped');
   const itemId = await seedProject(call, id, 'Was mine');
-  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.email)!;
+  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.user.email)!;
   await call('PUT', `/api/roadmaps/${id}/projects/${itemId}/assignees`, { userIds: [helper.userId] });
 
   const p = guest.page;
@@ -370,11 +337,9 @@ test('saving after being unassigned explains it', async ({ page, browser }, test
   await guest.context.close();
 });
 
-test('focus moves into the panel and back to the row on Close and on Escape; the panel passes axe', async ({ page }) => {
+test('focus moves into the panel and back to the row on Close and on Escape; the panel passes axe', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'focus');
-  const id = await createRoadmap(page, 'Focus plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await seedProject(call, id, 'Beta');
   await page.goto(`/r/${id}/projects`);
@@ -412,11 +377,9 @@ test('focus moves into the panel and back to the row on Close and on Escape; the
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeFocused();
 });
 
-test('a background refetch does not wipe what is typed in the panel', async ({ page }) => {
+test('a background refetch does not wipe what is typed in the panel', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'typing');
-  const id = await createRoadmap(page, 'Typing plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Alpha');
@@ -437,11 +400,9 @@ test('a background refetch does not wipe what is typed in the panel', async ({ p
   expect(stored.items.find((i) => i.id === itemId)).toMatchObject({ status: 'done', description: '' });
 });
 
-test('changing status from the row while the panel has unsaved edits keeps the edits, and Save succeeds', async ({ page }) => {
+test('changing status from the row while the panel has unsaved edits keeps the edits, and Save succeeds', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'both');
-  const id = await createRoadmap(page, 'Both plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Alpha');
@@ -470,13 +431,11 @@ test('changing status from the row while the panel has unsaved edits keeps the e
   await expect(again.getByLabel('Status', { exact: true })).toHaveValue('blocked');
 });
 
-test('unsaved edits are not thrown away silently: Escape, Close, Back to projects and another row ask first', async ({ page }) => {
+test('unsaved edits are not thrown away silently: Escape, Close, Back to projects and another row ask first', async ({ page, call, roadmap }) => {
   // A long walk through one panel: slow, so a timeout under load names its step instead of the test's budget.
   test.slow();
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'guard');
-  const id = await createRoadmap(page, 'Guard plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await seedProject(call, id, 'Beta');
   await page.goto(projectUrl(id, itemId));
@@ -484,8 +443,8 @@ test('unsaved edits are not thrown away silently: Escape, Close, Back to project
   const description = panel.getByLabel('Description', { exact: true });
   const dialog = page.getByRole('dialog', { name: 'Discard your unsaved changes to Alpha?' });
 
-  // A clean form closes at once.
-  await panel.focus();
+  // A clean form closes at once. Escape is heard inside the panel, where opening it puts focus.
+  await expect(panel.getByRole('heading', { name: 'Alpha', level: 2 })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(`/r/${id}/projects`);
   await expect(dialog).toHaveCount(0);
@@ -540,10 +499,8 @@ test('unsaved edits are not thrown away silently: Escape, Close, Back to project
   await expect(page).toHaveURL(`/r/${id}/projects`);
 });
 
-test('Back to projects asks before discarding unsaved edits at 375 px', async ({ page }) => {
-  await createSignedInUser(page, 'guard2');
-  const id = await createRoadmap(page, 'Guard small');
-  const call = await apiAs(page);
+test('Back to projects asks before discarding unsaved edits at 375 px', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto(projectUrl(id, itemId));
@@ -559,11 +516,9 @@ test('Back to projects asks before discarding unsaved edits at 375 px', async ({
   await expect(page.getByRole('link', { name: 'Alpha', exact: true })).toBeFocused();
 });
 
-test('New project is the primary button until an editable panel opens, then Save is', async ({ page }) => {
+test('New project is the primary button until an editable panel opens, then Save is', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'primary');
-  const id = await createRoadmap(page, 'Primary plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.goto(`/r/${id}/projects`);
   const add = page.getByRole('button', { name: 'New project' });
@@ -578,11 +533,9 @@ test('New project is the primary button until an editable panel opens, then Save
   expect(itemId).toBeTruthy();
 });
 
-test("a status change from the row does not hide another session's edit", async ({ page }) => {
+test("a status change from the row does not hide another session's edit", async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'hidden');
-  const id = await createRoadmap(page, 'Hidden plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Alpha');
@@ -619,12 +572,10 @@ interface Member {
 const membersOf = async (call: Awaited<ReturnType<typeof apiAs>>, roadmapId: string) =>
   (await call<{ members: Member[] }>('GET', `/api/roadmaps/${roadmapId}/members`)).members;
 
-test('FR-1.6: an Admin assigns two members and the row lists both names', async ({ page, browser }, testInfo) => {
+test('FR-1.6: an Admin assigns two members and the row lists both names', async ({ page, browser, owner, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  const owner = await createSignedInUser(page, 'boss');
-  const id = await createRoadmap(page, 'Assign plan');
-  const second = await inviteAndJoin(page, browser, testInfo, 'Assign plan', 'pal', 'Contributor');
-  const call = await apiAs(page);
+  const id = roadmap.id;
+  const second = await joinByApi(browser, call, id, 'contributor', 'pal');
   const itemId = await seedProject(call, id, 'Build it');
   await page.goto(projectUrl(id, itemId));
 
@@ -634,29 +585,27 @@ test('FR-1.6: an Admin assigns two members and the row lists both names', async 
   // The box ticks once the server has saved it.
   await group.getByLabel(owner.name, { exact: true }).click();
   await expect(group.getByLabel(owner.name, { exact: true })).toBeChecked();
-  await group.getByLabel(second.name, { exact: true }).click();
-  await expect(group.getByLabel(second.name, { exact: true })).toBeChecked();
+  await group.getByLabel(second.user.name, { exact: true }).click();
+  await expect(group.getByLabel(second.user.name, { exact: true })).toBeChecked();
   await expect(projectRow(page, 'Build it')).toContainText(owner.name);
-  await expect(projectRow(page, 'Build it')).toContainText(second.name);
+  await expect(projectRow(page, 'Build it')).toContainText(second.user.name);
   await expect(page.getByRole('alert')).toHaveCount(0);
 
   await page.reload();
   const again = panelOf(page, 'Build it').getByRole('group', { name: 'Assignees' });
   await expect(again.getByLabel(owner.name, { exact: true })).toBeChecked();
-  await expect(again.getByLabel(second.name, { exact: true })).toBeChecked();
+  await expect(again.getByLabel(second.user.name, { exact: true })).toBeChecked();
 
   await again.getByLabel(owner.name, { exact: true }).click();
   await expect(projectRow(page, 'Build it')).not.toContainText(owner.name);
-  await expect(projectRow(page, 'Build it')).toContainText(second.name);
+  await expect(projectRow(page, 'Build it')).toContainText(second.user.name);
   await second.context.close();
 });
 
-test("FR-1.6: ticking an assignee on a stale list shows the conflict message and never drops someone else's assignment", async ({ page, browser }, testInfo) => {
+test("FR-1.6: ticking an assignee on a stale list shows the conflict message and never drops someone else's assignment", async ({ page, browser, owner, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  const owner = await createSignedInUser(page, 'tick');
-  const id = await createRoadmap(page, 'Tick plan');
-  const other = await inviteAndJoin(page, browser, testInfo, 'Tick plan', 'carol', 'Admin');
-  const call = await apiAs(page);
+  const id = roadmap.id;
+  const other = await joinByApi(browser, call, id, 'admin', 'carol');
   const itemId = await seedProject(call, id, 'Shared work');
   await page.goto(projectUrl(id, itemId));
   const group = panelOf(page, 'Shared work').getByRole('group', { name: 'Assignees' });
@@ -664,13 +613,13 @@ test("FR-1.6: ticking an assignee on a stale list shows the conflict message and
 
   // A second session assigns Carol; this page has not refetched, so its list still shows nobody assigned.
   const theirs = await apiAs(other.page);
-  await theirs('PUT', `/api/roadmaps/${id}/projects/${itemId}/assignees`, { userIds: [(await membersOf(call, id)).find((m) => m.name === other.name)!.userId] });
-  await expect(group.getByLabel(other.name, { exact: true })).not.toBeChecked();
+  await theirs('PUT', `/api/roadmaps/${id}/projects/${itemId}/assignees`, { userIds: [(await membersOf(call, id)).find((m) => m.name === other.user.name)!.userId] });
+  await expect(group.getByLabel(other.user.name, { exact: true })).not.toBeChecked();
 
   await group.getByLabel(owner.name, { exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Someone else changed this at the same time. Reload and try again.');
   // The list was refetched: Carol is still assigned, and the refused tick did not land.
-  await expect(group.getByLabel(other.name, { exact: true })).toBeChecked();
+  await expect(group.getByLabel(other.user.name, { exact: true })).toBeChecked();
   await expect(group.getByLabel(owner.name, { exact: true })).not.toBeChecked();
 
   // Trying again from the fresh list keeps both.
@@ -680,15 +629,13 @@ test("FR-1.6: ticking an assignee on a stale list shows the conflict message and
   await page.reload();
   const again = panelOf(page, 'Shared work').getByRole('group', { name: 'Assignees' });
   await expect(again.getByLabel(owner.name, { exact: true })).toBeChecked();
-  await expect(again.getByLabel(other.name, { exact: true })).toBeChecked();
+  await expect(again.getByLabel(other.user.name, { exact: true })).toBeChecked();
   await other.context.close();
 });
 
-test('FR-1.4: an Admin adds a tag, a link and a milestone, saves, and a reload shows them', async ({ page }) => {
+test('FR-1.4: an Admin adds a tag, a link and a milestone, saves, and a reload shows them', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'lister');
-  const id = await createRoadmap(page, 'List plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Ship it');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Ship it');
@@ -743,11 +690,9 @@ test('FR-1.4: an Admin adds a tag, a link and a milestone, saves, and a reload s
   expect(stored.milestones[0]!.id).toBe(milestoneId);
 });
 
-test('FR-1.4: an Admin marks an item blocked by another, and the select does not offer the item itself, its parent or its children', async ({ page }) => {
+test('FR-1.4: an Admin marks an item blocked by another, and the select does not offer the item itself, its parent or its children', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'blocker');
-  const id = await createRoadmap(page, 'Block plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const parent = await seedProject(call, id, 'Parent item');
   const middle = await seedProject(call, id, 'Middle item', parent);
   await seedProject(call, id, 'Child item', middle);
@@ -786,11 +731,9 @@ test('FR-1.4: an Admin marks an item blocked by another, and the select does not
   await expect(panelOf(page, 'Middle item').getByRole('button', { name: /^Remove / })).toHaveCount(0);
 });
 
-test('an item that starts before its blocker ends shows "Starts before {blocker} ends."', async ({ page }) => {
+test('an item that starts before its blocker ends shows "Starts before {blocker} ends."', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'early');
-  const id = await createRoadmap(page, 'Early plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const blocker = await seedProject(call, id, 'Foundations');
   const item = await seedProject(call, id, 'Walls');
   await call('PATCH', `/api/roadmaps/${id}/projects/${blocker}`, { version: 1, startDate: '2027-01-01', endDate: '2027-06-01' });
@@ -800,13 +743,11 @@ test('an item that starts before its blocker ends shows "Starts before {blocker}
   await expect(projectRow(page, 'Walls').getByRole('img', { name: 'Has warnings' })).toBeVisible();
 });
 
-test('a Contributor sees assignees and the priority label read-only', async ({ page, browser }, testInfo) => {
-  await createSignedInUser(page, 'chief3');
-  const id = await createRoadmap(page, 'Read plan');
-  const guest = await inviteAndJoin(page, browser, testInfo, 'Read plan', 'helper3', 'Contributor');
-  const call = await apiAs(page);
+test('a Contributor sees assignees and the priority label read-only', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const guest = await joinByApi(browser, call, id, 'contributor', 'helper3');
   const mine = await seedProject(call, id, 'Mine');
-  const helper = (await membersOf(call, id)).find((m) => m.email === guest.email)!;
+  const helper = (await membersOf(call, id)).find((m) => m.email === guest.user.email)!;
   await call('PUT', `/api/roadmaps/${id}/projects/${mine}/assignees`, { userIds: [helper.userId] });
   await call('PUT', `/api/roadmaps/${id}/projects/${mine}/priority-label`, { label: 'P2' });
 
@@ -824,11 +765,9 @@ test('a Contributor sees assignees and the priority label read-only', async ({ p
   await guest.context.close();
 });
 
-test('with unsaved text in the panel, changing assignees and the priority label keeps the text, and Save succeeds and everything persists', async ({ page }) => {
+test('with unsaved text in the panel, changing assignees and the priority label keeps the text, and Save succeeds and everything persists', async ({ page, owner, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  const owner = await createSignedInUser(page, 'mixer');
-  const id = await createRoadmap(page, 'Mix plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Alpha');
@@ -851,11 +790,9 @@ test('with unsaved text in the panel, changing assignees and the priority label 
   await expect(again.getByLabel('Priority label', { exact: true })).toHaveValue('P3');
 });
 
-test('tags, links, milestones and blocked by count as unsaved edits and are asked about before leaving', async ({ page }) => {
+test('tags, links, milestones and blocked by count as unsaved edits and are asked about before leaving', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'guard2');
-  const id = await createRoadmap(page, 'Guard2 plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Alpha');
@@ -869,11 +806,9 @@ test('tags, links, milestones and blocked by count as unsaved edits and are aske
   await expect(page).toHaveURL(`/r/${id}/projects`);
 });
 
-test('FR-1.4: arrow keys on the "blocked by" select add nothing; "Add item" adds the choice and keeps focus on the select', async ({ page }) => {
+test('FR-1.4: arrow keys on the "blocked by" select add nothing; "Add item" adds the choice and keeps focus on the select', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'arrows');
-  const id = await createRoadmap(page, 'Arrow plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Target item');
   await seedProject(call, id, 'First choice');
   await seedProject(call, id, 'Second choice');
@@ -902,11 +837,9 @@ test('FR-1.4: arrow keys on the "blocked by" select add nothing; "Add item" adds
   await expect(select).toBeFocused();
 });
 
-test('the "blocked by" choices are indented by level with non-breaking spaces, which a select keeps', async ({ page }) => {
+test('the "blocked by" choices are indented by level with non-breaking spaces, which a select keeps', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'indent');
-  const id = await createRoadmap(page, 'Indent plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const top = await seedProject(call, id, 'Top item');
   const mid = await seedProject(call, id, 'Mid item', top);
   await seedProject(call, id, 'Deep item', mid);
@@ -918,11 +851,9 @@ test('the "blocked by" choices are indented by level with non-breaking spaces, w
   expect(await options.allTextContents()).toEqual(['Choose an item', 'Top item', '\u00a0\u00a0Mid item', '\u00a0\u00a0\u00a0\u00a0Deep item']);
 });
 
-test('removing a tag keeps focus in the tag list: the next remove button, else the previous, else the add field; a full list hands focus to its last tag', async ({ page }) => {
+test('removing a tag keeps focus in the tag list: the next remove button, else the previous, else the add field; a full list hands focus to its last tag', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'focuser');
-  const id = await createRoadmap(page, 'Focus plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.goto(projectUrl(id, itemId));
   const panel = panelOf(page, 'Alpha');

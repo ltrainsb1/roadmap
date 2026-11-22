@@ -177,15 +177,6 @@ export async function signInWithRecoveryCode(page: Page, email: string, code: st
   await expect(page).toHaveURL('/');
 }
 
-/** An owner with an authenticator app, signed in on `page` and looking at the roadmap list. */
-export async function createSignedInUser(page: Page, label: string): Promise<TestUser> {
-  const user = await createEnrolledUser(page, label);
-  await signInWithTotp(page, user.email, user.secret);
-  await expect(page).toHaveURL('/');
-  await expect(page.getByRole('heading', { name: 'Roadmaps' })).toBeVisible();
-  return user;
-}
-
 /** Creates a roadmap from the picker; returns its id once the page has moved into it. */
 export async function createRoadmap(page: Page, name: string): Promise<string> {
   await page.goto('/');
@@ -242,21 +233,6 @@ export async function joinViaInvite(browser: Browser, info: TestInfo, invitePath
   await page.getByRole('button', { name: 'Create account' }).click();
   const { secret, recoveryCodes } = await enrollTotp(page);
   return { email, name, secret, recoveryCodes, context, page };
-}
-
-/** Invites `email` from the owner's Members screen and has them join in a new context. */
-export async function inviteAndJoin(
-  owner: Page,
-  browser: Browser,
-  info: TestInfo,
-  roadmapName: string,
-  label: string,
-  role: 'Admin' | 'Contributor',
-): Promise<Joined> {
-  const email = uniqueEmail(label);
-  await sendInvite(owner, email, role);
-  const path = await inviteLinkFor(email, roadmapName);
-  return joinViaInvite(browser, info, path, `${label} user`, email);
 }
 
 /** The row of the project list for the item titled `title`. */

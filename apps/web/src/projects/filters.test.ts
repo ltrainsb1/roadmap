@@ -1,6 +1,6 @@
 import { NO_FILTERS, type ProjectFilters } from '@roadmap/shared';
 import { describe, expect, test } from 'vitest';
-import { filtersFromSearch, filtersToSearch, hasNarrowing } from './filters.ts';
+import { filtersForReader, filtersFromSearch, filtersToSearch, hasNarrowing, ME, searchFor, viewOptionsFromSearch } from './filters.ts';
 
 const read = (query: string) => filtersFromSearch(new URLSearchParams(query));
 
@@ -53,5 +53,19 @@ describe('filters in the address', () => {
     expect(hasNarrowing({ ...NO_FILTERS, text: '   ' })).toBe(false);
     expect(hasNarrowing({ ...NO_FILTERS, text: 'a' })).toBe(true);
     expect(hasNarrowing({ ...NO_FILTERS, to: '2027-01-01' })).toBe(true);
+  });
+
+  test('FR-1.7: zoom and level are read with defaults and written only when not the default', () => {
+    expect(viewOptionsFromSearch(new URLSearchParams('zoom=weeks&level=3'))).toEqual({ zoom: 'weeks', level: 3 });
+    expect(viewOptionsFromSearch(new URLSearchParams('zoom=days&level=9'))).toEqual({ zoom: 'months', level: 1 });
+    expect(searchFor(NO_FILTERS, { zoom: 'months', level: 1 }).toString()).toBe('');
+    expect(searchFor(NO_FILTERS, { zoom: 'quarters', level: 1 }).toString()).toBe('zoom=quarters');
+  });
+
+  test('FR-1.8: "Assigned to me" is turned into the reader\'s id, and kept as "me" while nobody is signed in', () => {
+    const filters = { ...NO_FILTERS, assigneeIds: [ME, 'u2'] };
+    expect(filtersForReader(filters, 'u1').assigneeIds).toEqual(['u1', 'u2']);
+    expect(filtersForReader(filters, undefined).assigneeIds).toEqual([ME, 'u2']);
+    expect(filtersForReader(filters, 'u1')).toEqual({ ...filters, assigneeIds: ['u1', 'u2'] });
   });
 });

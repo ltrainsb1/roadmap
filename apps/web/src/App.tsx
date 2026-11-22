@@ -12,6 +12,7 @@ import { ResetPage } from './auth/ResetPage.tsx';
 import { AuditPage } from './audit/AuditPage.tsx';
 import { MembersPage } from './members/MembersPage.tsx';
 import { ProjectsPage } from './projects/ProjectsPage.tsx';
+import type { ProjectView } from './projects/ViewSwitcher.tsx';
 import { PickerPage } from './roadmaps/PickerPage.tsx';
 import { RoadmapIndex, RoadmapLayout } from './roadmaps/RoadmapLayout.tsx';
 import { SecurityPage } from './settings/SecurityPage.tsx';
@@ -33,9 +34,9 @@ function SignInRedirect() {
 }
 
 /** Keyed by roadmap, so collapsed items, an open add row and the like never carry over when the roadmap is switched. */
-function ProjectsRoute() {
+function ProjectsRoute({ view }: { view: ProjectView }) {
   const { roadmapId } = useParams();
-  return <ProjectsPage key={roadmapId} />;
+  return <ProjectsPage key={roadmapId} view={view} />;
 }
 
 export function App() {
@@ -73,7 +74,9 @@ export function App() {
             }
           >
             <Route index element={<RoadmapIndex />} />
-            <Route path="projects/:projectId?" element={<ProjectsRoute />} />
+            <Route path="projects/:projectId?" element={<ProjectsRoute view="list" />} />
+            <Route path="timeline/:projectId?" element={<ProjectsRoute view="timeline" />} />
+            <Route path="board/:projectId?" element={<ProjectsRoute view="board" />} />
             <Route path="members" element={<MembersPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>

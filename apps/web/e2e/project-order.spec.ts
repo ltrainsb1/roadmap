@@ -1,14 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
-import {
-  apiAs,
-  createRoadmap,
-  createSignedInUser,
-  expectNoA11yViolations,
-  inviteAndJoin,
-  projectRow,
-  seedProject,
-  useCspGuard,
-} from './helpers.ts';
+import type { Page } from '@playwright/test';
+import { apiAs, expectNoA11yViolations, projectRow, seedProject, useCspGuard } from './helpers.ts';
+import { expect, joinByApi, test, type ApiCall } from './fixtures.ts';
 
 useCspGuard();
 
@@ -24,37 +16,31 @@ async function pressUntilAnnounced(page: Page, key: string, text: string) {
   }).toPass({ timeout: 10_000 });
 }
 
-type Call = Awaited<ReturnType<typeof apiAs>>;
 interface Row {
   id: string;
   title: string;
   parentId: string | null;
   archived: boolean;
 }
-const list = async (call: Call, roadmapId: string) => (await call<{ items: Row[] }>('GET', `/api/roadmaps/${roadmapId}/projects`)).items;
+const list = async (call: ApiCall, roadmapId: string) => (await call<{ items: Row[] }>('GET', `/api/roadmaps/${roadmapId}/projects`)).items;
 const titles = (page: Page) => page.locator('.item-title').allInnerTexts();
 
-/** An Owner with a roadmap that holds "One", "Two" and "Three" at the top level. */
-async function threeProjects(page: Page, label: string) {
+/** Puts "One", "Two" and "Three" at the top level of the roadmap and opens its list. */
+async function threeProjects(page: Page, call: ApiCall, id: string) {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, label);
-  const id = await createRoadmap(page, `${label} plan`);
-  const call = await apiAs(page);
   const ids = [await seedProject(call, id, 'One'), await seedProject(call, id, 'Two'), await seedProject(call, id, 'Three')];
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
   await expect(projectRow(page, 'Three')).toBeVisible();
-  return { id, call, ids };
+  return { ids };
 }
 
-test('FR-1.3: an Admin moves a sub-project up with the row menu, and the order survives a reload', async ({ page }) => {
+test('FR-1.3: an Admin moves a sub-project up with the row menu, and the order survives a reload', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'mover');
-  const id = await createRoadmap(page, 'Move plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const parent = await seedProject(call, id, 'Season');
   await seedProject(call, id, 'Opening', parent);
   await seedProject(call, id, 'Closing', parent);
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
   await expect(projectRow(page, 'Closing')).toBeVisible();
 
   // The ends of a group cannot move further.
@@ -81,8 +67,8 @@ test('FR-1.3: an Admin moves a sub-project up with the row menu, and the order s
   await expect.poll(() => titles(page)).toEqual(['Season', 'Closing', 'Opening']);
 });
 
-test('FR-1.3: an Admin reorders with the keyboard on the drag handle', async ({ page }) => {
-  await threeProjects(page, 'keys');
+test('FR-1.3: an Admin reorders with the keyboard on the drag handle', async ({ page, call, roadmap }) => {
+  await threeProjects(page, call, roadmap.id);
   const handle = page.getByRole('button', { name: 'Reorder One' });
   await handle.focus();
   await page.keyboard.press('Space');
@@ -110,9 +96,9 @@ test('FR-1.3: an Admin reorders with the keyboard on the drag handle', async ({ 
   await expect.poll(() => titles(page)).toEqual(['Two', 'One', 'Three']);
 });
 
-test('FR-1.3: an Admin drags a row with the mouse', async ({ page, isMobile }) => {
+test('FR-1.3: an Admin drags a row with the mouse', async ({ page, call, roadmap, isMobile }) => {
   test.skip(isMobile, 'a mouse drag; touch is covered by the sensor settings');
-  await threeProjects(page, 'dragger');
+  await threeProjects(page, call, roadmap.id);
   const from = (await page.getByRole('button', { name: 'Reorder One' }).boundingBox())!;
   const to = (await projectRow(page, 'Three').boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -125,9 +111,36 @@ test('FR-1.3: an Admin drags a row with the mouse', async ({ page, isMobile }) =
   await expect.poll(() => titles(page)).toEqual(['Two', 'Three', 'One']);
 });
 
-test('Review focus 5: when a sibling was added in another session, the reorder shows "The list changed while you were reordering. Try again." and the list refreshes', async ({ page }) => {
-  const { id, call } = await threeProjects(page, 'stale');
-  await seedProject(call, id, 'Four');
+test('FR-1.3: an Admin reorders a row by touch at 375 px, with a long press', async ({ page, call, roadmap }) => {
+  await threeProjects(page, call, roadmap.id);
+  await page.setViewportSize({ width: 375, height: 667 });
+  const handle = page.getByRole('button', { name: 'Reorder One' });
+  await expect(handle).toBeVisible();
+  const h = (await handle.boundingBox())!;
+  const target = (await projectRow(page, 'Three').boundingBox())!;
+  const from = { x: h.x + h.width / 2, y: h.y + h.height / 2 };
+  const to = { x: from.x, y: target.y + target.height / 2 + 10 };
+
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', points: { x: number; y: number }[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map((p) => ({ x: p.x, y: p.y, id: 1 })) });
+  // A long press picks the row up; dnd-kit says so once it has.
+  await touch('touchStart', [from]);
+  await expect(page.getByText('Picked up One.', { exact: true })).toBeAttached();
+  for (let i = 1; i <= 10; i += 1) {
+    await touch('touchMove', [{ x: from.x, y: from.y + ((to.y - from.y) * i) / 10 }]);
+  }
+  await expect(page.getByText('Moved One to position 3 of 3.', { exact: true })).toBeAttached();
+  await touch('touchEnd', []);
+  await expect(page.getByText('Dropped One at position 3 of 3.', { exact: true })).toBeAttached();
+  await expect.poll(() => titles(page)).toEqual(['Two', 'Three', 'One']);
+  await page.reload();
+  await expect.poll(() => titles(page)).toEqual(['Two', 'Three', 'One']);
+});
+
+test('Review focus 5: when a sibling was added in another session, the reorder shows "The list changed while you were reordering. Try again." and the list refreshes', async ({ page, call, roadmap }) => {
+  await threeProjects(page, call, roadmap.id);
+  await seedProject(call, roadmap.id, 'Four');
   await page.getByRole('button', { name: 'Actions for One' }).click();
   await page.getByRole('menuitem', { name: 'Move down' }).click();
   await expect(page.getByRole('alert')).toHaveText('The list changed while you were reordering. Try again.');
@@ -135,15 +148,13 @@ test('Review focus 5: when a sibling was added in another session, the reorder s
   expect(await titles(page)).toEqual(['One', 'Two', 'Three', 'Four']);
 });
 
-test('a Contributor sees no drag handles and no Move items', async ({ page, browser }, testInfo) => {
-  await createSignedInUser(page, 'owner4');
-  const id = await createRoadmap(page, 'Handles plan');
-  const guest = await inviteAndJoin(page, browser, testInfo, 'Handles plan', 'helper4', 'Contributor');
-  const call = await apiAs(page);
+test('a Contributor sees no drag handles and no Move items', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const guest = await joinByApi(browser, call, id, 'contributor', 'helper4');
   const mine = await seedProject(call, id, 'Mine');
   await seedProject(call, id, 'Under mine', mine);
   await seedProject(call, id, 'Theirs');
-  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.email)!;
+  const helper = (await call<{ members: { userId: string; email: string }[] }>('GET', `/api/roadmaps/${id}/members`)).members.find((m) => m.email === guest.user.email)!;
   await call('PUT', `/api/roadmaps/${id}/projects/${mine}/assignees`, { userIds: [helper.userId] });
 
   const p = guest.page;
@@ -158,8 +169,9 @@ test('a Contributor sees no drag handles and no Move items', async ({ page, brow
   await guest.context.close();
 });
 
-test('an Admin sets the priority label to P1 and the row shows "1 · P1"', async ({ page }) => {
-  const { id, ids } = await threeProjects(page, 'labeller');
+test('an Admin sets the priority label to P1 and the row shows "1 · P1"', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
+  const { ids } = await threeProjects(page, call, id);
   await page.goto(`/r/${id}/projects/${ids[0]}`);
   const panel = page.getByRole('region', { name: 'One', exact: true });
   await expect(panel.getByLabel('Priority label', { exact: true }).locator('option')).toHaveText(['None', 'P1', 'P2', 'P3', 'P4']);
@@ -169,11 +181,9 @@ test('an Admin sets the priority label to P1 and the row shows "1 · P1"', async
   await expect(projectRow(page, 'One').getByRole('cell', { name: '1', exact: true })).toBeVisible();
 });
 
-test('archiving shows "Archived {title}." and removes the item and its children from the list', async ({ page }) => {
+test('archiving shows "Archived {title}." and removes the item and its children from the list', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'archiver');
-  const id = await createRoadmap(page, 'Archive plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const parent = await seedProject(call, id, 'Old season');
   await seedProject(call, id, 'Old opening', parent);
   await seedProject(call, id, 'Old closing', parent);
@@ -196,12 +206,10 @@ test('archiving shows "Archived {title}." and removes the item and its children 
   expect(stored.find((i) => i.title === 'Keeper')!.archived).toBe(false);
 });
 
-test('archiving an item another session deleted says it no longer exists, and the row goes', async ({ page, browser }, testInfo) => {
+test('archiving an item another session deleted says it no longer exists, and the row goes', async ({ page, browser, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'late');
-  const id = await createRoadmap(page, 'Late plan');
-  const other = await inviteAndJoin(page, browser, testInfo, 'Late plan', 'quick', 'Admin');
-  const call = await apiAs(page);
+  const id = roadmap.id;
+  const other = await joinByApi(browser, call, id, 'admin', 'quick');
   const gone = await seedProject(call, id, 'Gone already');
   await seedProject(call, id, 'Still here');
   await page.goto(`/r/${id}/projects`);
@@ -217,16 +225,14 @@ test('archiving an item another session deleted says it no longer exists, and th
   await other.context.close();
 });
 
-test('Review focus 2: deleting an item with two children names the count in the dialog, and Cancel keeps it', async ({ page }) => {
+test('Review focus 2: deleting an item with two children names the count in the dialog, and Cancel keeps it', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'deleter');
-  const id = await createRoadmap(page, 'Delete plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const parent = await seedProject(call, id, 'Doomed');
   await seedProject(call, id, 'Child a', parent);
   await seedProject(call, id, 'Child b', parent);
   const lone = await seedProject(call, id, 'Lonely');
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
   await expect(projectRow(page, 'Child b')).toBeVisible();
 
   await page.getByRole('button', { name: 'Actions for Doomed' }).click();
@@ -256,11 +262,9 @@ test('Review focus 2: deleting an item with two children names the count in the 
   expect((await list(call, id)).map((i) => i.id)).toEqual([lone]);
 });
 
-test('archive and delete of the open item ask before discarding unsaved edits', async ({ page }) => {
+test('archive and delete of the open item ask before discarding unsaved edits', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'careful');
-  const id = await createRoadmap(page, 'Careful plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const itemId = await seedProject(call, id, 'Alpha');
   await page.goto(`/r/${id}/projects/${itemId}`);
   await page.getByRole('region', { name: 'Alpha', exact: true }).getByLabel('Title', { exact: true }).fill('Alpha, edited');
@@ -275,17 +279,15 @@ test('archive and delete of the open item ask before discarding unsaved edits', 
   await expect(page.getByRole('dialog', { name: 'Delete Alpha?' })).toBeVisible();
 });
 
-test('FR-1.3: a sub-project moves only among its own siblings, and a dragged project carries its children with it', async ({ page }) => {
+test('FR-1.3: a sub-project moves only among its own siblings, and a dragged project carries its children with it', async ({ page, call, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createSignedInUser(page, 'nest');
-  const id = await createRoadmap(page, 'Nest plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const season = await seedProject(call, id, 'Season');
   await seedProject(call, id, 'Opening', season);
   await seedProject(call, id, 'Closing', season);
   await seedProject(call, id, 'Other');
   await seedProject(call, id, 'Third');
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
   await expect(projectRow(page, 'Third')).toBeVisible();
 
   // Every announcement the live region makes, to see where the keyboard ever took the row.

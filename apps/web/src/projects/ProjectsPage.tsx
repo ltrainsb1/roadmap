@@ -1,119 +1,84 @@
-import {
-  activeFilterCount,
-  can,
-  filterProjects,
-  type PriorityLabel,
-  type Project,
-  type ProjectFilters,
-  type ProjectList,
-  type ProjectStatus,
-} from '@roadmap/shared';
+import { activeFilterCount, can, NO_FILTERS, TIMELINE_ZOOMS, type ProjectList, type TimelineZoom } from '@roadmap/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { errorCode, itemActionMessage, messageFor } from '../api/errors.ts';
+import { messageFor } from '../api/errors.ts';
 import { useMe } from '../auth/useMe.ts';
 import { useMembers } from '../members/useMembers.ts';
 import { useRoadmap } from '../roadmaps/RoadmapLayout.tsx';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
-import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Field } from '../ui/Field.tsx';
+import { SelectField } from '../ui/SelectField.tsx';
 import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
-import { filtersFromSearch, filtersToSearch, hasNarrowing, ME } from './filters.ts';
+import { BoardView } from './BoardView.tsx';
+import { filtersForReader, filtersFromSearch, hasNarrowing, searchFor, viewOf, viewOptionsFromSearch, type ViewOptions } from './filters.ts';
+import { levelPlural } from './names.ts';
+import { actionsButtonId } from './itemParts.tsx';
 import {
-  actionsButtonId,
   NEW_PROJECT_BUTTON_ID,
   ProjectTree,
-  titleLinkId,
   useCollapsed,
   type AddTarget,
 } from './ProjectTree.tsx';
-import { ProjectPanel, type OwnChange } from './ProjectPanel.tsx';
+import { ProjectPanel } from './ProjectPanel.tsx';
 import {
   isAssigned,
   PROJECTS_KEY,
-  useArchive,
   useCreateProject,
-  useDeleteProject,
   useProjects,
-  useReorder,
-  useSetAssignees,
-  useSetPriorityLabel,
-  useUnarchive,
-  useUpdateProject,
 } from './useProjects.ts';
+import { TimelineView } from './TimelineView.tsx';
+import { todayIn } from './today.ts';
+import { useItemActions } from './useItemActions.tsx';
+import { viewPath, ViewSwitcher, type ProjectView } from './ViewSwitcher.tsx';
 
-const NONE: ReadonlySet<string> = new Set();
 const FILTERS_BUTTON_ID = 'filters-button';
 const SEARCH_ID = 'project-search';
+const ZOOM_NAMES: Record<TimelineZoom, string> = { weeks: 'Weeks', months: 'Months', quarters: 'Quarters' };
+const LEVELS: readonly ViewOptions['level'][] = [1, 2, 3, 4];
 
-/** The items the list shows, and those shown only for context, for these filters. */
-function viewOf(items: readonly Project[], filters: ProjectFilters, myId: string | undefined) {
-  if (!hasNarrowing(filters) && !filters.showArchived) return { items: items.filter((i) => !i.archived), context: NONE };
-  // "Assigned to me" is the reader, whoever wrote the address.
-  const mine = filters.assigneeIds.map((id) => (id === ME ? (myId ?? id) : id));
-  const { matches, context } = filterProjects(items, { ...filters, assigneeIds: mine });
-  return { items: items.filter((i) => matches.has(i.id) || context.has(i.id)), context };
-}
-
-export function ProjectsPage() {
+/** The items of one roadmap in one view, with the search, filters, view switcher and the item panel. */
+export function ProjectsPage({ view }: { view: ProjectView }) {
   const { roadmapId, role } = useRoadmap();
   const { projectId } = useParams();
-  const navigate = useNavigate();
   const me = useMe();
   const projects = useProjects(roadmapId);
   const members = useMembers(roadmapId);
   const create = useCreateProject(roadmapId);
-  const update = useUpdateProject(roadmapId);
-  const setAssignees = useSetAssignees(roadmapId);
-  const setPriorityLabel = useSetPriorityLabel(roadmapId);
-  const reorder = useReorder(roadmapId);
-  const archive = useArchive(roadmapId);
-  const unarchive = useUnarchive(roadmapId);
-  const deleteItem = useDeleteProject(roadmapId);
   const queryClient = useQueryClient();
   const { collapsed, toggle, expand } = useCollapsed(roadmapId);
   // The filters live in the address, and nowhere else: opening an item keeps them, and a copied link shows the same list.
   const [params, setParams] = useSearchParams();
   const myId = me.data?.user.id;
   const filters = useMemo(() => filtersFromSearch(params), [params]);
+  const options = useMemo(() => viewOptionsFromSearch(params), [params]);
+  // Every query string is built from the filters and the view settings, so changing one keeps the others.
+  const query = searchFor(filters, options).toString();
+  const search = query === '' ? '' : `?${query}`;
+  const navigate = useNavigate();
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const basePath = viewPath(roadmapId, view);
+  // Where closing the panel goes back to: the view as it was filtered.
+  const viewUrl = `${basePath}${search}`;
+  const hasPanel = projectId !== undefined;
+  const actions = useItemActions({ roadmapId, role, myId, basePath, search, projectId, projects, members });
+  const { actionError, notice, setNotice } = actions;
+
   const [adding, setAdding] = useState<AddTarget | null>(null);
-  // The message for the last failed action from a row or from a panel control that saves on change.
-  const [actionError, setActionError] = useState<string | undefined>();
-  // What the last archive or unarchive did, in a live region.
-  const [notice, setNotice] = useState('');
-  // The item the Delete dialog is open for, and why the last attempt failed.
-  const [deleting, setDeleting] = useState<Project | null>(null);
-  const [deleteError, setDeleteError] = useState<string | undefined>();
-  // Counts up when focus should go to the page heading, because the item that held it is gone.
-  const [headingFocus, setHeadingFocus] = useState(0);
-  // The latest save made outside the panel's form (status pill, assignees, priority label), which the open panel
-  // adopts so its own Save does not conflict with it.
-  const [ownChange, setOwnChange] = useState<OwnChange>();
-  // Whether the open panel has unsaved edits, and what to do once the person agrees to discard them.
-  const dirty = useRef(false);
-  const onDirtyChange = useCallback((value: boolean) => void (dirty.current = value), []);
-  const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
-  // Saves made outside the panel's form run one after another, each starting from the newest saved state of its item.
-  const statusQueue = useRef<Promise<void>>(Promise.resolve());
-  const heading = useRef<HTMLHeadingElement>(null);
-  // Set when the panel is closed on purpose: once the list is back in view, focus returns to that item's title.
-  const returnFocusTo = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (headingFocus > 0) heading.current?.focus();
-  }, [headingFocus]);
-
   const narrowing = hasNarrowing(filters);
   const filtered = narrowing || filters.showArchived;
-  const view = useMemo(() => viewOf(projects.items, filters, myId), [filters, projects.items, myId]);
-  const shown = view.items;
+  const visible = useMemo(() => viewOf(projects.items, filters, myId), [filters, projects.items, myId]);
+  const shown = visible.items;
   const tagsInUse = useMemo(() => [...new Set(projects.items.filter((i) => !i.archived).flatMap((i) => i.tags))].sort(), [projects.items]);
-  const search = params.toString() === '' ? '' : `?${params.toString()}`;
-  const setFilters = (next: typeof filters) => setParams(filtersToSearch(next), { replace: true });
-  const clearFilters = () => setParams(new URLSearchParams(), { replace: true });
+  const setFilters = (next: typeof filters) => setParams(searchFor(next, options), { replace: true });
+  const clearFilters = () => setParams(searchFor(NO_FILTERS, options), { replace: true });
+  const setZoom = (zoom: TimelineZoom) => setParams(searchFor(filters, { ...options, zoom }), { replace: true });
+  const setLevel = (level: ViewOptions['level']) => setParams(searchFor(filters, { ...options, level }), { replace: true });
+  // The Board filters the whole roadmap itself, so "Assigned to me" must already name the reader.
+  const boardFilters = useMemo(() => filtersForReader(filters, myId), [filters, myId]);
+  // Counts presses of "Today"; the Timeline scrolls to today each time it changes.
+  const [todaySignal, setTodaySignal] = useState(0);
   const closeFilters = () => {
     setFiltersOpen(false);
     document.getElementById(FILTERS_BUTTON_ID)?.focus();
@@ -136,88 +101,6 @@ export function ProjectsPage() {
     document.getElementById(parentId ? actionsButtonId(parentId) : NEW_PROJECT_BUTTON_ID)?.focus();
   };
 
-  const listPath = `/r/${encodeURIComponent(roadmapId)}/projects`;
-  // Where closing the panel goes back to: the list as it was filtered.
-  const listUrl = `${listPath}${search}`;
-  const hasPanel = projectId !== undefined;
-
-  /** Runs `action` now, or after the person agrees to discard unsaved edits in the panel. */
-  const unlessDirty = (action: () => void) => {
-    if (dirty.current) setPendingDiscard(() => action);
-    else action();
-  };
-  const closePanel = () =>
-    unlessDirty(() => {
-      returnFocusTo.current = projectId ?? null;
-      void navigate(listUrl);
-    });
-  const openItem = (itemId: string) => {
-    if (itemId === projectId) return;
-    unlessDirty(() => void navigate(`${listPath}/${encodeURIComponent(itemId)}${search}`));
-  };
-  useEffect(() => {
-    if (hasPanel || returnFocusTo.current === null) return;
-    // The row's title if it is still in the list, otherwise the page heading.
-    (document.getElementById(titleLinkId(returnFocusTo.current)) ?? heading.current)?.focus();
-    returnFocusTo.current = null;
-  }, [hasPanel]);
-
-  /**
-   * The message for a failed row or panel action. The list is refetched, so a row someone else deleted, or one the
-   * person can no longer change, shows as it now is; a refused assignee also refetches the members.
-   */
-  const recoverFrom = async (err: unknown): Promise<string> => {
-    if (errorCode(err) === 'not_a_member') void members.refetch();
-    await projects.refetch();
-    return itemActionMessage(err);
-  };
-  const failAction = (err: unknown) => void recoverFrom(err).then(setActionError);
-
-  /**
-   * Runs one of this browser's own saves for an item after the ones before it, from the item as the list last
-   * saw it, and tells the open panel about it. `save` gives back nothing when there is nothing to change.
-   */
-  const runOwnChange = (itemId: string, save: (current: Project) => Promise<Project> | undefined, status = false) => {
-    statusQueue.current = statusQueue.current.then(async () => {
-      const current = queryClient.getQueryData<ProjectList>(PROJECTS_KEY(roadmapId))?.items.find((i) => i.id === itemId);
-      if (!current) return;
-      try {
-        const saved = await save(current);
-        if (!saved) return;
-        setActionError(undefined);
-        setOwnChange((last) => ({ id: saved.id, version: saved.version, ...(status && { status: saved.status }), n: (last?.n ?? 0) + 1 }));
-      } catch (err) {
-        // Awaited, so the next queued save starts from what the server now holds.
-        setActionError(await recoverFrom(err));
-      }
-    });
-  };
-
-  const changeStatus = (item: Project, status: ProjectStatus) =>
-    runOwnChange(
-      item.id,
-      (current) => (status === current.status ? undefined : update.mutateAsync({ projectId: item.id, body: { version: current.version, status } })),
-      true,
-    );
-
-  const toggleAssignee = (itemId: string, userId: string, assigned: boolean) =>
-    runOwnChange(itemId, (current) => {
-      const ids = current.assigneeIds.filter((id) => id !== userId);
-      if (assigned) ids.push(userId);
-      return ids.length === current.assigneeIds.length && ids.every((id) => current.assigneeIds.includes(id))
-        ? undefined
-        : setAssignees.mutateAsync({ projectId: itemId, body: { userIds: ids, version: current.version } });
-    });
-
-  const changePriorityLabel = (itemId: string, label: PriorityLabel | null) =>
-    runOwnChange(itemId, (current) => (current.priorityLabel === label ? undefined : setPriorityLabel.mutateAsync({ projectId: itemId, label })));
-
-  const reorderItems = (parentId: string | null, orderedIds: string[], announce?: string) => {
-    setNotice('');
-    setActionError(undefined);
-    reorder.mutate({ parentId, orderedIds }, { onSuccess: () => announce && setNotice(announce), onError: failAction });
-  };
-
   const addItem = async (parentId: string | null, title: string) => {
     const { id } = await create.mutateAsync({ parentId, title });
     // The parent may have been collapsed while the row was open; the new item must show.
@@ -237,60 +120,9 @@ export function ProjectsPage() {
     document.getElementById(SEARCH_ID)?.focus();
   };
 
-  /** Whether the open panel is for `item` or something under it, so it goes when `item` does. */
-  const panelIsUnder = (item: Project) => selected !== undefined && (selected.id === item.id || selected.path.includes(item.id));
-  /** Runs `action` now, or after the person agrees to discard unsaved edits in the panel `item` takes with it. */
-  const unlessDirtyUnder = (item: Project, action: () => void) => (panelIsUnder(item) ? unlessDirty(action) : action());
-  const leavePanelOf = (item: Project) => {
-    if (panelIsUnder(item)) void navigate(listUrl);
-    setHeadingFocus((n) => n + 1);
-  };
-
-  const archiveItem = (item: Project) =>
-    unlessDirtyUnder(item, () => {
-      setActionError(undefined);
-      archive.mutate(item.id, {
-        onSuccess: () => {
-          setNotice(`Archived ${item.title}.`);
-          leavePanelOf(item);
-        },
-        onError: failAction,
-      });
-    });
-
-  const unarchiveItem = (item: Project) => {
-    setActionError(undefined);
-    unarchive.mutate(item.id, {
-      onSuccess: () => setNotice(`Unarchived ${item.title}.`),
-      onError: failAction,
-    });
-  };
-
-  const askDelete = (item: Project) =>
-    unlessDirtyUnder(item, () => {
-      setDeleteError(undefined);
-      setDeleting(item);
-    });
-  const confirmDelete = () => {
-    const item = deleting;
-    if (!item) return;
-    deleteItem.mutate(item.id, {
-      onSuccess: () => {
-        setDeleting(null);
-        setNotice('');
-        leavePanelOf(item);
-      },
-      onError: (err) => void recoverFrom(err).then(setDeleteError),
-    });
-  };
-  const underDeleting = deleting ? projects.items.filter((i) => i.path.includes(deleting.id)).length : 0;
-
-  const reloadItem = async (): Promise<Project | undefined> => {
-    const fresh = await projects.refetch({ throwOnError: true });
-    return fresh.data?.items.find((i) => i.id === projectId);
-  };
-
   const canAddTop = can({ role, action: 'project.create', ctx: { isAssigned: false } });
+  // Adding happens on the List only, where the new item's place in the order can be seen.
+  const showNewProject = canAddTop && view === 'list';
   // The list shows whenever its data is there: a failed refresh must not unmount the rows, an open add row or focus.
   // The members only name the assignees, so a slow or failed members list leaves the names out and nothing more.
   // It waits for the signed-in person too, so "Assigned to me" in the address always has someone to mean.
@@ -303,14 +135,15 @@ export function ProjectsPage() {
   const reorderable = !filtered;
   const canReorderRole = can({ role, action: 'project.setPriority' });
   const refreshFailed = hasList && projects.isRefetchError;
+  const hasDates = shown.some((i) => i.startDate !== null || i.endDate !== null || i.milestones.length > 0);
 
   return (
     <>
       <div className="title-row">
-        <h1 ref={heading} tabIndex={-1}>
+        <h1 ref={actions.headingRef} tabIndex={-1}>
           Projects
         </h1>
-        {canAddTop && (
+        {showNewProject && (
           <Button id={NEW_PROJECT_BUTTON_ID} variant={panelEditable ? 'secondary' : 'primary'} onClick={() => startAdd(null)}>
             New project
           </Button>
@@ -349,6 +182,43 @@ export function ProjectsPage() {
               >
                 {activeCount > 0 ? `Filters (${activeCount})` : 'Filters'}
               </Button>
+              <ViewSwitcher
+                roadmapId={roadmapId}
+                view={view}
+                search={search}
+                views={['list', 'timeline', 'board']}
+                onNavigate={(path) => actions.unlessDirty(() => void navigate(path))}
+              />
+              {view === 'timeline' && (
+                <>
+                  <div className="toolbar-zoom">
+                    <SelectField id="timeline-zoom" label="Zoom" value={options.zoom} onChange={(e) => setZoom(e.target.value as TimelineZoom)}>
+                      {TIMELINE_ZOOMS.map((z) => (
+                        <option key={z} value={z}>
+                          {ZOOM_NAMES[z]}
+                        </option>
+                      ))}
+                    </SelectField>
+                  </div>
+                  <Button onClick={() => setTodaySignal((n) => n + 1)}>Today</Button>
+                </>
+              )}
+              {view === 'board' && (
+                <div className="toolbar-level">
+                  <SelectField
+                    id="board-level"
+                    label="Level"
+                    value={options.level}
+                    onChange={(e) => setLevel(Number(e.target.value) as ViewOptions['level'])}
+                  >
+                    {LEVELS.map((l) => (
+                      <option key={l} value={l}>
+                        {levelPlural(l)}
+                      </option>
+                    ))}
+                  </SelectField>
+                </div>
+              )}
             </div>
             <FiltersPanel
               open={filtersOpen}
@@ -361,8 +231,8 @@ export function ProjectsPage() {
               membersLoaded={members.data !== undefined}
               myId={myId ?? ''}
             />
-            {!reorderable && canReorderRole && shown.length > 0 && <p className="reorder-note">Clear filters to reorder.</p>}
-            {shown.length === 0 && adding === null && (
+            {view === 'list' && !reorderable && canReorderRole && shown.length > 0 && <p className="reorder-note">Clear filters to reorder.</p>}
+            {shown.length === 0 && (adding === null || view !== 'list') && (
               <>
                 <p>
                   {filtered && projects.items.length > 0
@@ -374,24 +244,62 @@ export function ProjectsPage() {
                 {filtered && projects.items.length > 0 && <Button onClick={clearFiltersFromNoMatch}>Clear filters</Button>}
               </>
             )}
-            {(shown.length > 0 || adding !== null) && (
+            {view === 'timeline' && shown.length > 0 && (
+              <>
+                {!hasDates && <p>No items have dates yet. Open an item to add its dates.</p>}
+                <TimelineView
+                  roadmapId={roadmapId}
+                  role={role}
+                  myId={myId}
+                  items={shown}
+                  contextIds={visible.context}
+                  expandAll={narrowing}
+                  byId={projects.byId}
+                  today={todayIn(me.data?.user.timezone ?? 'UTC')}
+                  zoom={options.zoom}
+                  selectedId={selected?.id}
+                  collapsed={collapsed}
+                  onToggle={toggle}
+                  search={search}
+                  actions={actions}
+                  scrollToTodaySignal={todaySignal}
+                />
+              </>
+            )}
+            {view === 'board' && shown.length > 0 && (
+              <BoardView
+                role={role}
+                myId={myId}
+                items={projects.items}
+                filters={boardFilters}
+                level={options.level}
+                byId={projects.byId}
+                memberNames={memberNames}
+                selectedId={selected?.id}
+                roadmapId={roadmapId}
+                search={search}
+                actions={actions}
+                onClearFilters={clearFiltersFromNoMatch}
+              />
+            )}
+            {view === 'list' && (shown.length > 0 || adding !== null) && (
               <ProjectTree
                 roadmapId={roadmapId}
                 role={role}
                 myId={myId}
                 items={shown}
-                contextIds={view.context}
+                contextIds={visible.context}
                 expandAll={narrowing}
                 reorderable={reorderable}
                 search={search}
                 byId={projects.byId}
                 memberNames={memberNames}
-                onChangeStatus={changeStatus}
-                onOpen={openItem}
-                onReorder={reorderItems}
-                onArchive={archiveItem}
-                onUnarchive={unarchiveItem}
-                onDelete={askDelete}
+                onChangeStatus={actions.changeStatus}
+                onOpen={actions.openItem}
+                onReorder={actions.reorderItems}
+                onArchive={actions.archiveItem}
+                onUnarchive={actions.unarchiveItem}
+                onDelete={actions.askDelete}
                 selectedId={selected?.id}
                 collapsed={collapsed}
                 onToggle={toggle}
@@ -410,50 +318,27 @@ export function ProjectsPage() {
               myId={me.data?.user.id}
               item={selected}
               byId={projects.byId}
-              listPath={listUrl}
-              onClose={closePanel}
-              onReload={reloadItem}
+              listPath={viewUrl}
+              onClose={actions.closePanel}
+              onReload={actions.reloadItem}
               members={members.data?.members ?? []}
-              ownChange={ownChange}
-              onToggleAssignee={toggleAssignee}
-              onSetPriorityLabel={changePriorityLabel}
-              onDirtyChange={onDirtyChange}
+              ownChange={actions.ownChange}
+              onToggleAssignee={actions.toggleAssignee}
+              onSetPriorityLabel={actions.changePriorityLabel}
+              onDirtyChange={actions.onDirtyChange}
             />
           )}
           {hasPanel && !selected && (
             <section className="project-panel" aria-label="Details">
               <Alert>This item no longer exists, or you don't have access to it.</Alert>
-              <Link to={listUrl} className="text-link">
+              <Link to={viewUrl} className="text-link">
                 Back to projects
               </Link>
             </section>
           )}
         </div>
       )}
-      <ConfirmDialog
-        open={deleting !== null}
-        title={`Delete ${deleting?.title ?? 'this item'}?`}
-        confirmLabel="Delete"
-        error={deleteError}
-        onConfirm={confirmDelete}
-        onClose={() => setDeleting(null)}
-      >
-        <p>{underDeleting > 0 ? `This also deletes the ${underDeleting} ${underDeleting === 1 ? 'item' : 'items'} under it. This can't be undone.` : "This can't be undone."}</p>
-      </ConfirmDialog>
-      <ConfirmDialog
-        open={pendingDiscard !== null}
-        title={`Discard your unsaved changes to ${selected?.title ?? 'this item'}?`}
-        confirmLabel="Discard"
-        cancelLabel="Keep editing"
-        onConfirm={() => {
-          const action = pendingDiscard;
-          setPendingDiscard(null);
-          action?.();
-        }}
-        onClose={() => setPendingDiscard(null)}
-      >
-        {null}
-      </ConfirmDialog>
+      {actions.dialogs}
     </>
   );
 }

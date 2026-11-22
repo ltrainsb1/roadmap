@@ -5,6 +5,7 @@ import {
   buildTree,
   filterProjects,
   projectWarnings,
+  treeOrder,
   wouldCycle,
   type Project,
   type ProjectFilters,
@@ -275,5 +276,16 @@ describe('activeFilterCount', () => {
     expect(activeFilterCount(f({ assigneeIds: ['u'], tags: ['t'], labels: ['none'] }))).toBe(3);
     expect(activeFilterCount(f({ from: '2027-01-01' }))).toBe(1);
     expect(activeFilterCount(f({ from: '2027-01-01', to: '2027-02-01', statuses: ['done'] }))).toBe(2);
+  });
+});
+
+describe('treeOrder', () => {
+  test('treeOrder walks depth first by rank', () => {
+    const b = make('B', { rank: 1 });
+    const a = make('A', { rank: 0 });
+    const a2 = child('A2', a, { rank: 1 });
+    const a1 = child('A1', a, { rank: 0 });
+    const order = treeOrder([b, a2, a, a1]);
+    expect([...order]).toEqual([['A', 0], ['A1', 1], ['A2', 2], ['B', 3]]);
   });
 });

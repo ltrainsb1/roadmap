@@ -1,5 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
-import { apiAs, createRoadmap, createSignedInUser, expectNoA11yViolations, field, inviteAndJoin, projectRow, seedProject, useCspGuard } from './helpers.ts';
+import type { Page } from '@playwright/test';
+import type { TestUser } from './helpers.ts';
+import { expectNoA11yViolations, field, projectRow, seedProject, useCspGuard } from './helpers.ts';
+import { expect, joinByApi, test, type ApiCall } from './fixtures.ts';
 
 useCspGuard();
 
@@ -18,11 +20,9 @@ async function openFilters(page: Page) {
  * 3 to 10 Mar 2027, description mentioning a venue) and Closing (done, 1 to 30 Sep 2027); Standalone (tag
  * "design", not started); and Retired, which is archived.
  */
-async function seeded(page: Page, label: string) {
+async function seeded(page: Page, { call, owner: user, roadmap }: { call: ApiCall; owner: TestUser; roadmap: { id: string } }) {
   await page.setViewportSize({ width: 1280, height: 800 });
-  const user = await createSignedInUser(page, label);
-  const id = await createRoadmap(page, `${label} plan`);
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const me = (await call<{ user: { id: string } }>('GET', '/api/me')).user.id;
   const base = `/api/roadmaps/${id}/projects`;
   const season = await seedProject(call, id, 'Season');
@@ -43,13 +43,13 @@ async function seeded(page: Page, label: string) {
   await call('PATCH', `${base}/${closing}`, { version: 1, status: 'done', startDate: '2027-09-01', endDate: '2027-09-30' });
   await call('PATCH', `${base}/${standalone}`, { version: 1, tags: ['design'] });
   await call('POST', `${base}/${retired}/archive`);
-  await page.reload();
+  await page.goto(`/r/${id}/projects`);
   await expect(projectRow(page, 'Standalone')).toBeVisible();
   return { id, call, user, ids: { season, opening, closing, standalone, retired } };
 }
 
-test('FR-1.8: filtering by status shows matching items and their ancestors, and the button reads "Filters (1)"', async ({ page }) => {
-  await seeded(page, 'status');
+test('FR-1.8: filtering by status shows matching items and their ancestors, and the button reads "Filters (1)"', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await expect(filtersButton(page)).toHaveAttribute('aria-expanded', 'false');
   await filtersButton(page).click();
   await expect(filtersButton(page)).toHaveAttribute('aria-expanded', 'true');
@@ -75,8 +75,8 @@ test('FR-1.8: filtering by status shows matching items and their ancestors, and 
   await expect(filtersButton(page, 'Filters (1)')).toHaveAttribute('aria-expanded', 'false');
 });
 
-test('FR-1.8: filtering by "Assigned to me", by tag, by priority label and by a date range each narrow the list', async ({ page }) => {
-  await seeded(page, 'narrow');
+test('FR-1.8: filtering by "Assigned to me", by tag, by priority label and by a date range each narrow the list', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await openFilters(page);
   const clear = panel(page).getByRole('button', { name: 'Clear filters', exact: true });
 
@@ -105,8 +105,8 @@ test('FR-1.8: filtering by "Assigned to me", by tag, by priority label and by a 
   await expect(page).toHaveURL(/from=2027-09-01&to=2027-09-30/);
 });
 
-test('FR-1.8: search matches a title, a description and a tag, ignoring case', async ({ page }) => {
-  await seeded(page, 'finder');
+test('FR-1.8: search matches a title, a description and a tag, ignoring case', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await search(page).fill('STANDAL');
   await expect.poll(() => titles(page)).toEqual(['Standalone']);
   await search(page).fill('vEnUe');
@@ -118,8 +118,8 @@ test('FR-1.8: search matches a title, a description and a tag, ignoring case', a
   await expect(filtersButton(page)).toBeVisible();
 });
 
-test('filters combine, and "Clear filters" restores the full list', async ({ page }) => {
-  await seeded(page, 'combo');
+test('filters combine, and "Clear filters" restores the full list', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await openFilters(page);
   await panel(page).getByLabel('In progress', { exact: true }).check();
   await panel(page).getByLabel('Done', { exact: true }).check();
@@ -137,8 +137,8 @@ test('filters combine, and "Clear filters" restores the full list', async ({ pag
   await expect(page).toHaveURL(/\/projects$/);
 });
 
-test('no match shows "No projects match these filters." with a working "Clear filters" button', async ({ page }) => {
-  await seeded(page, 'nomatch');
+test('no match shows "No projects match these filters." with a working "Clear filters" button', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await search(page).fill('zzz-nothing');
   await expect(page.getByText('No projects match these filters.')).toBeVisible();
   await expect(page.getByRole('table')).toHaveCount(0);
@@ -151,8 +151,8 @@ test('no match shows "No projects match these filters." with a working "Clear fi
   await expect(search(page)).toBeFocused();
 });
 
-test('an item added while filters are on that does not match them is announced, not shown', async ({ page }) => {
-  await seeded(page, 'hidden');
+test('an item added while filters are on that does not match them is announced, not shown', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await openFilters(page);
   await panel(page).getByLabel('In progress', { exact: true }).check();
   await expect.poll(() => titles(page)).toEqual(['Season', 'Opening']);
@@ -171,8 +171,8 @@ test('an item added while filters are on that does not match them is announced, 
   await expect.poll(() => titles(page)).toEqual(['Season', 'Opening']);
 });
 
-test('the filtered address can be opened in a new tab and shows the same list', async ({ page }) => {
-  await seeded(page, 'sharer');
+test('the filtered address can be opened in a new tab and shows the same list', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await openFilters(page);
   await panel(page).getByLabel('Done', { exact: true }).check();
   await search(page).fill('clos');
@@ -194,8 +194,8 @@ test('the filtered address can be opened in a new tab and shows the same list', 
   await expect.poll(() => titles(page)).toEqual(['Season', 'Closing']);
 });
 
-test('typing in the search box keeps every keystroke, the focus and the caret', async ({ page }) => {
-  await seeded(page, 'typist');
+test('typing in the search box keeps every keystroke, the focus and the caret', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await search(page).click();
   await search(page).pressSequentially('clos');
   await page.keyboard.press('ArrowLeft');
@@ -209,15 +209,15 @@ test('typing in the search box keeps every keystroke, the focus and the caret', 
   await expect(page).toHaveURL(/\?q=cloxys$/);
 });
 
-test('FR-1.8: "Assigned to me" is kept as "me" in the address and means the reader of a shared link', async ({ page, browser }, testInfo) => {
-  const { id, call, ids } = await seeded(page, 'sharedme');
+test('FR-1.8: "Assigned to me" is kept as "me" in the address and means the reader of a shared link', async ({ page, browser, call, owner, roadmap }) => {
+  const { id, ids } = await seeded(page, { call, owner, roadmap });
   await openFilters(page);
   await panel(page).getByLabel('Assigned to me', { exact: true }).check();
   await expect(page).toHaveURL(/\?assignee=me$/);
 
-  const helper = await inviteAndJoin(page, browser, testInfo, 'sharedme plan', 'reader', 'Admin');
+  const helper = await joinByApi(browser, call, id, 'admin', 'reader');
   const members = await call<{ members: { userId: string; name: string }[] }>('GET', `/api/roadmaps/${id}/members`);
-  const readerId = members.members.find((m) => m.name === helper.name)!.userId;
+  const readerId = members.members.find((m) => m.name === helper.user.name)!.userId;
   await call('PUT', `/api/roadmaps/${id}/projects/${ids.closing}/assignees`, { userIds: [readerId] });
 
   const theirs = helper.page;
@@ -232,8 +232,8 @@ test('FR-1.8: "Assigned to me" is kept as "me" in the address and means the read
   await helper.context.close();
 });
 
-test('FR-1.8: "Show archived" reveals archived items marked "Archived", with Unarchive in their menu', async ({ page }) => {
-  await seeded(page, 'archiver');
+test('FR-1.8: "Show archived" reveals archived items marked "Archived", with Unarchive in their menu', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await expect(projectRow(page, 'Retired')).toHaveCount(0);
   await openFilters(page);
   await panel(page).getByLabel('Show archived', { exact: true }).check();
@@ -254,8 +254,8 @@ test('FR-1.8: "Show archived" reveals archived items marked "Archived", with Una
   await expect(page.getByRole('button', { name: 'Actions for Retired' })).toBeVisible();
 });
 
-test('FR-1.8: reordering is unavailable while a filter, a search or "Show archived" is on', async ({ page }) => {
-  await seeded(page, 'frozen');
+test('FR-1.8: reordering is unavailable while a filter, a search or "Show archived" is on', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await expect(page.getByText('Clear filters to reorder.')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Reorder Standalone' })).toBeVisible();
 
@@ -286,8 +286,8 @@ test('FR-1.8: reordering is unavailable while a filter, a search or "Show archiv
   await expect(page.getByRole('button', { name: 'Reorder Standalone' })).toBeVisible();
 });
 
-test('FR-1.8: a filter that names a tag nobody has any more is kept in the address and can be unticked', async ({ page }) => {
-  const { id } = await seeded(page, 'stale');
+test('FR-1.8: a filter that names a tag nobody has any more is kept in the address and can be unticked', async ({ page, call, owner, roadmap }) => {
+  const { id } = await seeded(page, { call, owner, roadmap });
   await page.goto(`/r/${id}/projects?tag=gone&tag=design`);
   await expect(filtersButton(page, 'Filters (1)')).toBeVisible();
   await expect.poll(() => titles(page)).toEqual(['Standalone']);
@@ -301,11 +301,9 @@ test('FR-1.8: a filter that names a tag nobody has any more is kept in the addre
   await expect(panel(page).getByLabel('gone', { exact: true })).toHaveCount(0);
 });
 
-test('the audit log shows a sentence for adding, changing, reordering and deleting an item', async ({ page }) => {
+test('the audit log shows a sentence for adding, changing, reordering and deleting an item', async ({ page, call, owner: user, roadmap }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  const user = await createSignedInUser(page, 'ledger');
-  const id = await createRoadmap(page, 'Ledger plan');
-  const call = await apiAs(page);
+  const id = roadmap.id;
   const base = `/api/roadmaps/${id}/projects`;
   const season = await seedProject(call, id, 'Season');
   const opening = await seedProject(call, id, 'Opening', season);
@@ -352,8 +350,8 @@ test('the audit log shows a sentence for adding, changing, reordering and deleti
   ]);
 });
 
-test('at 375 px the filters panel fits, the page does not scroll sideways, and axe passes with the panel open', async ({ page }) => {
-  await seeded(page, 'narrow375');
+test('at 375 px the filters panel fits, the page does not scroll sideways, and axe passes with the panel open', async ({ page, call, owner, roadmap }) => {
+  await seeded(page, { call, owner, roadmap });
   await page.setViewportSize({ width: 375, height: 667 });
   await openFilters(page);
   await panel(page).getByLabel('Show archived', { exact: true }).check();

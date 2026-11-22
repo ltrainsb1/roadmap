@@ -152,3 +152,16 @@ export function filterProjects(items: readonly Project[], f: ProjectFilters): { 
   }
   return { matches, context };
 }
+
+/** Each item's index when the tree from `buildTree` is walked depth first. Items `buildTree` drops are absent. */
+export function treeOrder(items: readonly Project[]): Map<string, number> {
+  const order = new Map<string, number>();
+  const walk = (nodes: TreeNode[]) => {
+    for (const node of nodes) {
+      order.set(node.item.id, order.size);
+      walk(node.children);
+    }
+  };
+  walk(buildTree(items));
+  return order;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 export interface MenuItem {
   label: string;
@@ -19,14 +19,44 @@ interface MenuProps {
   trigger?: ReactNode;
   /** A class for the button, in place of the icon button's. */
   triggerClassName?: string;
+  /** Which edge of the button the list lines up with: the end (right) by default. */
+  align?: 'start' | 'end';
+}
+
+/** Space between the button and the list, and the least space kept between the list and the window's edge. */
+const GAP = 4;
+const EDGE = 8;
+
+/**
+ * Where the list goes, in window coordinates: under the button, or over it when there is more room above than below
+ * and not enough below, and always inside the window from side to side. It is no taller than the room on that side,
+ * and scrolls inside itself when it holds more.
+ */
+function placeList(button: DOMRect, width: number, height: number, align: 'start' | 'end') {
+  const windowWidth = document.documentElement.clientWidth;
+  const below = window.innerHeight - button.bottom - GAP - EDGE;
+  const above = button.top - GAP - EDGE;
+  const down = below >= height || below >= above;
+  const maxHeight = Math.max(0, down ? below : above);
+  const top = down ? button.bottom + GAP : button.top - GAP - Math.min(height, maxHeight);
+  const preferred = align === 'start' ? button.left : button.right - width;
+  const left = Math.max(EDGE, Math.min(preferred, windowWidth - EDGE - width));
+  return { top, left, maxHeight };
 }
 
 /**
  * A button that opens a list of actions. Arrow keys, Home and End move between items, Escape closes the list
  * and returns focus to the button, and choosing an item closes it and hands focus back to the button first.
+ *
+ * The list is fixed to the window, placed from the button's box when it opens, so a scrolling frame around the
+ * button can't clip it. It closes when anything scrolls or the window is resized, since it would no longer sit by
+ * its button.
  */
-export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon-btn' }: MenuProps) {
+export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon-btn', align = 'end' }: MenuProps) {
   const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState<{ top: number; left: number; maxHeight?: number }>({ top: 0, left: 0 });
+  // Where the button was when the list was placed.
+  const placedAt = useRef<DOMRect | null>(null);
   const wrapper = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -36,8 +66,53 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
 
   const entries = () => Array.from(list.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? []);
 
+  // Focus without letting the browser scroll the page (that would close the list), then scroll only the list, which
+  // has a height cap, far enough to show the entry.
+  const focusEntry = (entry: HTMLElement | undefined) => {
+    const el = list.current;
+    if (!entry || !el) return;
+    entry.focus({ preventScroll: true });
+    const bottom = entry.offsetTop + entry.offsetHeight;
+    if (entry.offsetTop < el.scrollTop) el.scrollTop = entry.offsetTop;
+    else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
+  };
+
+  // Measured before the browser paints, so the list never shows in the wrong place.
+  useLayoutEffect(() => {
+    if (!open || !button.current || !list.current) return;
+    placedAt.current = button.current.getBoundingClientRect();
+    // The list's full height, even when a height cap from its last opening still holds it in: its scrolled content,
+    // plus its borders.
+    const el = list.current;
+    const height = el.scrollHeight + el.offsetHeight - el.clientHeight;
+    setPlace(placeList(placedAt.current, el.offsetWidth, height, align));
+  }, [open, align]);
+
   useEffect(() => {
-    if (open) (list.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? entries()[0])?.focus();
+    if (open) focusEntry(list.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? entries()[0]);
+  }, [open]);
+
+  // A scroll anywhere (captured, since scroll events don't bubble) or a resize leaves the list away from its button.
+  // A scroll event that comes after the list was placed but did not move the button, such as the one for a scroll
+  // just before the press that opened it, leaves the list where it is.
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = () => {
+      const hadFocus = list.current?.contains(document.activeElement) ?? false;
+      setOpen(false);
+      if (hadFocus) button.current?.focus({ preventScroll: true });
+    };
+    const onScroll = () => {
+      const now = button.current?.getBoundingClientRect();
+      const was = placedAt.current;
+      if (!now || !was || now.top !== was.top || now.left !== was.left) dismiss();
+    };
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', dismiss);
+    };
   }, [open]);
 
   // A press outside the menu closes it, and leaves focus where the press put it.
@@ -60,7 +135,7 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
     const at = all.indexOf(document.activeElement as HTMLElement);
     const move = (index: number) => {
       e.preventDefault();
-      all[(index + all.length) % all.length]?.focus();
+      focusEntry(all[(index + all.length) % all.length]);
     };
     if (e.key === 'ArrowDown') move(at + 1);
     else if (e.key === 'ArrowUp') move(at - 1);
@@ -101,7 +176,15 @@ export function Menu({ label, items, buttonId, trigger, triggerClassName = 'icon
         )}
       </button>
       {open && (
-        <div id={listId} ref={list} role="menu" aria-labelledby={triggerId} className="menu-list" onKeyDown={onListKeyDown}>
+        <div
+          id={listId}
+          ref={list}
+          role="menu"
+          aria-labelledby={triggerId}
+          className="menu-list"
+          style={{ position: 'fixed', top: place.top, left: place.left, maxHeight: place.maxHeight }}
+          onKeyDown={onListKeyDown}
+        >
           {items.map((item) => (
             <button
               key={item.label}

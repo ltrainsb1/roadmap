@@ -269,6 +269,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
             label="Edit your note"
             submitLabel="Save note"
             initial={n.body}
+            initialMentions={n.mentions}
             members={members}
             busy={pending.edit}
             error={errors.edit}

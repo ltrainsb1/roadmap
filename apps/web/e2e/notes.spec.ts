@@ -345,3 +345,92 @@ test('FR-1.5: a reply to a note that was just deleted keeps the typed text', asy
   await expect(p.getByRole('dialog', { name: 'Discard your unsaved changes to Launch site?' })).toBeVisible();
   await chief.context.close();
 });
+
+/** Presses Down in the @ list until the option named `name` is active. */
+async function arrowTo(box: Locator, page: Page, name: string) {
+  const option = page.getByRole('listbox', { name: 'People', exact: true }).getByRole('option', { name, exact: true });
+  const optionId = await option.getAttribute('id');
+  for (let i = 0; i < 8 && (await box.getAttribute('aria-activedescendant')) !== optionId; i += 1) await page.keyboard.press('ArrowDown');
+  await expect(box).toHaveAttribute('aria-activedescendant', optionId!);
+}
+
+test('FR-1.5: a Contributor types "@", picks an Admin with the keyboard and adds the note; the name shows highlighted, also after a reload, and the note records the mention', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  const writer = await joinByApi(browser, call, id, 'contributor', 'writer');
+  const p = writer.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+  const box = newNoteBox(notes);
+
+  await box.click();
+  await p.keyboard.type('Over to @');
+  const people = p.getByRole('listbox', { name: 'People', exact: true });
+  await expect(people).toBeVisible();
+  const combo = notes.getByRole('combobox', { name: 'Add a note', exact: true });
+  await expect(combo).toHaveAttribute('aria-expanded', 'true');
+  await expect(combo).toHaveAttribute('aria-controls', (await people.getAttribute('id'))!);
+  await expectNoA11yViolations(p);
+  await arrowTo(combo, p, 'chief user');
+  await p.keyboard.press('Enter');
+  await expect(people).toHaveCount(0);
+  await expect(box).toHaveValue('Over to @chief user ');
+  await expect(box).toBeFocused();
+  await p.keyboard.type('please');
+
+  const saved = p.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/projects/${itemId}/notes`));
+  await notes.getByRole('button', { name: 'Add note', exact: true }).click();
+  const posted = (await (await saved).json()) as { id: string };
+  const added = noteWith(notes, 'Over to');
+  await expect(added.locator('.mention')).toHaveText('@chief user');
+
+  const { members } = await call<{ members: Array<{ userId: string; name: string }> }>('GET', `/api/roadmaps/${id}/members`);
+  const chiefId = members.find((m) => m.name === 'chief user')?.userId;
+  const fetched = await (await apiAs(p))<{ notes: Array<{ id: string; mentions: unknown }> }>('GET', `/api/roadmaps/${id}/projects/${itemId}/notes`);
+  expect(fetched.notes.find((n) => n.id === posted.id)?.mentions).toEqual([{ userId: chiefId, name: 'chief user' }]);
+
+  await p.reload();
+  await expect(noteWith(notesOf(p, 'Launch site'), 'Over to').locator('.mention')).toHaveText('@chief user');
+  await writer.context.close();
+  await chief.context.close();
+});
+
+test('FR-1.5: at 375 px the @ list is inside the viewport and passes axe, a tap picks, and Escape closes only the list', async ({ page, call, owner, roadmap }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  await page.goto(projectUrl(id, itemId));
+  const notes = notesOf(page, 'Launch site');
+  const box = newNoteBox(notes);
+  await box.click();
+  await page.keyboard.type('@');
+  const frame = page.locator('.mention-picker');
+  await expect(page.getByRole('listbox', { name: 'People', exact: true })).toBeVisible();
+  const inside = async () => {
+    const r = await frame.boundingBox();
+    expect(r).not.toBeNull();
+    expect(r!.x).toBeGreaterThanOrEqual(0);
+    expect(r!.y).toBeGreaterThanOrEqual(0);
+    expect(r!.x + r!.width).toBeLessThanOrEqual(375);
+    expect(r!.y + r!.height).toBeLessThanOrEqual(667);
+  };
+  await inside();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  await expectNoA11yViolations(page);
+
+  // A tap (a click on desktop) picks the name and leaves focus in the box.
+  await page.getByRole('option', { name: owner.name, exact: true }).click();
+  await expect(frame).toHaveCount(0);
+  await expect(box).toHaveValue(`@${owner.name} `);
+  await expect(box).toBeFocused();
+
+  await box.fill('');
+  await page.keyboard.type('@zzz');
+  await expect(frame).toContainText('No one matches.');
+  await page.keyboard.press('Escape');
+  await expect(frame).toHaveCount(0);
+  await expect(box).toHaveValue('@zzz');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page).toHaveURL(projectUrl(id, itemId));
+});

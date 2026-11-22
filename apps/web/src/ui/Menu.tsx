@@ -32,7 +32,7 @@ const EDGE = 8;
  * and not enough below, and always inside the window from side to side. It is no taller than the room on that side,
  * and scrolls inside itself when it holds more.
  */
-function placeList(button: DOMRect, width: number, height: number, align: 'start' | 'end') {
+export function placeList(button: DOMRect, width: number, height: number, align: 'start' | 'end') {
   const windowWidth = document.documentElement.clientWidth;
   const below = window.innerHeight - button.bottom - GAP - EDGE;
   const above = button.top - GAP - EDGE;

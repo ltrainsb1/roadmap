@@ -89,7 +89,7 @@ function serve(notes: Note[], answer: (method: string, path: string, body: unkno
   });
 }
 
-function show(opts: { role?: Role; archived?: boolean; onDraftChange?: (hasText: boolean) => void } = {}) {
+function show(opts: { role?: Role; archived?: boolean; onDraftChange?: (hasText: boolean) => void; members?: { userId: string; name: string }[] } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onDraftChange = opts.onDraftChange ?? vi.fn();
   render(
@@ -99,7 +99,7 @@ function show(opts: { role?: Role; archived?: boolean; onDraftChange?: (hasText:
         item={item({ archived: opts.archived ?? false })}
         role={opts.role ?? 'contributor'}
         myId={ME}
-        members={[]}
+        members={opts.members ?? []}
         timeZone="UTC"
         onDraftChange={onDraftChange}
       />
@@ -318,6 +318,24 @@ describe('NotesSection', () => {
     expect(screen.queryByRole('textbox', { name: 'Edit your note' })).toBeNull();
     expect(within(articleWith('After')).getByText('Edited')).toBeTruthy();
     expect(document.activeElement).toBe(within(articleWith('After')).getByRole('button', { name: 'Edit' }));
+  });
+
+  test('FR-1.5: editing a note that mentions one of two members with the same name sends that one again', async () => {
+    const sent: unknown[] = [];
+    const twins = [
+      { userId: 'u-ann1', name: 'Ann Lee' },
+      { userId: 'u-ann2', name: 'Ann Lee' },
+    ];
+    serve([note({ id: 'n1', body: 'ask @Ann Lee', authorId: ME, mentions: [{ userId: 'u-ann2', name: 'Ann Lee' }] })], (_m, _p, body) => {
+      sent.push(body);
+      return new Promise(() => undefined);
+    });
+    show({ members: twins });
+    await screen.findByText('Ann Lee', { exact: false });
+    fireEvent.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit your note' }), { target: { value: 'ask @Ann Lee soon' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+    await waitFor(() => expect(sent).toEqual([{ body: 'ask @Ann Lee soon', mentionIds: ['u-ann2'] }]));
   });
 
   test('FR-1.5: Cancel closes a box without saving and returns focus to the control that opened it', async () => {

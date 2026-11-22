@@ -107,6 +107,52 @@ describe('Markdown', () => {
     expect(root.textContent).toBe('thanks @J. (Jo) O_Neil* for this');
   });
 
+  test('FR-1.5: an image inside a link shows as the link with its alt text, with no link inside a link', () => {
+    const root = show('[![alt](https://example.com/a.png)](https://example.com) and [![ref][pic]](https://example.com/b)\n\n[pic]: https://example.com/p.png');
+    expect(root.querySelector('img')).toBeNull();
+    expect(root.querySelector('a a')).toBeNull();
+    const links = Array.from(root.querySelectorAll('a'));
+    expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['alt', 'https://example.com'],
+      ['ref', 'https://example.com/b'],
+    ]);
+  });
+
+  test('FR-1.5: an image outside a link still shows as a link with no link inside it', () => {
+    const root = show('see ![chart](https://example.com/a.png) here');
+    expect(root.querySelector('a a')).toBeNull();
+    expect(root.querySelector('a')?.textContent).toBe('chart');
+  });
+
+  test.each([
+    ['5,000 ">"', '>'.repeat(5000)],
+    ['2,500 "> "', '> '.repeat(2500)],
+    ['60 ">" then text', `${'>'.repeat(60)} hi`],
+    ['1,666 "1. "', '1. '.repeat(1666)],
+    ['1,250 "- > "', '- > '.repeat(1250)],
+  ])('FR-1.5: a note nested past 50 levels (%s) shows as plain text', (_label, body) => {
+    const root = show(body);
+    expect(root.querySelector('blockquote, ul, ol')).toBeNull();
+    const plain = root.querySelector('p.markdown-plain');
+    expect(plain?.textContent).toBe(body);
+    expect(root.children).toHaveLength(1);
+  });
+
+  test('FR-1.5: lists nested deeply through indentation show as plain text', () => {
+    let body = '';
+    for (let indent = 0; body.length < 4800; indent += 80) body += `${' '.repeat(indent)}${'- '.repeat(40)}a\n`;
+    const root = show(body);
+    expect(root.querySelector('ul')).toBeNull();
+    expect(root.querySelector('p.markdown-plain')?.textContent).toBe(body);
+  });
+
+  test('FR-1.5: 50 levels of block quotes still render as nested block quotes', () => {
+    const root = show(`${'>'.repeat(50)} hi @Ann`, [ann]);
+    expect(root.querySelectorAll('blockquote')).toHaveLength(50);
+    expect(root.querySelector('.markdown-plain')).toBeNull();
+    expect(mentionTexts(root)).toEqual(['@Ann']);
+  });
+
   test('FR-1.5: 5,000 "*" and "_" characters render in under a second', () => {
     const body = '*_'.repeat(2500);
     const started = performance.now();

@@ -1329,3 +1329,7 @@ select {
   font-weight: 600;
   color: var(--primary);
 }
+/* A note too deeply nested to render as Markdown shows as its text. */
+.markdown-plain {
+  white-space: pre-wrap;
+}

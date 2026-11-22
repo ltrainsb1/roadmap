@@ -326,6 +326,7 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
               onToggleAssignee={actions.toggleAssignee}
               onSetPriorityLabel={actions.changePriorityLabel}
               onDirtyChange={actions.onDirtyChange}
+              timeZone={me.data?.user.timezone ?? 'UTC'}
             />
           )}
           {hasPanel && !selected && (

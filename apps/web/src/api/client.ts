@@ -54,6 +54,11 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     ...(opts.body === undefined ? {} : { body: JSON.stringify(opts.body) }),
   });
 
+  return read<T>(res, path, opts.quiet === true);
+}
+
+/** Reads an answer: throws `ApiError` for a non-2xx one (sending the person to sign in on a 401), stores any CSRF token. */
+async function read<T>(res: Response, path: string, quiet: boolean): Promise<T> {
   const text = await res.text();
   let data: unknown;
   try {
@@ -69,7 +74,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     if (res.status === 401) {
       // A wrong second-step code is also a 401, but its pending session lives on and the retry needs the token.
       if (code === 'unauthenticated') csrfToken = null;
-      if (!path.startsWith(AUTH_PREFIX) && !opts.quiet) onUnauthorized();
+      if (!path.startsWith(AUTH_PREFIX) && !quiet) onUnauthorized();
     }
     throw new ApiError(res.status, code);
   }
@@ -77,4 +82,17 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const token = (data as { csrfToken?: unknown } | undefined)?.csrfToken;
   if (typeof token === 'string') csrfToken = token;
   return data as T;
+}
+
+/**
+ * Sends one file to the API as `multipart/form-data`, under the part name `file`. The browser sets the content
+ * type with its boundary. Errors, the CSRF token and a 401 are handled as `api` handles them.
+ */
+export async function upload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append('file', file);
+  const headers: Record<string, string> = { accept: 'application/json' };
+  if (csrfToken) headers['x-csrf-token'] = csrfToken;
+  const res = await fetch(path, { method: 'POST', headers, credentials: 'same-origin', body: form });
+  return read<T>(res, path, false);
 }

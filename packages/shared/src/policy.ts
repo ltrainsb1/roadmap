@@ -2,6 +2,7 @@ import type { Action, Role } from './roles.ts';
 
 export interface PolicyContext {
   isAssigned?: boolean;
+  isAuthor?: boolean;
   targetRole?: Role;
   newRole?: Role;
 }
@@ -25,6 +26,9 @@ const RULES: Record<Action, Rule> = {
   'vote.cast': everyone,
   'comment.create': everyone,
   'ai.use': everyone,
+  'note.create': everyone,
+  'note.edit': (_role, ctx) => ctx.isAuthor === true,
+  'note.delete': (role, ctx) => role !== 'contributor' || ctx.isAuthor === true,
   'project.create': staffOrAssigned,
   'project.edit': staffOrAssigned,
   'project.delete': staffOrAssigned,
@@ -53,14 +57,17 @@ const ROLE_VALUES: ReadonlyArray<Role | undefined> = [undefined, 'owner', 'admin
 /** True when some context could make `can` allow this role; false means no request body can change the answer. */
 export function canEver(role: Role | null, action: Action): boolean {
   for (const isAssigned of [undefined, true, false]) {
-    for (const targetRole of ROLE_VALUES) {
-      for (const newRole of ROLE_VALUES) {
-        const ctx: PolicyContext = {
-          ...(isAssigned !== undefined && { isAssigned }),
-          ...(targetRole !== undefined && { targetRole }),
-          ...(newRole !== undefined && { newRole }),
-        };
-        if (can({ role, action, ctx })) return true;
+    for (const isAuthor of [undefined, true, false]) {
+      for (const targetRole of ROLE_VALUES) {
+        for (const newRole of ROLE_VALUES) {
+          const ctx: PolicyContext = {
+            ...(isAssigned !== undefined && { isAssigned }),
+            ...(isAuthor !== undefined && { isAuthor }),
+            ...(targetRole !== undefined && { targetRole }),
+            ...(newRole !== undefined && { newRole }),
+          };
+          if (can({ role, action, ctx })) return true;
+        }
       }
     }
   }

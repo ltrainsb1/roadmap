@@ -9,7 +9,7 @@ const API_PORT = 3100;
 const WEB_PORT = 5173;
 
 /** The environment the API and the bootstrap command run with; helpers.ts reads it back from E2E_API_ENV. */
-function apiEnv(mongoUri: string, outbox: string): Record<string, string> {
+function apiEnv(mongoUri: string, outbox: string, filesDir: string): Record<string, string> {
   return {
     NODE_ENV: 'test',
     PORT: String(API_PORT),
@@ -22,6 +22,10 @@ function apiEnv(mongoUri: string, outbox: string): Record<string, string> {
     MAIL_OUTBOX_FILE: outbox,
     MAIL_FROM: 'no-reply@localhost',
     HIBP_ENABLED: 'false',
+    FILES: 'local',
+    FILES_DIR: filesDir,
+    FILES_SIGNING_KEY: randomBytes(32).toString('base64'),
+    SCANNER: 'fake',
     // One IP runs the whole suite; the production limit of 10 a minute would trip it, and so would 1000 once many specs create accounts.
     AUTH_RATE_LIMIT_PER_MIN: '10000',
   };
@@ -114,7 +118,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     cleanups.push(mongo.stop);
     const dir = mkdtempSync(path.join(tmpdir(), 'roadmap-e2e-'));
     cleanups.push(() => Promise.resolve(rmSync(dir, { recursive: true, force: true })));
-    const env = apiEnv(mongo.uri, path.join(dir, 'outbox.jsonl'));
+    const env = apiEnv(mongo.uri, path.join(dir, 'outbox.jsonl'), path.join(dir, 'files'));
     process.env.E2E_API_ENV = JSON.stringify(env);
     process.env.E2E_MAIL_OUTBOX = env.MAIL_OUTBOX_FILE;
 

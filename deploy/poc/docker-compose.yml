@@ -1,6 +1,8 @@
 # Run from the repository root:
 #   docker compose -f deploy/poc/docker-compose.yml up -d --build
 # Needs deploy/poc/.env (copy .env.example and replace the placeholders).
+# Files go to S3 (S3_BUCKET) with the instance role's credentials; there is no MinIO here. The smoke run layers
+# docker-compose.smoke.yml on top to add one.
 name: roadmap-poc
 
 services:
@@ -41,6 +43,34 @@ services:
       retries: 20
       start_period: 15s
 
+  clamav:
+    image: clamav/clamav:1.4.7
+    restart: unless-stopped
+    # Signatures take about 1 GB in memory; a reload briefly holds two copies (about 1.9 GiB), so leave room above that.
+    mem_limit: 3g
+    volumes:
+      # The signature database: kept across restarts so a restart does not download it again.
+      - clamav_db:/var/lib/clamav
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /var/log/clamav
+    # The start script runs as root: it creates /run/clamav, takes ownership of the database folder and freshclam
+    # writes into it, then freshclam and clamd switch to the clamav user.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # The image's own check (clamd answers PING on 3310), polled more often while the signatures load.
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 6m
+      start_interval: 5s
+
   api:
     build:
       context: ../..
@@ -48,8 +78,16 @@ services:
     image: roadmap-api:poc
     restart: unless-stopped
     env_file: .env
+    # Production needs both (the API refuses to start otherwise), so they are fixed here, not in .env.
+    environment:
+      FILES: s3
+      S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET in deploy/poc/.env}
+      SCANNER: clamd
+      CLAMD_HOST: clamav
     depends_on:
       mongo:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     read_only: true
     tmpfs:
@@ -98,3 +136,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  clamav_db:

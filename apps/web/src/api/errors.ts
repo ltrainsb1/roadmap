@@ -84,6 +84,9 @@ export const messageFor = (err: unknown, ctx?: ErrorContext): string => errorMes
 /** Read-only copy for an item the person may not change, also shown when the server refuses a change with `forbidden`. */
 export const ITEM_READ_ONLY = 'Only people assigned to this item, Owners and Admins can change it.';
 
+/** Notes and files on an archived item can be read, not changed; also shown when the server refuses with `item_archived`. */
+export const ARCHIVED_CONTENT = "This item is archived, so notes and files can't be added or changed.";
+
 /** The message for a failed action on a project item: a gone item and a refused one get sentences about the item. */
 export const itemActionMessage = (err: unknown): string => {
   const code = errorCode(err);

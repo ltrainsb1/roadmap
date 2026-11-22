@@ -443,6 +443,8 @@ select {
 }
 .dialog h2 {
   margin-top: 0;
+  /* A title can hold a long name with no break point, such as a file's. */
+  overflow-wrap: anywhere;
 }
 .dialog-actions {
   display: flex;
@@ -1276,4 +1278,221 @@ select {
       'handle . actions'
       'status status status';
   }
+}
+
+/* A note's text (FR-1.5). Long words and code wrap or scroll inside the note, never the panel. */
+.markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre {
+  margin: 0 0 8px;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 24px;
+}
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.markdown code,
+.markdown pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  background: var(--surface);
+  border-radius: 4px;
+}
+.markdown code {
+  padding: 0 4px;
+}
+.markdown pre {
+  max-width: 100%;
+  padding: 8px 12px;
+  overflow-x: auto;
+  overflow-wrap: normal;
+}
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+.markdown a {
+  color: var(--primary);
+}
+.mention {
+  font-weight: 600;
+  color: var(--primary);
+}
+/* A note too deeply nested to render as Markdown shows as its text. */
+.markdown-plain {
+  white-space: pre-wrap;
+}
+
+/* Files in the item panel (FR-1.4): one row per file, its name downloads it. */
+.files-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.file-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.file-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 0;
+}
+.file-text {
+  flex: 1;
+  min-width: 0;
+}
+/* A long name wraps inside the row, never the panel. */
+.file-name {
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.file-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.file-remove {
+  flex: none;
+  min-width: var(--control-height);
+}
+.file-uploading .file-row {
+  color: var(--muted);
+}
+.files-section .alert {
+  margin: 8px 0;
+}
+.file-add {
+  margin-top: 8px;
+}
+.file-add .hint {
+  margin: 4px 0 0;
+}
+
+/* Notes in the item panel (FR-1.5): threads oldest first, replies indented under their note. */
+.notes-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.note-threads,
+.note-replies {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.note-thread + .note-thread {
+  margin-top: 12px;
+}
+.note-replies {
+  /* Replies sit 16 px in from their note, the border included. */
+  margin: 4px 0 0;
+  padding-left: 14px;
+  border-left: 2px solid var(--border);
+}
+.note {
+  min-width: 0;
+  padding: 4px 0;
+}
+.note-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0 0 4px;
+}
+.note-meta time,
+.note-edited {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.note-deleted {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+/* Short words like "Edit" still make a 44 by 44 px target. */
+.note-actions .btn {
+  min-width: var(--control-height);
+}
+.note-box {
+  margin-top: 8px;
+}
+.note-box .field {
+  margin-bottom: 8px;
+}
+.note-box textarea {
+  min-height: 5rem;
+}
+/* The @ list: placed in window coordinates by MentionPicker, as Menu places its list, so the panel can't clip it. */
+.mention-picker {
+  position: fixed;
+  z-index: 10;
+  min-width: 12rem;
+  max-width: min(22rem, calc(100vw - 16px));
+  /* MentionPicker caps the height at the room beside the text box; a longer list scrolls inside itself. */
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.15);
+}
+.mention-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mention-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  min-height: var(--control-height);
+  padding: 8px 12px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.mention-option:hover,
+.mention-option[aria-selected='true'] {
+  background: var(--surface);
+}
+/* Focus stays in the text box, so the active option carries its own mark. */
+.mention-option[aria-selected='true'] {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.mention-email {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.mention-none {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--muted);
+}
+.note-box .alert {
+  margin-bottom: 8px;
 }

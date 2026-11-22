@@ -13,7 +13,9 @@ import { loadConfig, type Config } from '../src/config.ts';
 import { connectDb, type Db } from '../src/db/client.ts';
 import { ensureIndexes } from '../src/db/indexes.ts';
 import { scoped } from '../src/db/scoped.ts';
-import type { MembershipDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
+import type { AttachmentDoc, MembershipDoc, NoteDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
+import { MemoryObjectStore, type ObjectStore } from '../src/files/object-store.ts';
+import { FakeScanner, type Scanner } from '../src/files/scanner.ts';
 import { MemoryMailer } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
@@ -54,6 +56,25 @@ export interface Seeder {
       archived?: boolean;
     },
   ): Promise<ProjectDoc>;
+  /** A top-level note with body "Note" unless `over` says otherwise; goes through the scoped collection. */
+  note(
+    tenantId: string,
+    roadmapId: string,
+    projectId: string,
+    authorId: string,
+    over?: Partial<Omit<NoteDoc, 'tenantId' | 'roadmapId' | 'projectId' | 'authorId'>>,
+  ): Promise<NoteDoc>;
+  /**
+   * Puts `body` (default "file body") in `TestApp.files` under the usual key and inserts the record; the name
+   * defaults to "file.txt" and the size to the body's length.
+   */
+  attachment(
+    tenantId: string,
+    roadmapId: string,
+    projectId: string,
+    uploadedById: string,
+    over?: Partial<Pick<AttachmentDoc, '_id' | 'name' | 'size' | 'createdAt'>> & { body?: Buffer },
+  ): Promise<AttachmentDoc>;
 }
 
 export interface TestApp {
@@ -62,6 +83,10 @@ export interface TestApp {
   config: Config;
   /** What the app emailed. */
   mail: MemoryMailer;
+  /** The app's object store, unless `objectStore` replaced it. */
+  files: MemoryObjectStore;
+  /** The app's virus scanner, unless `scanner` replaced it. */
+  scanner: FakeScanner;
   seed: Seeder;
   close(): Promise<void>;
 }
@@ -79,6 +104,18 @@ export interface TestAppOptions {
   env?: Record<string, string>;
   /** Replaces the per-roadmap item limit. */
   maxProjectItems?: number;
+  /** Replaces the per-item note limit. */
+  maxNotesPerItem?: number;
+  /** Replaces the memory object store the app is given (`TestApp.files` is then unused by the app). */
+  objectStore?: ObjectStore;
+  /** Replaces the fake scanner the app is given (`TestApp.scanner` is then unused by the app). */
+  scanner?: Scanner;
+  /** Replaces the per-item file limit. */
+  maxFilesPerItem?: number;
+  /** Replaces how many uploads the app reads at once. */
+  maxConcurrentUploads?: number;
+  /** Replaces how long the app waits for an upload's body. */
+  uploadReadTimeoutMs?: number;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -93,6 +130,8 @@ export const TEST_ENV = {
   TOTP_ENC_KEY: TEST_TOTP_KEY.toString('base64'),
   MAILER: 'memory',
   HIBP_ENABLED: 'false',
+  FILES: 'memory',
+  SCANNER: 'fake',
 };
 
 export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
@@ -102,14 +141,22 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   const { client, db } = await connectDb(mongo.uri, dbName);
   await ensureIndexes(db);
   const mail = new MemoryMailer();
+  const files = new MemoryObjectStore(config.appOrigin, opts.now);
+  const scanner = new FakeScanner();
   const app = await buildApp({
     config,
     db,
     mailer: mail,
+    objectStore: opts.objectStore ?? files,
+    scanner: opts.scanner ?? scanner,
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
     ...(opts.maxProjectItems !== undefined ? { maxProjectItems: opts.maxProjectItems } : {}),
+    ...(opts.maxNotesPerItem !== undefined ? { maxNotesPerItem: opts.maxNotesPerItem } : {}),
+    ...(opts.maxFilesPerItem !== undefined ? { maxFilesPerItem: opts.maxFilesPerItem } : {}),
+    ...(opts.maxConcurrentUploads !== undefined ? { maxConcurrentUploads: opts.maxConcurrentUploads } : {}),
+    ...(opts.uploadReadTimeoutMs !== undefined ? { uploadReadTimeoutMs: opts.uploadReadTimeoutMs } : {}),
   });
   opts.routes?.(app);
 
@@ -194,6 +241,39 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
         updatedAt: now,
       });
     },
+    note: (tenantId, roadmapId, projectId, authorId, over = {}) =>
+      scoped(db, tenantId)
+        .collection('notes')
+        .insertOne({
+          _id: uuidv7(),
+          parentId: null,
+          body: 'Note',
+          mentions: [],
+          createdAt: new Date(),
+          editedAt: null,
+          deletedAt: null,
+          ...over,
+          roadmapId,
+          projectId,
+          authorId,
+        }),
+    async attachment(tenantId, roadmapId, projectId, uploadedById, over = {}) {
+      const { body = Buffer.from('file body'), ...rest } = over;
+      const _id = rest._id ?? uuidv7();
+      const key = `${tenantId}/${roadmapId}/${_id}`;
+      await files.put(key, body);
+      return scoped(db, tenantId).collection('attachments').insertOne({
+        name: 'file.txt',
+        size: body.length,
+        createdAt: new Date(),
+        ...rest,
+        _id,
+        roadmapId,
+        projectId,
+        uploadedById,
+        key,
+      });
+    },
   };
 
   return {
@@ -201,6 +281,8 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     db,
     config,
     mail,
+    files,
+    scanner,
     seed,
     async close() {
       await app.close();

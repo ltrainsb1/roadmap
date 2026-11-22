@@ -6,8 +6,9 @@ import type { ScopedDb } from '../db/scoped.ts';
 import type { ProjectDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
 import { assignedCtx, loadProject } from './access.ts';
+import { deleteContentOf, deleteStoredFiles } from './content.ts';
+import type { ObjectStore } from '../files/object-store.ts';
 import { projectParams } from '../params.ts';
-
 
 /** Every item in the roadmap under `item`, at any depth. */
 const descendantsOf = (s: ScopedDb, item: ProjectDoc) =>
@@ -30,7 +31,11 @@ async function closeRankGap(s: ScopedDb, item: ProjectDoc): Promise<void> {
 const bumpOrderRevision = (s: ScopedDb, roadmapId: string, extra: { dependencyRevision?: 1 } = {}) =>
   s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { orderRevision: 1, ...extra } });
 
-export function registerLifecycleRoutes(app: FastifyInstance): void {
+export interface LifecycleRouteDeps {
+  objectStore: ObjectStore;
+}
+
+export function registerLifecycleRoutes(app: FastifyInstance, deps: LifecycleRouteDeps): void {
   const r = app.withTypeProvider<ZodTypeProvider>();
   const audit = createAuditLog();
   const base = '/api/roadmaps/:roadmapId/projects/:projectId';
@@ -91,11 +96,12 @@ export function registerLifecycleRoutes(app: FastifyInstance): void {
   r.delete(base, { config, schema: { params: projectParams, response: { 200: z.object({ deleted: z.number() }) } } }, async (req) => {
     const actor = req.actor!;
     const { roadmapId, projectId } = req.params;
-    return actor.db.withTransaction(async (s) => {
+    const { deleted, keys } = await actor.db.withTransaction(async (s) => {
       const item = await loadProject(s, roadmapId, projectId);
       const ids = [item._id, ...(await descendantsOf(s, item)).map((x) => x._id)];
       const projects = s.collection('projects');
       const { deleted } = await projects.deleteMany({ roadmapId, _id: { $in: ids } });
+      const { keys } = await deleteContentOf(s, { roadmapId, projectIds: ids });
       // The version goes up with the pull: a form opened before the delete still lists the deleted item, and its
       // next save must be a conflict the person can reload from, not a refusal about an item they never chose.
       await projects.updateMany({ roadmapId, blockedBy: { $in: ids } }, { $pull: { blockedBy: { $in: ids } }, $inc: { version: 1 } });
@@ -111,7 +117,9 @@ export function registerLifecycleRoutes(app: FastifyInstance): void {
         before: { title: item.title, count: deleted },
         ip: req.ip,
       });
-      return { deleted };
+      return { deleted, keys };
     });
+    await deleteStoredFiles(deps.objectStore, keys, req.log);
+    return { deleted };
   });
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { api, ApiError, getCsrfToken, setCsrfToken, setUnauthorizedHandler } from './client.ts';
+import { api, ApiError, getCsrfToken, setCsrfToken, setUnauthorizedHandler, upload } from './client.ts';
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status });
@@ -129,5 +129,40 @@ describe('api client', () => {
     fetchMock.mockResolvedValue(json(401, { error: 'unauthenticated' }));
     await expect(api('/api/roadmaps')).rejects.toBeInstanceOf(ApiError);
     expect(assign).toHaveBeenCalledWith('/login?next=%2Fr%2F1%2Fmembers%3Fx%3D1');
+  });
+});
+
+describe('upload', () => {
+  const file = () => new File(['hello'], 'notes.txt', { type: 'text/plain' });
+
+  test('FR-1.4: posts a FormData with the file under "file" and the CSRF header, and sets no content type', async () => {
+    setCsrfToken('tok-2');
+    fetchMock.mockResolvedValue(json(201, { id: 'a1' }));
+    const f = file();
+    await expect(upload('/api/things/files', f)).resolves.toEqual({ id: 'a1' });
+    expect(fetchMock.mock.calls.at(-1)![0]).toBe('/api/things/files');
+    const init = lastInit();
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('same-origin');
+    expect(init.headers['x-csrf-token']).toBe('tok-2');
+    expect(init.headers['content-type']).toBeUndefined();
+    expect(init.body).toBeInstanceOf(FormData);
+    expect([...(init.body as FormData).keys()]).toEqual(['file']);
+    expect(((init.body as FormData).get('file') as File).name).toBe('notes.txt');
+  });
+
+  test('FR-1.4: maps an error body to ApiError', async () => {
+    fetchMock.mockResolvedValue(json(422, { error: 'file_infected' }));
+    await expect(upload('/api/things/files', file())).rejects.toMatchObject({ status: 422, code: 'file_infected' });
+  });
+
+  test('FR-1.4: a 401 sends the person to sign in, as api does', async () => {
+    const redirect = vi.fn();
+    setUnauthorizedHandler(redirect);
+    setCsrfToken('stale');
+    fetchMock.mockResolvedValue(json(401, { error: 'unauthenticated' }));
+    await expect(upload('/api/things/files', file())).rejects.toBeInstanceOf(ApiError);
+    expect(redirect).toHaveBeenCalledOnce();
+    expect(getCsrfToken()).toBeNull();
   });
 });

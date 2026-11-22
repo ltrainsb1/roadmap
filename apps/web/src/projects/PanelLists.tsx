@@ -28,6 +28,8 @@ export interface ListValues {
 export interface MemberName {
   userId: string;
   name: string;
+  /** Shown in the @ list to tell apart two members with the same name. */
+  email?: string;
 }
 
 interface PanelListsProps {

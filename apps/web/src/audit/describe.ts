@@ -78,6 +78,18 @@ export function describeAuditEvent(e: AuditEvent, nameOf: (userId: string) => st
       const label = text(e.after, 'priorityLabel');
       return label ? `${who} set the priority label of ${item(e.after)} to ${label}.` : `${who} removed the priority label of ${item(e.after)}.`;
     }
+    case 'note.create':
+      return `${who} added a note.`;
+    case 'note.update':
+      return `${who} edited a note.`;
+    case 'note.delete':
+      return `${who} deleted a note.`;
+    case 'attachment.create':
+      return `${who} added a file.`;
+    case 'attachment.delete':
+      return `${who} removed a file.`;
+    case 'attachment.rejected':
+      return `${who} tried to add a file that failed the virus check.`;
     default:
       return `${who} made a change: ${e.action}.`;
   }

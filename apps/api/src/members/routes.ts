@@ -12,10 +12,14 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { MembershipDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
 import { canEver, type PolicyContext } from '../policy/policy.ts';
+import type { ObjectStore } from '../files/object-store.ts';
+import { deleteContentOf, deleteStoredFiles } from '../projects/content.ts';
 import { roadmapParams } from '../params.ts';
 
 export interface MemberRouteDeps {
   now: () => Date;
+  /** Where the roadmap's files are; deleting the roadmap deletes them. */
+  objectStore: ObjectStore;
 }
 
 const memberParams = roadmapParams.extend({ userId: z.string().min(1).max(100) });
@@ -236,8 +240,9 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
       const roadmap = await actor.db.collection('roadmaps').findOne({ _id: roadmapId });
       if (!roadmap) throw new HttpError(404, 'not_found');
       if (req.body.confirmName !== roadmap.name) throw new HttpError(422, 'confirm_mismatch');
-      await actor.db.withTransaction(async (s) => {
+      const keys = await actor.db.withTransaction(async (s) => {
         // Later plans extend this with the other data that hangs off a roadmap.
+        const { keys } = await deleteContentOf(s, { roadmapId });
         await s.collection('projects').deleteMany({ roadmapId });
         await s.collection('invites').deleteMany({ roadmapId });
         await s.collection('memberships').deleteMany({ roadmapId });
@@ -250,7 +255,9 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
           before: { name: roadmap.name },
           ip: req.ip,
         });
+        return keys;
       });
+      await deleteStoredFiles(deps.objectStore, keys, req.log);
       return reply.status(204).send(null);
     },
   );

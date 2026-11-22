@@ -144,6 +144,12 @@ export const AUDIT_ACTIONS = [
   'project.assign',
   'project.reorder',
   'project.priority_label',
+  'note.create',
+  'note.update',
+  'note.delete',
+  'attachment.create',
+  'attachment.delete',
+  'attachment.rejected',
 ] as const;
 export type AuditActionName = (typeof AUDIT_ACTIONS)[number];
 

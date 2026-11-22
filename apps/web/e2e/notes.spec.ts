@@ -1,0 +1,481 @@
+import AxeBuilder from '@axe-core/playwright';
+import type { Locator, Page } from '@playwright/test';
+import { apiAs, expectNoA11yViolations, field, seedNote, seedProject, useCspGuard } from './helpers.ts';
+import { expect, joinByApi, test } from './fixtures.ts';
+
+useCspGuard();
+
+const projectUrl = (roadmapId: string, projectId: string) => `/r/${roadmapId}/projects/${projectId}`;
+const panelOf = (page: Page, title: string) => page.getByRole('region', { name: title, exact: true });
+const notesOf = (page: Page, title: string) => panelOf(page, title).getByRole('region', { name: 'Notes', exact: true });
+const noteWith = (notes: Locator, text: string) => notes.getByRole('article').filter({ hasText: text });
+const newNoteBox = (notes: Locator) => notes.getByRole('textbox', { name: 'Add a note', exact: true });
+
+test('FR-1.5: a Contributor not assigned to an item adds a Markdown note; it shows rendered with their name and a time, and stays after a reload', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const writer = await joinByApi(browser, call, id, 'contributor', 'writer');
+  const p = writer.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+  await expect(notes.getByText('No notes yet.')).toBeVisible();
+  await expect(notes.getByText('You can use Markdown. Type @ to mention someone.')).toBeVisible();
+
+  await newNoteBox(notes).fill('Ship it **soon**\n\n- first step\n- second step');
+  await notes.getByRole('button', { name: 'Add note', exact: true }).click();
+
+  const added = noteWith(notes, 'Ship it');
+  await expect(added.locator('.markdown strong')).toHaveText('soon');
+  await expect(added.getByRole('listitem')).toHaveText(['first step', 'second step']);
+  await expect(added.getByText('writer user', { exact: true })).toBeVisible();
+  await expect(added.locator('time')).toHaveAttribute('datetime', /^\d{4}-\d{2}-\d{2}T/);
+  await expect(added.locator('time')).not.toBeEmpty();
+  await expect(newNoteBox(notes)).toHaveValue('');
+  await expect(newNoteBox(notes)).toBeFocused();
+  await expect(notes.getByText('Note added.', { exact: true })).toHaveAttribute('aria-live', 'polite');
+
+  await p.reload();
+  await expect(noteWith(notesOf(p, 'Launch site'), 'Ship it').locator('.markdown strong')).toHaveText('soon');
+  await writer.context.close();
+});
+
+test('FR-1.5: an Admin replies; the reply nests under the note, and replying to the reply adds to the same thread', async ({ browser, call, owner, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  await seedNote(call, id, itemId, 'Owner question');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  const p = chief.page;
+  await p.setViewportSize({ width: 1280, height: 800 });
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+
+  await noteWith(notes, 'Owner question').getByRole('button', { name: 'Reply', exact: true }).click();
+  const replyBox = notes.getByRole('textbox', { name: `Reply to ${owner.name}`, exact: true });
+  await expect(replyBox).toBeFocused();
+  await expectNoA11yViolations(p);
+  await replyBox.fill('First answer');
+  await notes.getByRole('button', { name: 'Add reply', exact: true }).click();
+  const replies = notes.locator('.note-replies');
+  await expect(replies.getByRole('article')).toHaveCount(1);
+  await expect(replies.getByRole('article')).toContainText('First answer');
+  await expect(replyBox).toHaveValue('');
+  await expect(replyBox).toBeFocused();
+  await expect(notes.getByText('Note added.', { exact: true })).toBeVisible();
+
+  await noteWith(notes, 'First answer').getByRole('button', { name: 'Reply', exact: true }).click();
+  const second = notes.getByRole('textbox', { name: 'Reply to chief user', exact: true });
+  await second.fill('Second answer');
+  await notes.getByRole('button', { name: 'Add reply', exact: true }).click();
+  await expect(replies).toHaveCount(1);
+  await expect(replies.getByRole('article')).toHaveCount(2);
+  await expect(replies.getByRole('article').nth(1)).toContainText('Second answer');
+
+  // Cancel closes the box.
+  await notes.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(second).toHaveCount(0);
+  await chief.context.close();
+});
+
+test('FR-1.5: the author edits their note and "Edited" appears; an Admin sees no Edit on it', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const writer = await joinByApi(browser, call, id, 'contributor', 'writer');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  await seedNote(await apiAs(writer.page), id, itemId, 'Draft wording');
+
+  const p = writer.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+  await noteWith(notes, 'Draft wording').getByRole('button', { name: 'Edit', exact: true }).click();
+  const box = notes.getByRole('textbox', { name: 'Edit your note', exact: true });
+  await expect(box).toHaveValue('Draft wording');
+  await expect(box).toBeFocused();
+  await box.fill('Final wording');
+  await notes.getByRole('button', { name: 'Save note', exact: true }).click();
+  const edited = noteWith(notes, 'Final wording');
+  await expect(edited.getByText('Edited', { exact: true })).toBeVisible();
+  await expect(box).toHaveCount(0);
+  await expect(edited.getByRole('button', { name: 'Edit', exact: true })).toBeFocused();
+
+  const a = chief.page;
+  await a.goto(projectUrl(id, itemId));
+  const theirs = noteWith(notesOf(a, 'Launch site'), 'Final wording');
+  await expect(theirs.getByText('Edited', { exact: true })).toBeVisible();
+  await expect(theirs.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+  await expect(theirs.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
+  await expect(theirs.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+  await writer.context.close();
+  await chief.context.close();
+});
+
+test('FR-1.5: an Admin deletes a note that has a reply; "This note was deleted." stays with the reply, and deleting the reply removes both', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const writer = await joinByApi(browser, call, id, 'contributor', 'writer');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  const top = await seedNote(await apiAs(writer.page), id, itemId, 'Contributor idea');
+  await seedNote(call, id, itemId, 'Owner reply', top);
+
+  const p = chief.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+  await expect(noteWith(notes, 'Owner reply')).toBeVisible();
+  await expectNoA11yViolations(p);
+
+  // Escape answers the question, not the panel: the panel stays open.
+  const deleteIdea = noteWith(notes, 'Contributor idea').getByRole('button', { name: 'Delete', exact: true });
+  await deleteIdea.click();
+  const dialog = p.getByRole('dialog', { name: 'Delete this note?' });
+  await expect(dialog).toBeVisible();
+  await p.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(p).toHaveURL(projectUrl(id, itemId));
+  await expect(deleteIdea).toBeFocused();
+
+  await deleteIdea.click();
+  await expect(dialog).toContainText("Its replies stay. This can't be undone.");
+  await expectNoA11yViolations(p);
+  await dialog.getByRole('button', { name: 'Delete note', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const placeholder = noteWith(notes, 'This note was deleted.');
+  await expect(placeholder).toBeVisible();
+  await expect(placeholder.getByRole('button')).toHaveCount(0);
+  await expect(notes.getByText('Contributor idea')).toHaveCount(0);
+  // The deleted note's place had no control left; focus goes to the next note's.
+  await expect(noteWith(notes, 'Owner reply').getByRole('button', { name: 'Reply', exact: true })).toBeFocused();
+
+  await noteWith(notes, 'Owner reply').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(dialog).toContainText("This can't be undone.");
+  await expect(dialog).not.toContainText('Its replies stay.');
+  await dialog.getByRole('button', { name: 'Delete note', exact: true }).click();
+  await expect(notes.getByRole('article')).toHaveCount(0);
+  await expect(notes.getByText('No notes yet.')).toBeVisible();
+  await expect(newNoteBox(notes)).toBeFocused();
+
+  await p.reload();
+  await expect(notesOf(p, 'Launch site').getByText('No notes yet.')).toBeVisible();
+  await writer.context.close();
+  await chief.context.close();
+});
+
+test('FR-1.5: after an Admin deletes a note that has a reply, "Reply" on that reply adds a second reply under "This note was deleted."', async ({ browser, call, owner, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const writer = await joinByApi(browser, call, id, 'contributor', 'writer');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  const top = await seedNote(await apiAs(writer.page), id, itemId, 'Contributor idea');
+  await seedNote(call, id, itemId, 'Owner reply', top);
+
+  const p = chief.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+  await noteWith(notes, 'Contributor idea').getByRole('button', { name: 'Delete', exact: true }).click();
+  await p.getByRole('dialog', { name: 'Delete this note?' }).getByRole('button', { name: 'Delete note', exact: true }).click();
+  await expect(noteWith(notes, 'This note was deleted.')).toBeVisible();
+
+  await noteWith(notes, 'Owner reply').getByRole('button', { name: 'Reply', exact: true }).click();
+  await notes.getByRole('textbox', { name: `Reply to ${owner.name}`, exact: true }).fill('Still worth doing');
+  await notes.getByRole('button', { name: 'Add reply', exact: true }).click();
+  await expect(notes.getByText('Note added.', { exact: true })).toBeVisible();
+  await expect(notes.getByRole('alert')).toHaveCount(0);
+
+  const thread = notes.locator('.note-thread').filter({ has: p.getByText('This note was deleted.', { exact: true }) });
+  const replies = thread.locator('.note-replies').getByRole('article');
+  await expect(replies).toHaveCount(2);
+  await expect(replies.nth(1)).toContainText('Still worth doing');
+
+  await p.reload();
+  const reloaded = notesOf(p, 'Launch site');
+  await expect(reloaded.locator('.note-replies').getByRole('article')).toHaveText([/Owner reply/, /Still worth doing/]);
+  await expect(noteWith(reloaded, 'This note was deleted.')).toBeVisible();
+  await writer.context.close();
+  await chief.context.close();
+});
+
+test('FR-1.5: an empty note says "Write something first."; a 5,001-character note shows the length message and keeps the text', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  await page.goto(projectUrl(id, itemId));
+  const notes = notesOf(page, 'Launch site');
+  const add = notes.getByRole('button', { name: 'Add note', exact: true });
+
+  await add.click();
+  await expect(notes.getByRole('alert')).toHaveText('Write something first.');
+  await expect(newNoteBox(notes)).toBeFocused();
+
+  const long = 'a'.repeat(5001);
+  await newNoteBox(notes).fill(long);
+  await add.click();
+  await expect(notes.getByRole('alert')).toHaveText('Notes can be up to 5,000 characters.');
+  await expect(newNoteBox(notes)).toHaveValue(long);
+  await expect(notes.getByRole('article')).toHaveCount(0);
+});
+
+test('FR-1.5: text in a note box counts as unsaved: Escape and opening another row ask first, and Keep editing keeps it', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Alpha');
+  await seedProject(call, id, 'Beta');
+  await page.goto(projectUrl(id, itemId));
+  const notes = notesOf(page, 'Alpha');
+  const dialog = page.getByRole('dialog', { name: 'Discard your unsaved changes to Alpha?' });
+
+  await newNoteBox(notes).fill('Half a thought');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(projectUrl(id, itemId));
+  await expect(newNoteBox(notes)).toHaveValue('Half a thought');
+
+  await page.getByRole('link', { name: 'Beta', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await expect(page).toHaveURL(projectUrl(id, itemId));
+  await expect(newNoteBox(notes)).toHaveValue('Half a thought');
+
+  // Once the box is empty again, nothing asks.
+  await newNoteBox(notes).fill('');
+  await page.getByRole('link', { name: 'Beta', exact: true }).click();
+  await expect(panelOf(page, 'Beta')).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+});
+
+test('FR-1.5: a note with an <img onerror> and a javascript: link shows as text and a dead link; nothing runs', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const raw = '<img src=x onerror="window.__notePwned=1">';
+  await seedNote(call, id, itemId, `Look ${raw} here\n\n[open me](javascript:window.__notePwned=2)`);
+  const dialogs: string[] = [];
+  page.on('dialog', (d) => {
+    dialogs.push(d.message());
+    void d.dismiss();
+  });
+
+  await page.goto(projectUrl(id, itemId));
+  const notes = notesOf(page, 'Launch site');
+  const shown = noteWith(notes, 'Look');
+  await expect(shown).toContainText(raw);
+  await expect(notes.locator('img')).toHaveCount(0);
+  const link = shown.locator('a', { hasText: 'open me' });
+  await expect(link).toBeVisible();
+  await expect(link).not.toHaveAttribute('href');
+  await link.click();
+  expect(await page.evaluate(() => (window as { __notePwned?: number }).__notePwned)).toBeUndefined();
+  expect(dialogs).toEqual([]);
+});
+
+test('FR-1.5: an archived item shows its notes and the archived message, with no boxes', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Old season');
+  await seedNote(call, id, itemId, 'Wrapped up');
+  await call('POST', `/api/roadmaps/${id}/projects/${itemId}/archive`);
+
+  await page.goto(projectUrl(id, itemId));
+  const notes = notesOf(page, 'Old season');
+  await expect(noteWith(notes, 'Wrapped up')).toBeVisible();
+  await expect(notes.getByText("This item is archived, so notes and files can't be added or changed.")).toBeVisible();
+  await expect(notes.getByRole('textbox')).toHaveCount(0);
+  await expect(notes.getByRole('button')).toHaveCount(0);
+});
+
+test('FR-1.5: when the notes fail to load, "Couldn\'t load notes. Try again." shows with its button, and the item form still saves', async ({ page, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  await seedNote(call, id, itemId, 'Hidden for now');
+  let blocked = true;
+  await page.route('**/api/roadmaps/*/projects/*/notes', (route) => (blocked ? route.abort() : route.continue()));
+
+  await page.goto(projectUrl(id, itemId));
+  const panel = panelOf(page, 'Launch site');
+  const alert = notesOf(page, 'Launch site').getByRole('alert');
+  await expect(alert).toContainText("Couldn't load notes. Try again.");
+  await expect(alert.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+
+  await panel.getByLabel('Description', { exact: true }).fill('Still editable');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('status')).toHaveText('Saved.');
+
+  blocked = false;
+  await alert.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(noteWith(notesOf(page, 'Launch site'), 'Hidden for now')).toBeVisible();
+  await expect(notesOf(page, 'Launch site').getByRole('alert')).toHaveCount(0);
+});
+
+test('FR-1.5: the audit log shows "added a note", "edited a note" and "deleted a note", and the action filter lists them', async ({ page, call, owner, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const noteId = await seedNote(call, id, itemId, 'Secret plan');
+  await call('PATCH', `/api/roadmaps/${id}/projects/${itemId}/notes/${noteId}`, { body: 'Secret plan, revised' });
+  await call('DELETE', `/api/roadmaps/${id}/projects/${itemId}/notes/${noteId}`);
+
+  await page.goto(`/r/${id}/audit`);
+  const log = page.getByRole('list', { name: 'Events' });
+  for (const sentence of ['added a note.', 'edited a note.', 'deleted a note.']) {
+    await expect(log.getByRole('listitem').filter({ hasText: `${owner.name} ${sentence}` })).toHaveCount(1);
+  }
+  await expect(log).not.toContainText('Secret plan');
+
+  for (const [label, sentence] of [
+    ['Note added', 'added a note.'],
+    ['Note edited', 'edited a note.'],
+    ['Note deleted', 'deleted a note.'],
+  ] as const) {
+    await field(page, 'Action').selectOption({ label });
+    await expect(log.getByRole('listitem')).toHaveCount(1);
+    await expect(log).toContainText(sentence);
+  }
+});
+
+test('FR-1.5: at 375 px a note with a long unbroken word and a wide code block causes no sideways scroll', async ({ page, call, roadmap }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const topId = await seedNote(call, id, itemId, `Word ${'x'.repeat(300)}\n\n\`\`\`\n${'const wide = 1; '.repeat(30)}\n\`\`\``);
+  await page.goto(projectUrl(id, itemId));
+  const notes = notesOf(page, 'Launch site');
+  await expect(notes.locator('pre')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  await expectNoA11yViolations(page);
+  // With the list open, the best-practice rules pass too (no role is put on the textarea).
+  const best = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']).analyze();
+  expect(best.violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(' ')) }))).toEqual([]);
+
+  // Reply, Edit and Delete are 44 by 44 px targets.
+  const shown = noteWith(notes, 'Word');
+  for (const name of ['Reply', 'Edit', 'Delete']) {
+    const box = await shown.getByRole('button', { name, exact: true }).boundingBox();
+    expect(box?.width).toBeGreaterThanOrEqual(44);
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+  }
+  // Replies are indented 16 px from their note, behind a left border.
+  await seedNote(call, id, itemId, 'An answer', topId);
+  await page.reload();
+  const replies = notesOf(page, 'Launch site').locator('.note-replies');
+  const [topBox, replyBox] = await Promise.all([noteWith(notes, 'Word').boundingBox(), replies.getByRole('article').boundingBox()]);
+  expect(Math.round((replyBox?.x ?? 0) - (topBox?.x ?? 0))).toBe(16);
+  await expect(replies).toHaveCSS('border-left-style', 'solid');
+});
+
+test('FR-1.5: a reply to a note that was just deleted keeps the typed text', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const noteId = await seedNote(call, id, itemId, 'Soon gone');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  const p = chief.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+
+  await noteWith(notes, 'Soon gone').getByRole('button', { name: 'Reply', exact: true }).click();
+  const replyBox = notes.getByRole('textbox', { name: /^Reply to / });
+  await replyBox.fill('My careful answer');
+  // Someone else deletes the note while the reply is being written.
+  await call('DELETE', `/api/roadmaps/${id}/projects/${itemId}/notes/${noteId}`);
+  await notes.getByRole('button', { name: 'Add reply', exact: true }).click();
+
+  await expect(notes.getByRole('alert')).toHaveText('That note no longer exists.');
+  await expect(replyBox).toHaveCount(0);
+  await expect(notes.getByText('Soon gone')).toHaveCount(0);
+  await expect(newNoteBox(notes)).toHaveValue('My careful answer');
+  await expect(newNoteBox(notes)).toBeFocused();
+  // Still counted as unsaved.
+  await p.keyboard.press('Escape');
+  await expect(p.getByRole('dialog', { name: 'Discard your unsaved changes to Launch site?' })).toBeVisible();
+  await chief.context.close();
+});
+
+/** Presses Down in the @ list until the option named `name` is active. */
+async function arrowTo(box: Locator, page: Page, name: string) {
+  const option = page.getByRole('listbox', { name: 'People', exact: true }).getByRole('option', { name, exact: true });
+  const optionId = await option.getAttribute('id');
+  for (let i = 0; i < 8 && (await box.getAttribute('aria-activedescendant')) !== optionId; i += 1) await page.keyboard.press('ArrowDown');
+  await expect(box).toHaveAttribute('aria-activedescendant', optionId!);
+}
+
+test('FR-1.5: a Contributor types "@", picks an Admin with the keyboard and adds the note; the name shows highlighted, also after a reload, and the note records the mention', async ({ browser, call, roadmap }) => {
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  const chief = await joinByApi(browser, call, id, 'admin', 'chief');
+  const writer = await joinByApi(browser, call, id, 'contributor', 'writer');
+  const p = writer.page;
+  await p.goto(projectUrl(id, itemId));
+  const notes = notesOf(p, 'Launch site');
+  const box = newNoteBox(notes);
+
+  await box.click();
+  await p.keyboard.type('Over to @');
+  const people = p.getByRole('listbox', { name: 'People', exact: true });
+  await expect(people).toBeVisible();
+  // The box stays a text box and points at the list.
+  await expect(box).not.toHaveAttribute('role');
+  await expect(box).not.toHaveAttribute('aria-expanded');
+  await expect(box).toHaveAttribute('aria-autocomplete', 'list');
+  await expect(box).toHaveAttribute('aria-haspopup', 'listbox');
+  await expect(box).toHaveAttribute('aria-controls', (await people.getAttribute('id'))!);
+  await expectNoA11yViolations(p);
+  await arrowTo(box, p, 'chief user');
+  await expect(notes.locator('.mention-status')).toHaveText('chief user');
+  await p.keyboard.press('Enter');
+  await expect(people).toHaveCount(0);
+  await expect(box).not.toHaveAttribute('aria-controls');
+  await expect(notes.locator('.mention-status')).toHaveText('');
+  await expect(box).toHaveValue('Over to @chief user ');
+  await expect(box).toBeFocused();
+  await p.keyboard.type('please');
+
+  const saved = p.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/projects/${itemId}/notes`));
+  await notes.getByRole('button', { name: 'Add note', exact: true }).click();
+  const posted = (await (await saved).json()) as { id: string };
+  const added = noteWith(notes, 'Over to');
+  await expect(added.locator('.mention')).toHaveText('@chief user');
+
+  const { members } = await call<{ members: Array<{ userId: string; name: string }> }>('GET', `/api/roadmaps/${id}/members`);
+  const chiefId = members.find((m) => m.name === 'chief user')?.userId;
+  const fetched = await (await apiAs(p))<{ notes: Array<{ id: string; mentions: unknown }> }>('GET', `/api/roadmaps/${id}/projects/${itemId}/notes`);
+  expect(fetched.notes.find((n) => n.id === posted.id)?.mentions).toEqual([{ userId: chiefId, name: 'chief user' }]);
+
+  await p.reload();
+  await expect(noteWith(notesOf(p, 'Launch site'), 'Over to').locator('.mention')).toHaveText('@chief user');
+  await writer.context.close();
+  await chief.context.close();
+});
+
+test('FR-1.5: at 375 px the @ list is inside the viewport and passes axe, a tap picks, and Escape closes only the list', async ({ page, call, owner, roadmap }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  const id = roadmap.id;
+  const itemId = await seedProject(call, id, 'Launch site');
+  await page.goto(projectUrl(id, itemId));
+  const notes = notesOf(page, 'Launch site');
+  const box = newNoteBox(notes);
+  await box.click();
+  await page.keyboard.type('@');
+  const frame = page.locator('.mention-picker');
+  await expect(page.getByRole('listbox', { name: 'People', exact: true })).toBeVisible();
+  const inside = async () => {
+    const r = await frame.boundingBox();
+    expect(r).not.toBeNull();
+    expect(r!.x).toBeGreaterThanOrEqual(0);
+    expect(r!.y).toBeGreaterThanOrEqual(0);
+    expect(r!.x + r!.width).toBeLessThanOrEqual(375);
+    expect(r!.y + r!.height).toBeLessThanOrEqual(667);
+  };
+  await inside();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  await expectNoA11yViolations(page);
+
+  // A tap (a click on desktop) picks the name and leaves focus in the box.
+  await page.getByRole('option', { name: owner.name, exact: true }).click();
+  await expect(frame).toHaveCount(0);
+  await expect(box).toHaveValue(`@${owner.name} `);
+  await expect(box).toBeFocused();
+
+  await box.fill('');
+  await page.keyboard.type('@zzz');
+  await expect(frame).toContainText('No one matches.');
+  await expect(notes.locator('.mention-status')).toHaveText('No one matches.');
+  await page.keyboard.press('Escape');
+  await expect(frame).toHaveCount(0);
+  await expect(box).toHaveValue('@zzz');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page).toHaveURL(projectUrl(id, itemId));
+});

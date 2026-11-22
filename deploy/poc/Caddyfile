@@ -28,6 +28,22 @@
 				window 1m
 			}
 		}
+		# Request bodies: 1 MiB (the API's own JSON limit), except the file upload, which takes a 25 MiB file plus
+		# the multipart framing. MiB, not MB: the API counts 25 * 1024 * 1024 bytes.
+		@upload {
+			method POST
+			path_regexp ^/api/roadmaps/[^/]+/projects/[^/]+/attachments$
+		}
+		@not_upload not {
+			method POST
+			path_regexp ^/api/roadmaps/[^/]+/projects/[^/]+/attachments$
+		}
+		request_body @upload {
+			max_size 26MiB
+		}
+		request_body @not_upload {
+			max_size 1MiB
+		}
 		reverse_proxy api:3000
 	}
 

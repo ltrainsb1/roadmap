@@ -4,3 +4,4 @@ export * from './policy.ts';
 export * from './projects.ts';
 export * from './project-rules.ts';
 export * from './timeline.ts';
+export * from './notes.ts';

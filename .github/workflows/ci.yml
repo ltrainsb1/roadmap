@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest # Docker is available here, which Testcontainers needs
     env:
       TEST_MONGO: container
+      TEST_S3: container
+      TEST_CLAMAV: container
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -88,8 +90,8 @@ jobs:
   deploy-smoke:
     runs-on: ubuntu-latest # Docker is available here; ports 80 and 443 are free
     env:
-      COMPOSE: docker compose -f deploy/poc/docker-compose.yml
-      MONGO_DATA: ${{ github.workspace }}/.mongo-data
+      # The smoke file adds MinIO in place of S3 and keeps MongoDB's data in a named volume.
+      COMPOSE: docker compose -f deploy/poc/docker-compose.yml -f deploy/poc/docker-compose.smoke.yml
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Write a throwaway .env
@@ -110,6 +112,10 @@ jobs:
             echo "MAIL_FROM=no-reply@localhost"
             echo "HIBP_ENABLED=false"
             echo "AUTH_RATE_LIMIT_PER_MIN=10"
+            echo "S3_BUCKET=roadmap-files"
+            echo "MINIO_ROOT_USER=smoke-$(openssl rand -hex 8)"
+            echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)"
+            echo "MINIO_KMS_SECRET_KEY=smoke-key:$(openssl rand -base64 32)"
           } > deploy/poc/.env
       - name: Build both images
         run: $COMPOSE build
@@ -125,14 +131,31 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: true
+      # ClamAV runs in production but is built upstream, not by us: its findings are listed here, and a fix means
+      # an upstream rebuild or a newer tag (see the follow-ups document). MinIO is not scanned: it runs only in this job, never in a deployment.
+      - name: List ClamAV image findings (upstream image, not a gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: clamav/clamav:1.4.7
+          severity: CRITICAL,HIGH
+          exit-code: 0
       - name: Start the stack
-        run: $COMPOSE up -d --wait --wait-timeout 180
-      - name: Smoke test
-        run: scripts/smoke.sh https://localhost
+        # ClamAV loads its signatures before it is healthy, and the API waits for it.
+        run: $COMPOSE up -d --wait --wait-timeout 420
       - name: Bootstrap prints a setup link
+        id: bootstrap
         run: |
           url=$($COMPOSE exec -T api node dist/cli/bootstrap.js --tenant Test --email you@example.com --name You)
           echo "$url" | grep -Eq '^https://localhost/reset/[A-Za-z0-9_-]+$'
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: Smoke test
+        env:
+          # A throwaway stack, so the writing checks run: the script signs in with the setup link to check uploads,
+          # downloads and the virus scan.
+          SMOKE_WRITES: 'yes'
+          SMOKE_SETUP_URL: ${{ steps.bootstrap.outputs.url }}
+          SMOKE_CONNECT_TO: minio:9000:127.0.0.1:9000
+        run: scripts/smoke.sh https://localhost
       - name: Show the stack logs on failure
         if: failure()
         run: $COMPOSE logs --no-color --tail 100

@@ -282,3 +282,25 @@ export async function apiAs(page: Page) {
 export async function seedProject(call: Awaited<ReturnType<typeof apiAs>>, roadmapId: string, title: string, parentId: string | null = null) {
   return (await call<{ id: string }>('POST', `/api/roadmaps/${roadmapId}/projects`, { parentId, title })).id;
 }
+
+/** Adds a note to an item through the API, or a reply when `parentId` is a top-level note's id; returns its id. */
+export async function seedNote(
+  call: Awaited<ReturnType<typeof apiAs>>,
+  roadmapId: string,
+  projectId: string,
+  body: string,
+  parentId: string | null = null,
+) {
+  return (await call<{ id: string }>('POST', `/api/roadmaps/${roadmapId}/projects/${projectId}/notes`, { body, parentId })).id;
+}
+
+/** Uploads a file to an item through the API as the signed-in person on `page`; returns the new file's id. */
+export async function seedFile(page: Page, roadmapId: string, projectId: string, name: string, body: string | Buffer) {
+  const { csrfToken } = (await (await page.request.get('/api/me')).json()) as { csrfToken: string };
+  const res = await page.request.post(`/api/roadmaps/${roadmapId}/projects/${projectId}/attachments`, {
+    headers: { 'x-csrf-token': csrfToken },
+    multipart: { file: { name, mimeType: 'application/octet-stream', buffer: Buffer.from(body) } },
+  });
+  expect(res.status(), `upload of ${name} answered ${res.status()}`).toBe(201);
+  return ((await res.json()) as { id: string }).id;
+}

@@ -12,6 +12,7 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { MembershipDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
 import { canEver, type PolicyContext } from '../policy/policy.ts';
+import { deleteContentOf } from '../projects/content.ts';
 import { roadmapParams } from '../params.ts';
 
 export interface MemberRouteDeps {
@@ -238,6 +239,7 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
       if (req.body.confirmName !== roadmap.name) throw new HttpError(422, 'confirm_mismatch');
       await actor.db.withTransaction(async (s) => {
         // Later plans extend this with the other data that hangs off a roadmap.
+        await deleteContentOf(s, { roadmapId });
         await s.collection('projects').deleteMany({ roadmapId });
         await s.collection('invites').deleteMany({ roadmapId });
         await s.collection('memberships').deleteMany({ roadmapId });

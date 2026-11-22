@@ -3,6 +3,7 @@ import type {
   AuditEventDoc,
   InviteDoc,
   MembershipDoc,
+  NoteDoc,
   ProjectDoc,
   ResetTokenDoc,
   RoadmapDoc,
@@ -15,6 +16,7 @@ export type CollectionName =
   | 'memberships'
   | 'roadmaps'
   | 'projects'
+  | 'notes'
   | 'sessions'
   | 'invites'
   | 'resetTokens';
@@ -24,6 +26,7 @@ interface DocMap {
   memberships: MembershipDoc;
   roadmaps: RoadmapDoc;
   projects: ProjectDoc;
+  notes: NoteDoc;
   sessions: SessionDoc;
   invites: InviteDoc;
   resetTokens: ResetTokenDoc;

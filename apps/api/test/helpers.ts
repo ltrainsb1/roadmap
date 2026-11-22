@@ -13,7 +13,7 @@ import { loadConfig, type Config } from '../src/config.ts';
 import { connectDb, type Db } from '../src/db/client.ts';
 import { ensureIndexes } from '../src/db/indexes.ts';
 import { scoped } from '../src/db/scoped.ts';
-import type { MembershipDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
+import type { MembershipDoc, NoteDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
 import { MemoryMailer } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
@@ -54,6 +54,14 @@ export interface Seeder {
       archived?: boolean;
     },
   ): Promise<ProjectDoc>;
+  /** A top-level note with body "Note" unless `over` says otherwise; goes through the scoped collection. */
+  note(
+    tenantId: string,
+    roadmapId: string,
+    projectId: string,
+    authorId: string,
+    over?: Partial<Omit<NoteDoc, 'tenantId' | 'roadmapId' | 'projectId' | 'authorId'>>,
+  ): Promise<NoteDoc>;
 }
 
 export interface TestApp {
@@ -79,6 +87,8 @@ export interface TestAppOptions {
   env?: Record<string, string>;
   /** Replaces the per-roadmap item limit. */
   maxProjectItems?: number;
+  /** Replaces the per-item note limit. */
+  maxNotesPerItem?: number;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -110,6 +120,7 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
     ...(opts.maxProjectItems !== undefined ? { maxProjectItems: opts.maxProjectItems } : {}),
+    ...(opts.maxNotesPerItem !== undefined ? { maxNotesPerItem: opts.maxNotesPerItem } : {}),
   });
   opts.routes?.(app);
 
@@ -194,6 +205,22 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
         updatedAt: now,
       });
     },
+    note: (tenantId, roadmapId, projectId, authorId, over = {}) =>
+      scoped(db, tenantId)
+        .collection('notes')
+        .insertOne({
+          _id: uuidv7(),
+          parentId: null,
+          body: 'Note',
+          mentions: [],
+          createdAt: new Date(),
+          editedAt: null,
+          deletedAt: null,
+          ...over,
+          roadmapId,
+          projectId,
+          authorId,
+        }),
   };
 
   return {

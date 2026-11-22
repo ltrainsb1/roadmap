@@ -22,6 +22,7 @@ import { registerAuthRoutes } from './auth/routes.ts';
 import { registerInviteRoutes } from './invites/routes.ts';
 import { registerAuditRoutes } from './audit/routes.ts';
 import { registerMemberRoutes } from './members/routes.ts';
+import { registerNoteRoutes } from './notes/routes.ts';
 import { registerAssignRoutes } from './projects/assign-routes.ts';
 import { registerPriorityRoutes } from './projects/priority-routes.ts';
 import { registerLifecycleRoutes } from './projects/lifecycle-routes.ts';
@@ -43,6 +44,8 @@ export interface AppDeps {
   mailer?: Mailer;
   /** Most items one roadmap may hold; defaults to the shared limit. Tests lower it. */
   maxProjectItems?: number;
+  /** Most notes one item may hold; defaults to the shared limit. Tests lower it. */
+  maxNotesPerItem?: number;
 }
 
 const AUTH_PREFIX = '/api/auth/';
@@ -146,6 +149,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerAssignRoutes(app, { now });
   registerPriorityRoutes(app, { now });
   registerLifecycleRoutes(app);
+  registerNoteRoutes(app, { now, ...(deps.maxNotesPerItem !== undefined && { maxNotesPerItem: deps.maxNotesPerItem }) });
 
   app.get('/api/openapi.json', { config: { auth: { level: 'public' } } }, () => app.swagger());
 

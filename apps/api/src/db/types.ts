@@ -90,9 +90,31 @@ export interface ProjectDoc {
   archived: boolean;
   /** Bumped on every edit; a stale client version is refused. */
   version: number;
+  /**
+   * Bumped by every change to the item's notes and files, so such a change and a delete of the item conflict and
+   * one retries. Not in the DTO and never changes `version`.
+   */
+  contentRevision?: number;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface NoteDoc {
+  _id: string;
+  tenantId: string;
+  roadmapId: string;
+  projectId: string;
+  /** The top-level note this replies to; null for a top-level note. Replies are one level deep. */
+  parentId: string | null;
+  authorId: string;
+  body: string;
+  /** Each person mentioned, with their name when the note was saved. */
+  mentions: { userId: string; name: string }[];
+  createdAt: Date;
+  editedAt: Date | null;
+  /** Set when a top-level note with replies is deleted; its body and mentions are erased then. */
+  deletedAt: Date | null;
 }
 
 export interface SessionDoc {

@@ -6,6 +6,7 @@ import type { ScopedDb } from '../db/scoped.ts';
 import type { ProjectDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
 import { assignedCtx, loadProject } from './access.ts';
+import { deleteContentOf } from './content.ts';
 import { projectParams } from '../params.ts';
 
 
@@ -96,6 +97,7 @@ export function registerLifecycleRoutes(app: FastifyInstance): void {
       const ids = [item._id, ...(await descendantsOf(s, item)).map((x) => x._id)];
       const projects = s.collection('projects');
       const { deleted } = await projects.deleteMany({ roadmapId, _id: { $in: ids } });
+      await deleteContentOf(s, { roadmapId, projectIds: ids });
       // The version goes up with the pull: a form opened before the delete still lists the deleted item, and its
       // next save must be a conflict the person can reload from, not a refusal about an item they never chose.
       await projects.updateMany({ roadmapId, blockedBy: { $in: ids } }, { $pull: { blockedBy: { $in: ids } }, $inc: { version: 1 } });

@@ -1,4 +1,4 @@
-import type { SnapshotContent, SnapshotNote } from '@roadmap/shared';
+import type { DownloadLink, SnapshotContent, SnapshotNote, SnapshotView } from '@roadmap/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -73,6 +73,38 @@ export function useSnapshotNotes(linkId: string, itemId: string, enabled: boolea
     retry: false,
     staleTime: Infinity,
   });
+}
+
+/** The PDF link was not a web address: it is never followed. */
+export const UNSAFE_DOWNLOAD_LINK = 'unsafe_download_link';
+
+/**
+ * Asks for the PDF of a view (made the first time, then kept), then goes to its download link. The PDF is sent as an
+ * attachment, so the browser saves it and the page stays where it is.
+ */
+export function useSnapshotPdf(linkId: string) {
+  return useMutation({
+    mutationFn: async (view: SnapshotView) => {
+      const { url } = await api<DownloadLink>(`${base(linkId)}/pdf`, { body: { view }, quiet: true });
+      // Only a web link: never a script or inline document, whatever the answer held.
+      const { protocol } = new URL(url, window.location.origin);
+      if (protocol !== 'https:' && protocol !== 'http:') throw new Error(UNSAFE_DOWNLOAD_LINK);
+      window.location.assign(url);
+    },
+    gcTime: 0,
+  });
+}
+
+/** Sets the page title while mounted, and puts the old one back after. */
+export function useDocumentTitle(title: string | undefined) {
+  useEffect(() => {
+    if (title === undefined) return;
+    const before = document.title;
+    document.title = title;
+    return () => {
+      document.title = before;
+    };
+  }, [title]);
 }
 
 /** Whether `err` says the snapshot's session has ended. */

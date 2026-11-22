@@ -7,6 +7,7 @@ import path from 'node:path';
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const API_PORT = 3100;
 const WEB_PORT = 5173;
+const PDF_PORT = 3200;
 
 /** The environment the API and the bootstrap command run with; helpers.ts reads it back from E2E_API_ENV. */
 function apiEnv(mongoUri: string, outbox: string, filesDir: string): Record<string, string> {
@@ -26,6 +27,9 @@ function apiEnv(mongoUri: string, outbox: string, filesDir: string): Record<stri
     FILES_DIR: filesDir,
     FILES_SIGNING_KEY: randomBytes(32).toString('base64'),
     SCANNER: 'fake',
+    // The real PDF service, which prints the preview server's print pages with Chromium.
+    PDF: 'service',
+    PDF_URL: `http://127.0.0.1:${PDF_PORT}`,
     // One IP runs the whole suite; the production limit of 10 a minute would trip it, and so would 1000 once many specs create accounts.
     AUTH_RATE_LIMIT_PER_MIN: '10000',
   };
@@ -133,9 +137,20 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       path.join(repoRoot, 'apps/web'),
     );
     children.push(web);
+    // Node directly, for the same reason as vite. It launches the Chromium Playwright installed (the same pinned
+    // version), with its sandbox on, and opens only the preview server's origin.
+    const pdf = start(
+      'pdf',
+      'node',
+      ['--experimental-strip-types', 'src/server.ts'],
+      { PORT: String(PDF_PORT), RENDER_ORIGIN: `http://localhost:${WEB_PORT}` },
+      path.join(repoRoot, 'apps/pdf'),
+    );
+    children.push(pdf);
     await waitFor(`http://127.0.0.1:${API_PORT}/api/health`, api, 'api');
     // Through the preview server, so the /api proxy is checked too.
     await waitFor(`http://localhost:${WEB_PORT}/api/health`, web, 'web');
+    await waitFor(`http://127.0.0.1:${PDF_PORT}/health`, pdf, 'pdf');
   } catch (err) {
     await stopAll().catch(() => undefined);
     throw err;

@@ -1,25 +1,27 @@
 import type { SnapshotContent, SnapshotView } from '@roadmap/shared';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
+import { ApiError } from '../api/client.ts';
 import { formatDay } from '../projects/names.ts';
+import { Alert } from '../ui/Alert.tsx';
+import { Button } from '../ui/Button.tsx';
 import { LinkProblem, linkProblemOf, LoadFailed } from './SnapshotGate.tsx';
 import { SnapshotList } from './SnapshotList.tsx';
 import { SnapshotTimeline } from './SnapshotTimeline.tsx';
-import { useReturnToGate, useSnapshotContent, viewPath, type ViewState } from './useSnapshot.ts';
+import {
+  useDocumentTitle,
+  useReturnToGate,
+  useSnapshotContent,
+  useSnapshotPdf,
+  viewPath,
+  type ViewState,
+} from './useSnapshot.ts';
 
 const VIEW_NAMES: Record<SnapshotView, string> = { list: 'List', timeline: 'Timeline' };
 
-/** Sets the page title while mounted, and puts the old one back after. */
-function useDocumentTitle(title: string | undefined) {
-  useEffect(() => {
-    if (title === undefined) return;
-    const before = document.title;
-    document.title = title;
-    return () => {
-      document.title = before;
-    };
-  }, [title]);
-}
+export const PDF_PREPARING = 'Preparing the PDF…';
+export const PDF_FAILED = "Couldn't create the PDF. Try again.";
+export const PDF_BUSY = 'Other PDFs are being prepared. Try again in a minute.';
 
 function ViewerPage({ children }: { children: ReactNode }) {
   return <div className="page page-wide snapshot-page">{children}</div>;
@@ -33,10 +35,12 @@ interface SnapshotHeaderProps {
   search: string;
   /** Takes focus once, when the snapshot has just been unlocked. */
   focusHeading: boolean;
+  /** "Download PDF", beside the views. */
+  download: ReactNode;
 }
 
 /** The roadmap's name as the page heading, the "as of" date, and the two views. */
-function SnapshotHeader({ linkId, content, view, search, focusHeading }: SnapshotHeaderProps) {
+function SnapshotHeader({ linkId, content, view, search, focusHeading, download }: SnapshotHeaderProps) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (focusHeading) heading.current?.focus();
@@ -56,6 +60,7 @@ function SnapshotHeader({ linkId, content, view, search, focusHeading }: Snapsho
           </Link>
         ))}
       </nav>
+      {download}
     </header>
   );
 }
@@ -65,7 +70,12 @@ export function SnapshotLayout({ view }: { view: SnapshotView }) {
   const { linkId = '' } = useParams();
   const location = useLocation();
   const content = useSnapshotContent(linkId);
-  const leaving = useReturnToGate(linkId, content.error);
+  const pdf = useSnapshotPdf(linkId);
+  // A press while one is under way asks for nothing: the state that disables the button lags a render behind.
+  const asking = useRef(false);
+  const leavingForContent = useReturnToGate(linkId, content.error);
+  const leavingForPdf = useReturnToGate(linkId, pdf.error);
+  const leaving = leavingForContent || leavingForPdf;
   const data = content.data;
   useDocumentTitle(data && `${data.roadmapName}: snapshot`);
 
@@ -78,6 +88,9 @@ export function SnapshotLayout({ view }: { view: SnapshotView }) {
       </ViewerPage>
     );
   }
+  // Revoked or expired since the page loaded: the PDF answer says so.
+  const pdfProblem = linkProblemOf(pdf.error);
+  if (pdfProblem) return <LinkProblem kind={pdfProblem} />;
   if (content.isError) {
     const kind = linkProblemOf(content.error);
     if (kind) return <LinkProblem kind={kind} />;
@@ -91,9 +104,41 @@ export function SnapshotLayout({ view }: { view: SnapshotView }) {
   }
 
   const unlocked = (location.state as ViewState | null)?.unlocked === true;
+  const download = () => {
+    if (asking.current) return;
+    asking.current = true;
+    pdf.mutate(view, {
+      onSettled: () => {
+        asking.current = false;
+      },
+    });
+  };
   return (
     <ViewerPage>
-      <SnapshotHeader linkId={linkId} content={content.data} view={view} search={location.search} focusHeading={unlocked} />
+      <SnapshotHeader
+        linkId={linkId}
+        content={content.data}
+        view={view}
+        search={location.search}
+        focusHeading={unlocked}
+        download={
+          // aria-disabled rather than disabled, so the button keeps focus while the PDF is made.
+          <Button className="snapshot-pdf" aria-disabled={pdf.isPending || undefined} onClick={download}>
+            Download PDF
+          </Button>
+        }
+      />
+      {/* Always on the page, so the words are announced when they appear. */}
+      <p role="status" className="snapshot-pdf-status">
+        {pdf.isPending ? PDF_PREPARING : ''}
+      </p>
+      {pdf.isError && (
+        <div className="snapshot-pdf-status">
+          <Alert>
+            <p>{pdf.error instanceof ApiError && pdf.error.code === 'pdf_busy' ? PDF_BUSY : PDF_FAILED}</p>
+          </Alert>
+        </div>
+      )}
       <main>{view === 'list' ? <SnapshotList linkId={linkId} content={content.data} /> : <SnapshotTimeline content={content.data} />}</main>
     </ViewerPage>
   );

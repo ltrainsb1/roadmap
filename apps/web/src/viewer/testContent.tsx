@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import type { Mock } from 'vitest';
 import { ApiError, type api, type ApiOptions } from '../api/client.ts';
 import { SnapshotGate } from './SnapshotGate.tsx';
+import { PrintPage } from './PrintPage.tsx';
 import { SnapshotLayout } from './SnapshotLayout.tsx';
 
 /** Test data and a test harness for the viewer's unit tests. */
@@ -83,8 +84,10 @@ type Answer = unknown;
 export interface ApiScript {
   status?: () => Answer;
   unlock?: (password: string) => Answer;
-  content?: () => Answer;
+  /** `all` is true for `/content?notes=all`. */
+  content?: (all: boolean) => Answer;
   notes?: (itemId: string) => Answer;
+  pdf?: (view: string) => Answer;
 }
 
 /**
@@ -100,7 +103,9 @@ export function scriptApi(mock: Mock<typeof api>, script: ApiScript) {
     let answer: Answer;
     if (path === prefix) answer = script.status?.() ?? { unlocked: false };
     else if (path === `${prefix}/unlock`) answer = script.unlock?.((opts.body as { password: string }).password);
-    else if (path === `${prefix}/content`) answer = script.content?.() ?? content();
+    else if (path === `${prefix}/content` || path === `${prefix}/content?notes=all`) {
+      answer = script.content?.(path.endsWith('?notes=all')) ?? content();
+    } else if (path === `${prefix}/pdf`) answer = script.pdf?.((opts.body as { view: string }).view);
     else {
       const itemId = /\/items\/([^/]+)\/notes$/.exec(path)?.[1];
       if (!itemId) throw new Error(`unexpected call ${path}`);
@@ -126,6 +131,8 @@ export function renderViewer(path: string, state?: unknown) {
           <Route path="/s/:linkId" element={<SnapshotGate />} />
           <Route path="/s/:linkId/list" element={<SnapshotLayout view="list" />} />
           <Route path="/s/:linkId/timeline" element={<SnapshotLayout view="timeline" />} />
+          <Route path="/s/:linkId/print/list" element={<PrintPage view="list" />} />
+          <Route path="/s/:linkId/print/timeline" element={<PrintPage view="timeline" />} />
         </Routes>
         <Where />
       </MemoryRouter>

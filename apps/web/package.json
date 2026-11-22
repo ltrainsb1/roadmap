@@ -34,6 +34,7 @@
     "jsdom": "^31.0.1",
     "mongodb-memory-server": "^11.3.0",
     "otplib": "^12.0.1",
+    "pdfjs-dist": "^6.5.438",
     "testcontainers": "^12.2.1",
     "vite": "^8.3.8"
   }

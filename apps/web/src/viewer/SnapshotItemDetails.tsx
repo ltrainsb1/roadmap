@@ -1,7 +1,7 @@
-import type { SnapshotContent, SnapshotItem } from '@roadmap/shared';
+import type { SnapshotContent, SnapshotItem, SnapshotNote } from '@roadmap/shared';
 import type { ReactNode } from 'react';
 import { formatDay } from '../projects/names.ts';
-import { SnapshotNotes } from './SnapshotNotes.tsx';
+import { PrintedNotes, SnapshotNotes } from './SnapshotNotes.tsx';
 
 /** Only `http:` and `https:` addresses become links; frozen text is as untrusted as live text. */
 export function isWebAddress(url: string): boolean {
@@ -42,10 +42,19 @@ interface SnapshotItemDetailsProps {
   item: SnapshotItem;
   include: SnapshotContent['include'];
   byId: ReadonlyMap<string, SnapshotItem>;
+  /**
+   * On a print page: the item's notes, written out (the Notes part is left out when there are none), and each link's
+   * address written after its text, since a PDF reader may not show where a link goes.
+   */
+  print?: { notes: readonly SnapshotNote[] };
 }
 
+/** On a print page, a link's address after its text; nothing when the text already is the address. */
+const printedAddress = (link: { label: string; url: string }, print: boolean) =>
+  print && link.label !== '' && <span className="link-address"> ({link.url})</span>;
+
 /** An item's details: each part only when it has something in it, and its notes when the snapshot has them. */
-export function SnapshotItemDetails({ linkId, item, include, byId }: SnapshotItemDetailsProps) {
+export function SnapshotItemDetails({ linkId, item, include, byId, print }: SnapshotItemDetailsProps) {
   const blockers = blockerTitles(item, byId);
   return (
     <div className="snapshot-details">
@@ -87,8 +96,9 @@ export function SnapshotItemDetails({ linkId, item, include, byId }: SnapshotIte
                     {l.label || l.url}
                   </a>
                 ) : (
-                  l.label || l.url
+                  <span>{l.label || l.url}</span>
                 )}
+                {printedAddress(l, print !== undefined)}
               </li>
             ))}
           </ul>
@@ -103,7 +113,12 @@ export function SnapshotItemDetails({ linkId, item, include, byId }: SnapshotIte
           </ul>
         </Part>
       )}
-      {include.notes && <SnapshotNotes linkId={linkId} itemId={item.id} noteCount={item.noteCount} />}
+      {include.notes &&
+        (print ? (
+          print.notes.length > 0 && <PrintedNotes notes={print.notes} />
+        ) : (
+          <SnapshotNotes linkId={linkId} itemId={item.id} noteCount={item.noteCount} />
+        ))}
     </div>
   );
 }

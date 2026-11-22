@@ -18,6 +18,7 @@ import { RoadmapIndex, RoadmapLayout } from './roadmaps/RoadmapLayout.tsx';
 import { SecurityPage } from './settings/SecurityPage.tsx';
 import { SnapshotsPage } from './snapshots/SnapshotsPage.tsx';
 import { LinkProblem, SnapshotGate, ToSnapshotGate } from './viewer/SnapshotGate.tsx';
+import { PrintPage } from './viewer/PrintPage.tsx';
 import { SnapshotLayout } from './viewer/SnapshotLayout.tsx';
 
 const queryClient = new QueryClient();
@@ -95,6 +96,12 @@ export function App() {
               </PerLink>
             }
           />
+          {/*
+            What the PDF service prints, opened with a render token: one content call, no password page. Any other
+            view under /print goes to the password page with the rest.
+          */}
+          <Route path="/s/:linkId/print/list" element={<PrintPage view="list" />} />
+          <Route path="/s/:linkId/print/timeline" element={<PrintPage view="timeline" />} />
           <Route path="/s/:linkId/*" element={<ToSnapshotGate />} />
           <Route path="/s" element={<LinkProblem kind="not_found" />} />
           <Route

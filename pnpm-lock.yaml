@@ -185,6 +185,9 @@ importers:
       otplib:
         specifier: ^12.0.1
         version: 12.0.1
+      pdfjs-dist:
+        specifier: ^6.5.438
+        version: 6.5.438
       testcontainers:
         specifier: ^12.2.1
         version: 12.2.1(bare-buffer@3.7.3)

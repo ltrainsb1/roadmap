@@ -102,3 +102,81 @@ test('FR-3.3: while the content loads the page says so, and a failed load can be
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   expect(await screen.findByRole('heading', { level: 1, name: 'Launch plan' })).toBeTruthy();
 });
+
+test('FR-3.4: Download PDF is disabled with "Preparing the PDF…" while it is being made, and shows its message for pdf_failed and pdf_busy', async () => {
+  const assign = vi.fn();
+  vi.stubGlobal('location', { ...window.location, assign });
+  try {
+    let answer: (view: string) => unknown = () => undefined;
+    const asked: string[] = [];
+    const calls = scriptApi(mockApi, {
+      pdf: (view) => {
+        asked.push(view);
+        return answer(view);
+      },
+    });
+    renderViewer(`/s/${LINK}/timeline`);
+    const button = await screen.findByRole('button', { name: 'Download PDF' });
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('');
+
+    // Being made: the button is disabled, a polite status says so, and a second press asks for nothing.
+    let finish!: (link: { url: string }) => void;
+    answer = () => new Promise((resolve) => (finish = resolve));
+    fireEvent.click(button);
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).toBe('true'));
+    expect(screen.getByRole('status').textContent).toBe('Preparing the PDF…');
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(asked).toEqual(['timeline']);
+    expect(calls.filter((c) => c.endsWith('/pdf'))).toHaveLength(1);
+
+    // Made: the browser goes to the download link, and the button comes back.
+    finish({ url: '/api/files/local?token=t' });
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/api/files/local?token=t'));
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).toBeNull());
+    expect(screen.getByRole('status').textContent).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // Failed, then busy: each its own message, and the button comes back each time.
+    answer = () => new ApiError(502, 'pdf_failed');
+    fireEvent.click(button);
+    expect((await screen.findByRole('alert')).textContent).toBe("Couldn't create the PDF. Try again.");
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    answer = () => new ApiError(503, 'pdf_busy');
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Other PDFs are being prepared. Try again in a minute.'));
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+
+    // A link that is not a web address is never followed.
+    answer = () => ({ url: 'javascript:alert(1)' });
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe("Couldn't create the PDF. Try again."));
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(asked).toEqual(['timeline', 'timeline', 'timeline', 'timeline']);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test('FR-3.4: Download PDF asks for the list on the list, and a session that ended goes back to the password page', async () => {
+  const asked: string[] = [];
+  scriptApi(mockApi, {
+    pdf: (view) => {
+      asked.push(view);
+      return new ApiError(401, 'password_required');
+    },
+  });
+  const { container } = renderViewer(`/s/${LINK}/list`);
+  fireEvent.click(await screen.findByRole('button', { name: 'Download PDF' }));
+  expect(await screen.findByRole('heading', { level: 1, name: 'This snapshot is password protected' })).toBeTruthy();
+  expect(locationOf(container)).toBe(`/s/${LINK}`);
+  expect(asked).toEqual(['list']);
+});
+
+test('FR-3.4: Download PDF on a link revoked meanwhile shows its card', async () => {
+  scriptApi(mockApi, { pdf: () => new ApiError(404, 'not_found') });
+  renderViewer(`/s/${LINK}/list`);
+  fireEvent.click(await screen.findByRole('button', { name: 'Download PDF' }));
+  expect(await screen.findByRole('heading', { level: 1, name: "This link doesn't work" })).toBeTruthy();
+});

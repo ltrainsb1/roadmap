@@ -73,6 +73,20 @@ export function SnapshotThreads({ notes, labelledBy, timeZone = browserZone() }:
   );
 }
 
+/**
+ * The Notes part on a print page: the item's notes, already loaded with the content, written out with their times in
+ * UTC, which the page says.
+ */
+export function PrintedNotes({ notes }: { notes: readonly SnapshotNote[] }) {
+  const headingId = useId();
+  return (
+    <section className="notes-section details-part" aria-labelledby={headingId}>
+      <h2 id={headingId}>Notes</h2>
+      <SnapshotThreads notes={notes} labelledBy={headingId} timeZone="UTC" />
+    </section>
+  );
+}
+
 interface SnapshotNotesProps {
   linkId: string;
   itemId: string;

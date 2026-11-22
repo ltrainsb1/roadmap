@@ -30,6 +30,7 @@ import { registerPriorityRoutes } from './projects/priority-routes.ts';
 import { registerLifecycleRoutes } from './projects/lifecycle-routes.ts';
 import { registerProjectRoutes } from './projects/routes.ts';
 import { registerRoadmapRoutes } from './roadmaps/routes.ts';
+import { createPdfRenderer, type PdfRenderer } from './snapshots/pdf-renderer.ts';
 import { registerSnapshotPublicRoutes } from './snapshots/public-routes.ts';
 import { registerSnapshotRoutes } from './snapshots/routes.ts';
 import { registerLocalFileRoutes } from './files/local-routes.ts';
@@ -67,6 +68,10 @@ export interface AppDeps {
   objectStore?: ObjectStore;
   /** Virus scanner for uploads; defaults to the scanner named in the config. */
   scanner?: Scanner;
+  /** Prints snapshot PDFs; defaults to the renderer named in the config. */
+  pdfRenderer?: PdfRenderer;
+  /** PDFs made at once by this process; defaults to MAX_PDF_RENDERS. Tests change it. */
+  maxPdfRenders?: number;
 }
 
 const AUTH_PREFIX = '/api/auth/';
@@ -196,7 +201,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     ...(deps.maxSnapshotNotes !== undefined && { maxNotes: deps.maxSnapshotNotes }),
   });
 
-  registerSnapshotPublicRoutes(app, { db: deps.db, now });
+  registerSnapshotPublicRoutes(app, {
+    db: deps.db,
+    now,
+    objectStore,
+    pdfRenderer: deps.pdfRenderer ?? createPdfRenderer(deps.config),
+    ...(deps.maxPdfRenders !== undefined && { maxPdfRenders: deps.maxPdfRenders }),
+  });
 
   // Only stores that keep files on this server need the API to serve them; S3 links go straight to S3.
   if (objectStore instanceof LocalObjectStore || objectStore instanceof MemoryObjectStore) {

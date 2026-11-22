@@ -63,6 +63,8 @@ describe('loadConfig', () => {
       scanner: 'fake',
       clamdPort: 3310,
       scanTimeoutMs: 30000,
+      pdf: 'fake',
+      pdfTimeoutMs: 60000,
     });
   });
 
@@ -126,6 +128,8 @@ describe('loadConfig: files and scanner (FR-1.4)', () => {
     S3_BUCKET: 'roadmap-files',
     SCANNER: 'clamd',
     CLAMD_HOST: 'clamav',
+    PDF: 'service',
+    PDF_URL: 'http://pdf:3000',
   };
 
   test('FILES=local needs FILES_DIR and FILES_SIGNING_KEY', () => {
@@ -186,6 +190,38 @@ describe('loadConfig: files and scanner (FR-1.4)', () => {
     for (const over of [{ SCANNER: 'fake' }, { SCANNER: undefined }]) {
       expect(() => loadConfig({ ...production, ...over }), JSON.stringify(over)).toThrow(ConfigError);
       expect(() => loadConfig({ ...production, ...over }), JSON.stringify(over)).toThrow(/SCANNER/);
+    }
+  });
+});
+
+describe('loadConfig: PDFs (FR-3.4)', () => {
+  test('Config: production needs PDF=service, and PDF=service needs PDF_URL', () => {
+    expect(loadConfig(valid)).toMatchObject({ pdf: 'fake', pdfTimeoutMs: 60000 });
+    expect(loadConfig(valid).pdfUrl).toBeUndefined();
+    expect(() => loadConfig({ ...valid, PDF: 'service' })).toThrow(/PDF_URL/);
+    expect(loadConfig({ ...valid, PDF: 'service', PDF_URL: 'http://pdf:3000', PDF_TIMEOUT_MS: '5000' })).toMatchObject({
+      pdf: 'service',
+      pdfUrl: 'http://pdf:3000',
+      pdfTimeoutMs: 5000,
+    });
+    expect(() => loadConfig({ ...valid, PDF: 'service', PDF_URL: 'pdf:3000' })).toThrow(/PDF_URL/);
+    expect(() => loadConfig({ ...valid, PDF: 'chrome' })).toThrow(/PDF/);
+    expect(() => loadConfig({ ...valid, PDF_TIMEOUT_MS: '0' })).toThrow(/PDF_TIMEOUT_MS/);
+
+    const production = {
+      ...valid,
+      FILES_DIR: undefined,
+      FILES_SIGNING_KEY: undefined,
+      NODE_ENV: 'production',
+      FILES: 's3',
+      S3_BUCKET: 'roadmap-files',
+      SCANNER: 'clamd',
+      CLAMD_HOST: 'clamav',
+    };
+    expect(loadConfig({ ...production, PDF: 'service', PDF_URL: 'http://pdf:3000' }).pdf).toBe('service');
+    for (const over of [{ PDF: 'fake' }, { PDF: undefined }]) {
+      expect(() => loadConfig({ ...production, ...over }), JSON.stringify(over)).toThrow(ConfigError);
+      expect(() => loadConfig({ ...production, ...over }), JSON.stringify(over)).toThrow(/PDF: must be service/);
     }
   });
 });

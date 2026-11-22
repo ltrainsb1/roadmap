@@ -189,7 +189,9 @@ describe('unlocking', () => {
 
     const req = (headers: Record<string, string>, cookies: Record<string, string> = {}) =>
       ({ params: { linkId: a.linkId }, headers, cookies }) as unknown as FastifyRequest;
-    expect((await snapshotAccess(req(render), t.db, clock)).via).toBe('render');
+    expect((await snapshotAccess(req(render), t.db, clock, { render: true })).via).toBe('render');
+    // Where a render token is not accepted, it counts for nothing.
+    await expect(snapshotAccess(req(render), t.db, clock)).rejects.toMatchObject({ status: 401 });
     const both = await snapshotAccess(req({}, { [SNAPSHOT_COOKIE]: viewer }), t.db, clock);
     expect(both).toMatchObject({ via: 'viewer', snapshot: { _id: a.id } });
     expect(both.db.tenantId).toBe(w.tenantId);

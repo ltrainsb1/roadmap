@@ -45,10 +45,13 @@ export async function findSnapshot(db: Db, linkId: string, now: Date): Promise<S
   return snapshot;
 }
 
-/** Which unexpired session of this snapshot the request carries, if any: the render header first, then the cookie. */
-async function sessionKind(req: FastifyRequest, s: ScopedDb, snapshotId: string, now: Date) {
+/**
+ * Which unexpired session of this snapshot the request carries, if any: the render header first (only where a
+ * render token is accepted), then the cookie.
+ */
+async function sessionKind(req: FastifyRequest, s: ScopedDb, snapshotId: string, now: Date, render: boolean) {
   const offered: Array<['viewer' | 'render', unknown]> = [
-    ['render', req.headers[RENDER_HEADER]],
+    ...(render ? [['render', req.headers[RENDER_HEADER]] as ['render', unknown]] : []),
     ['viewer', req.cookies[SNAPSHOT_COOKIE]],
   ];
   for (const [kind, token] of offered) {
@@ -61,18 +64,23 @@ async function sessionKind(req: FastifyRequest, s: ScopedDb, snapshotId: string,
   return null;
 }
 
-/** Finds the snapshot for the link and checks the cookie or the render header. Throws 404 not_found, 410 snapshot_expired, 401 password_required. */
+/**
+ * Finds the snapshot for the link and checks the cookie, or the render header when `render` is set (only the
+ * content route sets it: a render token opens nothing else). Throws 404 not_found, 410 snapshot_expired,
+ * 401 password_required.
+ */
 export async function snapshotAccess(
   req: FastifyRequest,
   db: Db,
   now: Date,
+  opts: { render?: boolean } = {},
 ): Promise<{ snapshot: SnapshotDoc; db: ScopedDb; via: 'viewer' | 'render' }> {
   const { linkId } = req.params as { linkId?: unknown };
   if (typeof linkId !== 'string') throw new HttpError(404, 'not_found');
   const snapshot = await findSnapshot(db, linkId, now);
   // The tenant comes from the snapshot, never from a member's session: a signed-in member's cookie changes nothing.
   const s = scoped(db, snapshot.tenantId);
-  const via = await sessionKind(req, s, snapshot._id, now);
+  const via = await sessionKind(req, s, snapshot._id, now, opts.render === true);
   if (via === null) throw new HttpError(401, 'password_required');
   return { snapshot, db: s, via };
 }

@@ -29,6 +29,12 @@ export interface Config {
   clamdHost?: string;
   clamdPort: number;
   scanTimeoutMs: number;
+  /** Snapshot PDFs: the PDF service in production, a fake that returns a small PDF elsewhere. */
+  pdf: 'service' | 'fake';
+  /** The PDF service's base URL, e.g. http://pdf:3000. */
+  pdfUrl?: string;
+  /** How long the API waits for one PDF. */
+  pdfTimeoutMs: number;
 }
 
 export class ConfigError extends Error {
@@ -76,6 +82,9 @@ const envSchema = z.object({
   CLAMD_HOST: z.string().min(1).optional(),
   CLAMD_PORT: z.coerce.number().int().min(1).max(65535).default(3310),
   SCAN_TIMEOUT_MS: z.coerce.number().int().min(1).default(30000),
+  PDF: z.enum(['service', 'fake']).default('fake'),
+  PDF_URL: z.url({ protocol: /^https?$/ }).optional(),
+  PDF_TIMEOUT_MS: z.coerce.number().int().min(1).default(60000),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -87,9 +96,11 @@ function crossChecks(e: Env): string[] {
   if (e.FILES === 'local' && !e.FILES_DIR) issues.push('FILES_DIR: required when FILES=local');
   if (e.FILES === 'local' && !e.FILES_SIGNING_KEY) issues.push('FILES_SIGNING_KEY: required when FILES=local');
   if (e.SCANNER === 'clamd' && !e.CLAMD_HOST) issues.push('CLAMD_HOST: required when SCANNER=clamd');
+  if (e.PDF === 'service' && !e.PDF_URL) issues.push('PDF_URL: required when PDF=service');
   if (e.NODE_ENV === 'production') {
     if (e.FILES !== 's3') issues.push(`FILES: must be s3 in production (is ${e.FILES})`);
     if (e.SCANNER !== 'clamd') issues.push(`SCANNER: must be clamd in production (is ${e.SCANNER})`);
+    if (e.PDF !== 'service') issues.push(`PDF: must be service in production (is ${e.PDF})`);
   }
   return issues;
 }
@@ -127,5 +138,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     ...(e.SCANNER === 'clamd' && { clamdHost: e.CLAMD_HOST! }),
     clamdPort: e.CLAMD_PORT,
     scanTimeoutMs: e.SCAN_TIMEOUT_MS,
+    pdf: e.PDF,
+    ...(e.PDF === 'service' && { pdfUrl: e.PDF_URL! }),
+    pdfTimeoutMs: e.PDF_TIMEOUT_MS,
   };
 }

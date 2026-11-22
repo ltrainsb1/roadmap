@@ -416,14 +416,34 @@ describe('Tenant isolation', () => {
       // Our note id under their own roadmap and item.
       await them.edit('O', theirItem._id, note._id, { body: 'x' }),
       await them.remove('O', theirItem._id, note._id),
-      await them.add('O', theirItem._id, { body: 'x', parentId: note._id }),
     ]) {
-      expect([404, 422]).toContain(res.statusCode);
-      if (res.statusCode === 422) expect(res.json()).toEqual({ error: 'unknown_note' });
-      else expect(res.json()).toEqual({ error: 'not_found' });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toEqual({ error: 'not_found' });
     }
+    const reply = await them.add('O', theirItem._id, { body: 'x', parentId: note._id });
+    expect(reply.statusCode).toBe(422);
+    expect(reply.json()).toEqual({ error: 'unknown_note' });
     expect(await w.stored(note._id)).toMatchObject({ body: 'ours', deletedAt: null });
     expect(await w.notes().countDocuments({ projectId: item._id })).toBe(1);
+  });
+});
+
+describe('roadmaps', () => {
+  test('FR-1.5: a note id from another roadmap of the same tenant is 404 for edit and delete, even for a member of both', async () => {
+    const w = await world();
+    const item = await w.item();
+    const note = await w.note(item._id, w.ids.C, { body: 'ours' });
+    const second = await t.seed.roadmap(w.tenantId, w.ids.C, 'Second');
+    const secondItem = await t.seed.project(w.tenantId, second._id);
+    const url = `${w.base(secondItem._id, second._id)}/${note._id}`;
+    for (const res of [
+      await t.app.inject({ method: 'PATCH', url, headers: w.headers('C'), payload: { body: 'x' } }),
+      await t.app.inject({ method: 'DELETE', url, headers: w.headers('C') }),
+    ]) {
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toEqual({ error: 'not_found' });
+    }
+    expect(await w.stored(note._id)).toMatchObject({ body: 'ours', editedAt: null, deletedAt: null });
   });
 });
 

@@ -47,6 +47,13 @@ describe('mentions', () => {
     ]);
     expect(mentionRanges('nothing here', [ann])).toEqual([]);
   });
+
+  test('FR-1.5: a combining mark after the name is part of a longer name, not a mention', () => {
+    const anne = { userId: 'u4', name: 'Anne' };
+    expect(findMentions('@Anne\u0301 hi', [ann, anne])).toEqual([]);
+    expect(findMentions('@Ann\u0301', [ann])).toEqual([]);
+    expect(findMentions('@Ann\u0301 and @Ann', [ann])).toEqual([ann]);
+  });
 });
 
 describe('file names and sizes', () => {
@@ -58,6 +65,16 @@ describe('file names and sizes', () => {
     expect(cleanFileName('x'.repeat(300) + '.pdf')).toHaveLength(200);
     expect(cleanFileName('x'.repeat(300) + '.pdf').endsWith('.pdf')).toBe(true);
     expect(cleanFileName('plan 🚀.md')).toBe('plan 🚀.md');
+  });
+
+  test('FR-1.4: bidirectional override and isolate characters are removed, emoji joiners kept', () => {
+    expect(cleanFileName('invoice\u202Efdp.exe')).toBe('invoicefdp.exe');
+    expect(cleanFileName('a\u202A\u202B\u202C\u202D\u2066\u2067\u2068\u2069b.txt')).toBe('ab.txt');
+    expect(cleanFileName('team 👩\u200D💻.png')).toBe('team 👩\u200D💻.png');
+  });
+
+  test('FR-1.4: a long name cut before white space does not keep the white space', () => {
+    expect(cleanFileName('x'.repeat(195) + ' '.repeat(10) + '.pdf')).toBe('x'.repeat(195) + '.pdf');
   });
 
   test('FR-1.4: a name that is only a folder path, or only dots, falls back to "file"', () => {

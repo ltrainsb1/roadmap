@@ -59,12 +59,12 @@ export type AttachmentList = z.infer<typeof attachmentListSchema>;
 export const downloadLinkSchema = z.object({ url: z.string() });
 export type DownloadLink = z.infer<typeof downloadLinkSchema>;
 
-const NAME_CHAR = /[\p{L}\p{N}_]/u;
+const NAME_CHAR = /[\p{L}\p{M}\p{N}_]/u;
 
 /**
  * Finds `@Name` in `body` for each candidate. The `@` must start the text or follow white space or "(".
  * The name is matched as plain text, case-sensitively, and must end at a character that is not a letter,
- * digit or underscore. At each `@` the longest matching name wins.
+ * combining mark, digit or underscore. At each `@` the longest matching name wins.
  */
 export function mentionRanges(
   body: string,
@@ -110,16 +110,19 @@ export function findMentions(body: string, candidates: readonly Mention[]): Ment
   return found;
 }
 
-/** A file name safe to show: no control characters, no folder part, at most 200 characters, keeps the extension. */
+/**
+ * A file name safe to show: no control or text-direction characters, no folder part, at most 200 characters,
+ * keeps the extension.
+ */
 export function cleanFileName(raw: string): string {
-  const noControl = raw.replace(/\p{Cc}/gu, '');
+  const noControl = raw.replace(/[\p{Cc}\u202A-\u202E\u2066-\u2069]/gu, '');
   const base = (noControl.split(/[/\\]/).pop() ?? '').trim();
   if (base === '' || /^\.+$/.test(base)) return 'file';
   const chars = Array.from(base);
   if (chars.length <= NOTE_LIMITS.fileName) return base;
   const ext = /\.[^.\s]{1,16}$/.exec(base)?.[0] ?? '';
   const extLength = Array.from(ext).length;
-  return chars.slice(0, NOTE_LIMITS.fileName - extLength).join('') + ext;
+  return chars.slice(0, NOTE_LIMITS.fileName - extLength).join('').trimEnd() + ext;
 }
 
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;

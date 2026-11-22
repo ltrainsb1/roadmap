@@ -111,13 +111,7 @@ describe('Permissions table (PRD Users and roles)', () => {
     for (const targetRole of ['admin', 'contributor'] as const) {
       expect(can({ role: 'owner', action: 'member.remove', ctx: { targetRole } })).toBe(true);
       expect(can({ role: 'admin', action: 'member.remove', ctx: { targetRole } })).toBe(true);
-      expect(
-        can({
-          role: 'contributor',
-          action: 'member.remove',
-          ctx: { targetRole },
-        }),
-      ).toBe(false);
+      expect(can({ role: 'contributor', action: 'member.remove', ctx: { targetRole } })).toBe(false);
     }
   });
 
@@ -127,11 +121,7 @@ describe('Permissions table (PRD Users and roles)', () => {
     expect(can({ role: 'admin', action: 'member.changeRole', ctx })).toBe(true);
     expect(can({ role: 'contributor', action: 'member.changeRole', ctx })).toBe(false);
     expect(
-      can({
-        role: 'owner',
-        action: 'member.changeRole',
-        ctx: { targetRole: 'admin', newRole: 'owner' },
-      }),
+      can({ role: 'owner', action: 'member.changeRole', ctx: { targetRole: 'admin', newRole: 'owner' } }),
     ).toBe(false);
   });
 
@@ -142,31 +132,16 @@ describe('Permissions table (PRD Users and roles)', () => {
       expect(can({ role, action: 'member.remove' })).toBe(false);
       expect(can({ role, action: 'member.remove', ctx: { newRole: 'admin' } })).toBe(false);
       expect(can({ role, action: 'member.changeRole' })).toBe(false);
-      expect(
-        can({
-          role,
-          action: 'member.changeRole',
-          ctx: { targetRole: 'admin' },
-        }),
-      ).toBe(false);
+      expect(can({ role, action: 'member.changeRole', ctx: { targetRole: 'admin' } })).toBe(false);
       expect(can({ role, action: 'member.changeRole', ctx: { newRole: 'admin' } })).toBe(false);
     }
   });
 
   test('role null is denied for every action', () => {
     for (const action of ACTIONS) {
-      expect(
-        can({
-          role: null,
-          action,
-          ctx: {
-            isAssigned: true,
-            isAuthor: true,
-            targetRole: 'admin',
-            newRole: 'admin',
-          },
-        }),
-      ).toBe(false);
+      expect(can({ role: null, action, ctx: { isAssigned: true, isAuthor: true, targetRole: 'admin', newRole: 'admin' } })).toBe(
+        false,
+      );
     }
   });
 

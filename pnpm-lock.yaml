@@ -156,7 +156,7 @@ importers:
         specifier: ^4.14.0
         version: 4.14.0(playwright-core@1.65.1)
       '@playwright/test':
-        specifier: ^1.65.1
+        specifier: 1.65.1
         version: 1.65.1
       '@testcontainers/mongodb':
         specifier: ^12.2.1

@@ -1,5 +1,5 @@
 import { buildTree, fitTimeline, type SnapshotContent, type SnapshotItem, type SnapshotNote, type SnapshotView, type TreeNode } from '@roadmap/shared';
-import { Fragment, useEffect, useMemo, type ReactNode } from 'react';
+import { Component, Fragment, useEffect, useMemo, type ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { formatDates, formatDay, levelName, statusName } from '../projects/names.ts';
 import { TimelineAxis } from '../projects/TimelineAxis.tsx';
@@ -142,8 +142,41 @@ function PrintTimeline({ content }: { content: SnapshotContent }) {
   );
 }
 
+/**
+ * Marks the page as failed when anything under it throws while rendering, so the PDF service stops at once instead
+ * of waiting its whole deadline for a "ready" that never comes. The page it wraps is gone by then, so nothing it set
+ * is left, and the failed page shows nothing.
+ */
+export class PrintBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  override componentDidCatch(): void {
+    document.documentElement.dataset.print = 'error';
+  }
+
+  override componentWillUnmount(): void {
+    if (this.state.failed) delete document.documentElement.dataset.print;
+  }
+
+  override render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 /** `/s/:linkId/print/list` and `/s/:linkId/print/timeline`: what the PDF service turns into a snapshot's PDF. */
 export function PrintPage({ view }: { view: SnapshotView }) {
+  return (
+    <PrintBoundary>
+      <PrintContent view={view} />
+    </PrintBoundary>
+  );
+}
+
+function PrintContent({ view }: { view: SnapshotView }) {
   const { linkId = '' } = useParams();
   // The list writes out every note, so it asks for them with the content; the timeline shows none.
   const content = useSnapshotContent(linkId, { allNotes: view === 'list' });

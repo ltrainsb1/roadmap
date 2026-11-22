@@ -1,8 +1,8 @@
 import type { SnapshotContent } from '@roadmap/shared';
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { api, ApiError } from '../api/client.ts';
-import { PRINT_TIMELINE_WIDTH } from './PrintPage.tsx';
+import { PRINT_TIMELINE_WIDTH, PrintBoundary } from './PrintPage.tsx';
 import { content, fullContent, item, LINK, locationOf, note, renderViewer, scriptApi } from './testContent.tsx';
 
 vi.mock('../api/client.ts', async (importOriginal) => ({
@@ -166,4 +166,37 @@ test('FR-3.4: the page marks itself ready only after the content is rendered, an
   renderViewer(`/s/${LINK}/print/list`);
   await waitFor(() => expect(printState()).toBe('ready'));
   expect(screen.getByText('This snapshot has no items.')).toBeTruthy();
+});
+
+function Throws(): never {
+  throw new Error('render failed');
+}
+
+test('FR-3.4: a render exception marks the print page as failed at once, so the PDF service stops waiting', async () => {
+  // React reports the caught error on the console; the test expects it, so it is kept out of the output.
+  const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  try {
+    const { unmount } = render(
+      <PrintBoundary>
+        <Throws />
+      </PrintBoundary>,
+    );
+    expect(printState()).toBe('error');
+    unmount();
+    expect(printState()).toBeUndefined();
+
+    // Through the page: content that breaks rendering ends in "error", never "ready".
+    const seen: Array<string | undefined> = [];
+    const observer = new MutationObserver(() => seen.push(printState()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-print'] });
+    const broken = { ...fullContent(), items: [{ ...item({ id: 'p1', title: 'Broken' }), milestones: null }] };
+    scriptApi(mockApi, { content: () => broken });
+    renderViewer(`/s/${LINK}/print/list`);
+    await waitFor(() => expect(printState()).toBe('error'));
+    observer.disconnect();
+    expect(seen).not.toContain('ready');
+    expect(screen.queryByRole('table')).toBeNull();
+  } finally {
+    quiet.mockRestore();
+  }
 });

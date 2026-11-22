@@ -92,7 +92,7 @@ describe.skipIf(process.env.TEST_CLAMAV !== 'container')('ClamdScanner against C
   test('the EICAR test string is found', async () => {
     const r = await scanner.scan(Buffer.from(EICAR));
     expect(r.clean).toBe(false);
-    expect(r.clean === false && r.signature).toMatch(/EICAR/);
+    expect(r.clean === false && r.signature).toMatch(/eicar/i);
   });
 
   test('a 20 MB buffer of zeros is clean', { timeout: 60_000 }, async () => {

@@ -1,4 +1,4 @@
-import type { Project, ProjectStatus, ProjectWarning } from '@roadmap/shared';
+import type { Project, ProjectStatus, ProjectWarning, TimelineZoom } from '@roadmap/shared';
 
 const STATUS_NAMES: Record<ProjectStatus, string> = {
   not_started: 'Not started',
@@ -58,3 +58,6 @@ export function warningText(warning: ProjectWarning, byId: ReadonlyMap<string, P
   if (warning.kind === 'outside_parent') return `Dates fall outside ${byId.get(warning.parentId)?.title ?? 'the parent'}'s dates.`;
   return `Starts before ${byId.get(warning.blockerId)?.title ?? 'a blocker'} ends.`;
 }
+
+/** The Zoom control's names for each zoom. */
+export const ZOOM_NAMES: Record<TimelineZoom, string> = { weeks: 'Weeks', months: 'Months', quarters: 'Quarters' };

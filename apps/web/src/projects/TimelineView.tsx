@@ -1,5 +1,4 @@
 import {
-  barFor,
   buildTree,
   can,
   projectWarnings,
@@ -7,16 +6,16 @@ import {
   xOf,
   type Project,
   type Role,
-  type TimelineRange,
   type TimelineZoom,
   type TreeNode,
 } from '@roadmap/shared';
 import { Fragment, useEffect, useRef, type ReactNode } from 'react';
 import { Menu } from '../ui/Menu.tsx';
 import { actionsButtonId, NameCell } from './itemParts.tsx';
-import { formatDates, formatMilestone, statusName, warningText } from './names.ts';
+import { statusName, warningText } from './names.ts';
 import { StatusMenu } from './StatusMenu.tsx';
 import { TimelineAxis } from './TimelineAxis.tsx';
+import { Track } from './timelineParts.tsx';
 import type { ItemActions } from './useItemActions.tsx';
 import { isAssigned } from './useProjects.ts';
 import { viewPath } from './ViewSwitcher.tsx';
@@ -44,24 +43,6 @@ interface TimelineViewProps {
   actions: ItemActions;
   /** Each change scrolls the schedule so today is a third of the way in; it also happens once on first render. */
   scrollToTodaySignal: number;
-}
-
-/** One item's schedule: its bar, its dates and milestones in words, and the today line. */
-function Track({ item, range, today }: { item: Project; range: TimelineRange; today: string }) {
-  const bar = barFor(item, range);
-  const dates = formatDates(item.startDate, item.endDate);
-  return (
-    <div className="track" style={{ width: range.width }}>
-      {bar && <span className={`bar status-${item.status} kind-${bar.kind}`} style={{ left: bar.left, width: bar.width }} />}
-      <span className={bar ? 'sr-only' : 'no-dates'}>{dates}</span>
-      {item.milestones.map((m) => (
-        <span key={m.id} className="milestone" style={{ left: xOf(m.date, range) }}>
-          <span className="sr-only">{formatMilestone(m)}</span>
-        </span>
-      ))}
-      <span className="today-line" aria-hidden="true" style={{ left: xOf(today, range) }} />
-    </div>
-  );
 }
 
 /**

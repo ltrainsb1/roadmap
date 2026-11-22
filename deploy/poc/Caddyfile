@@ -73,6 +73,7 @@
 # network (caddy-render, an alias the compose file gives it there), so no other container reaches it either.
 # The render token travels in a request header, not a cookie, so no TLS is needed here.
 http://:8080 {
+	# Every render comes from the one PDF container, so all of them share one address and one rate-limit budget.
 	bind caddy-render
 	import app
 }

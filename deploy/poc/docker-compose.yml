@@ -97,6 +97,8 @@ services:
       CLAMD_HOST: clamav
       PDF: service
       PDF_URL: http://pdf:3200
+      # The API takes the client address from X-Forwarded-For only from a peer on proxy_api, which is Caddy alone.
+      TRUSTED_PROXY_CIDR: ${PROXY_SUBNET:-172.30.255.0/24}
     depends_on:
       mongo:
         condition: service_healthy
@@ -106,6 +108,9 @@ services:
         condition: service_healthy
     networks:
       - default
+      - proxy_api
+      # The PDF service reaches the API here, like any outside client but without Caddy's limits in front, and the
+      # API sees it at its own address: it cannot choose the client address the API records.
       - pdf_api
     read_only: true
     tmpfs:
@@ -146,10 +151,11 @@ services:
       - no-new-privileges:true
       - seccomp=chromium-seccomp.json
     cap_drop: [ALL]
-    # The sandbox's zygote calls chroot inside the user namespace it creates, and the kernel lets it only if
-    # SYS_CHROOT is in the bounding set it inherits. The service runs as a non-root user with no-new-privileges, so
-    # it holds no capability in the container itself; without this, Chromium stops with
-    # "Check failed: sys_chroot("/proc/self/fdinfo/") == 0".
+    # The sandbox's zygote calls chroot inside the user namespace it creates. Docker's seccomp profile, and the one
+    # above, allow the chroot system call only when the container holds CAP_SYS_CHROOT: with cap_drop ALL it fails
+    # with EPERM at that layer, and Chromium stops with "Check failed: sys_chroot("/proc/self/fdinfo/") == 0".
+    # cap_add lifts exactly that rule. The service runs as a non-root user with no-new-privileges, so it holds no
+    # capability in the container itself.
     cap_add: [SYS_CHROOT]
     read_only: true
     # Chromium writes its profile under /tmp and a little under $HOME. Playwright starts it with
@@ -187,8 +193,9 @@ services:
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
+    # Not on default: Caddy talks only to the API, over proxy_api, so the API always sees it there.
     networks:
-      default:
+      proxy_api:
       # Caddy's internal listener binds to this alias only, so it answers on pdf_render and nowhere else.
       pdf_render:
         aliases: [caddy-render]
@@ -205,6 +212,12 @@ services:
 
 networks:
   default:
+  # Only Caddy and the API, on a fixed range the API trusts as its proxy (PROXY_SUBNET in .env to change it). Not
+  # internal: Caddy's published ports need a network with a way out.
+  proxy_api:
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET:-172.30.255.0/24}
   # Only the API and the PDF service.
   pdf_api:
     internal: true

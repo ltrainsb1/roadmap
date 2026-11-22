@@ -189,9 +189,21 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
         return toAttachmentDto(doc, await nameOfUploader(s));
       });
     } catch (err) {
-      // No record was committed, so the object must not stay behind.
-      await deleteStoredFiles(deps.objectStore, [key], req.log);
-      throw err;
+      // The transaction can report an error after its commit went through (a lost acknowledgement, say). The
+      // object may be deleted only if the record is really not there; if that can't be checked, keep the object.
+      let committed: AttachmentDoc | null;
+      try {
+        committed = await actor.db.collection('attachments').findOne({ _id: id, roadmapId, projectId });
+      } catch (checkErr) {
+        req.log.error({ err: checkErr, key }, 'upload outcome unknown; stored file kept');
+        throw err;
+      }
+      if (!committed) {
+        await deleteStoredFiles(deps.objectStore, [key], req.log);
+        throw err;
+      }
+      req.log.warn({ err }, 'transaction reported an error after its commit');
+      return toAttachmentDto(committed, await nameOfUploader(actor.db));
     }
   }
 

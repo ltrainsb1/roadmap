@@ -778,3 +778,34 @@ describe('uploads in flight', () => {
   });
 });
 
+describe('a commit that reports failure', () => {
+  test('FR-1.4: if the transaction throws after its commit went through, the upload is 201 and the object is kept', async () => {
+    const w = await world(rec);
+    const item = await w.item();
+    const client = rec.db.client;
+    const startSession = client.startSession.bind(client);
+    // Every transaction commits, then reports an error, as when the commit's acknowledgement is lost.
+    client.startSession = ((...args: Parameters<typeof startSession>) => {
+      const session = startSession(...args);
+      const run = session.withTransaction.bind(session);
+      session.withTransaction = async (...a: Parameters<typeof run>) => {
+        await run(...a);
+        throw new Error('commit result unknown');
+      };
+      return session;
+    });
+    calls.length = 0;
+    let res;
+    try {
+      res = await w.upload('O', item._id, 'kept.txt');
+    } finally {
+      client.startSession = startSession;
+    }
+    expect(res.statusCode).toBe(201);
+    const file = res.json<Attachment>();
+    expect(file.name).toBe('kept.txt');
+    expect(calls).toEqual(['scan', `put ${w.keyOf(file.id)}`]);
+    expect(store.objects.has(w.keyOf(file.id))).toBe(true);
+    expect(await w.stored(file.id)).not.toBeNull();
+  });
+});

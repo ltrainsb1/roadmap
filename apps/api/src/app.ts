@@ -1,4 +1,5 @@
 import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
 import swagger from '@fastify/swagger';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -10,7 +11,7 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { LIMITS } from '@roadmap/shared';
+import { LIMITS, NOTE_LIMITS } from '@roadmap/shared';
 import type { Config } from './config.ts';
 import type { Db } from './db/client.ts';
 import { registerErrorHandling } from './errors.ts';
@@ -20,6 +21,7 @@ import type { PasskeyVerifiers } from './auth/passkeys.ts';
 import { registerResetRoutes } from './auth/reset-routes.ts';
 import { registerAuthRoutes } from './auth/routes.ts';
 import { registerInviteRoutes } from './invites/routes.ts';
+import { registerAttachmentRoutes } from './attachments/routes.ts';
 import { registerAuditRoutes } from './audit/routes.ts';
 import { registerMemberRoutes } from './members/routes.ts';
 import { registerNoteRoutes } from './notes/routes.ts';
@@ -30,7 +32,7 @@ import { registerProjectRoutes } from './projects/routes.ts';
 import { registerRoadmapRoutes } from './roadmaps/routes.ts';
 import { registerLocalFileRoutes } from './files/local-routes.ts';
 import { createObjectStore, LocalObjectStore, MemoryObjectStore, type ObjectStore } from './files/object-store.ts';
-import type { Scanner } from './files/scanner.ts';
+import { createScanner, type Scanner } from './files/scanner.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { authPlugin } from './policy/hook.ts';
 
@@ -49,9 +51,11 @@ export interface AppDeps {
   maxProjectItems?: number;
   /** Most notes one item may hold; defaults to the shared limit. Tests lower it. */
   maxNotesPerItem?: number;
+  /** Most files one item may hold; defaults to the shared limit. Tests lower it. */
+  maxFilesPerItem?: number;
   /** Where attachments are kept; defaults to the store named in the config. */
   objectStore?: ObjectStore;
-  /** Virus scanner for uploads; defaults to the scanner named in the config. Read by the attachment routes. */
+  /** Virus scanner for uploads; defaults to the scanner named in the config. */
   scanner?: Scanner;
 }
 
@@ -103,6 +107,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     transform: jsonSchemaTransform,
   });
   await app.register(cookie);
+  // Only the upload route reads multipart bodies: one part named `file`, no other fields.
+  await app.register(multipart, { limits: { fileSize: NOTE_LIMITS.fileBytes, files: 1, fields: 0 } });
   await app.register(authPlugin, { db: deps.db, ...(deps.now ? { now: deps.now } : {}) });
 
   app.withTypeProvider<ZodTypeProvider>().get(
@@ -130,6 +136,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   const mailer = deps.mailer ?? createMailer(deps.config);
   const now = deps.now ?? (() => new Date());
+  const objectStore = deps.objectStore ?? createObjectStore(deps.config);
+  const scanner = deps.scanner ?? createScanner(deps.config);
 
   registerResetRoutes(app, {
     db: deps.db,
@@ -149,16 +157,21 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   });
 
-  registerMemberRoutes(app, { now });
+  registerMemberRoutes(app, { now, objectStore });
   registerAuditRoutes(app);
   registerProjectRoutes(app, { now, maxItems: deps.maxProjectItems ?? LIMITS.itemsPerRoadmap });
 
   registerAssignRoutes(app, { now });
   registerPriorityRoutes(app, { now });
-  registerLifecycleRoutes(app);
+  registerLifecycleRoutes(app, { objectStore });
   registerNoteRoutes(app, { now, ...(deps.maxNotesPerItem !== undefined && { maxNotesPerItem: deps.maxNotesPerItem }) });
+  registerAttachmentRoutes(app, {
+    now,
+    objectStore,
+    scanner,
+    ...(deps.maxFilesPerItem !== undefined && { maxFilesPerItem: deps.maxFilesPerItem }),
+  });
 
-  const objectStore = deps.objectStore ?? createObjectStore(deps.config);
   // Only stores that keep files on this server need the API to serve them; S3 links go straight to S3.
   if (objectStore instanceof LocalObjectStore || objectStore instanceof MemoryObjectStore) {
     registerLocalFileRoutes(app, objectStore);

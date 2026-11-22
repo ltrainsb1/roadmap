@@ -13,9 +13,9 @@ import { loadConfig, type Config } from '../src/config.ts';
 import { connectDb, type Db } from '../src/db/client.ts';
 import { ensureIndexes } from '../src/db/indexes.ts';
 import { scoped } from '../src/db/scoped.ts';
-import type { MembershipDoc, NoteDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
+import type { AttachmentDoc, MembershipDoc, NoteDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
 import { MemoryObjectStore, type ObjectStore } from '../src/files/object-store.ts';
-import { FakeScanner } from '../src/files/scanner.ts';
+import { FakeScanner, type Scanner } from '../src/files/scanner.ts';
 import { MemoryMailer } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
@@ -64,6 +64,17 @@ export interface Seeder {
     authorId: string,
     over?: Partial<Omit<NoteDoc, 'tenantId' | 'roadmapId' | 'projectId' | 'authorId'>>,
   ): Promise<NoteDoc>;
+  /**
+   * Puts `body` (default "file body") in `TestApp.files` under the usual key and inserts the record; the name
+   * defaults to "file.txt" and the size to the body's length.
+   */
+  attachment(
+    tenantId: string,
+    roadmapId: string,
+    projectId: string,
+    uploadedById: string,
+    over?: Partial<Pick<AttachmentDoc, '_id' | 'name' | 'size' | 'createdAt'>> & { body?: Buffer },
+  ): Promise<AttachmentDoc>;
 }
 
 export interface TestApp {
@@ -74,7 +85,7 @@ export interface TestApp {
   mail: MemoryMailer;
   /** The app's object store, unless `objectStore` replaced it. */
   files: MemoryObjectStore;
-  /** The app's virus scanner. */
+  /** The app's virus scanner, unless `scanner` replaced it. */
   scanner: FakeScanner;
   seed: Seeder;
   close(): Promise<void>;
@@ -97,6 +108,10 @@ export interface TestAppOptions {
   maxNotesPerItem?: number;
   /** Replaces the memory object store the app is given (`TestApp.files` is then unused by the app). */
   objectStore?: ObjectStore;
+  /** Replaces the fake scanner the app is given (`TestApp.scanner` is then unused by the app). */
+  scanner?: Scanner;
+  /** Replaces the per-item file limit. */
+  maxFilesPerItem?: number;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -129,12 +144,13 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     db,
     mailer: mail,
     objectStore: opts.objectStore ?? files,
-    scanner,
+    scanner: opts.scanner ?? scanner,
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
     ...(opts.maxProjectItems !== undefined ? { maxProjectItems: opts.maxProjectItems } : {}),
     ...(opts.maxNotesPerItem !== undefined ? { maxNotesPerItem: opts.maxNotesPerItem } : {}),
+    ...(opts.maxFilesPerItem !== undefined ? { maxFilesPerItem: opts.maxFilesPerItem } : {}),
   });
   opts.routes?.(app);
 
@@ -235,6 +251,23 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
           projectId,
           authorId,
         }),
+    async attachment(tenantId, roadmapId, projectId, uploadedById, over = {}) {
+      const { body = Buffer.from('file body'), ...rest } = over;
+      const _id = rest._id ?? uuidv7();
+      const key = `${tenantId}/${roadmapId}/${_id}`;
+      await files.put(key, body);
+      return scoped(db, tenantId).collection('attachments').insertOne({
+        name: 'file.txt',
+        size: body.length,
+        createdAt: new Date(),
+        ...rest,
+        _id,
+        roadmapId,
+        projectId,
+        uploadedById,
+        key,
+      });
+    },
   };
 
   return {

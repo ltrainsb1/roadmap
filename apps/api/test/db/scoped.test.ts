@@ -203,7 +203,7 @@ describe('ensureIndexes', () => {
   test('ensureIndexes creates tenant-first indexes and the audit TTL', async () => {
     await ensureIndexes(db);
     await ensureIndexes(db); // idempotent
-    const names = ['users', 'memberships', 'roadmaps', 'sessions', 'invites', 'resetTokens', 'auditEvents', 'webauthnChallenges'];
+    const names = ['users', 'memberships', 'roadmaps', 'sessions', 'invites', 'resetTokens', 'auditEvents', 'webauthnChallenges', 'attachments'];
     const exceptions = new Set([
       'users.email',
       'sessions.tokenHash',
@@ -233,6 +233,8 @@ describe('ensureIndexes', () => {
     const m = find('memberships', { tenantId: 1, roadmapId: 1, userId: 1 });
     expect(m?.unique).toBe(true);
     expect(find('users', { email: 1 })?.unique).toBe(true);
+    expect(find('attachments', { tenantId: 1, projectId: 1, createdAt: 1 })).toBeDefined();
+    expect(find('attachments', { tenantId: 1, roadmapId: 1 })).toBeDefined();
     expect(find('users', { 'passkeys.credentialId': 1 })?.sparse).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 import type { ClientSession, Db, Filter, Sort, UpdateFilter } from 'mongodb';
 import type {
+  AttachmentDoc,
   AuditEventDoc,
   InviteDoc,
   MembershipDoc,
@@ -17,6 +18,7 @@ export type CollectionName =
   | 'roadmaps'
   | 'projects'
   | 'notes'
+  | 'attachments'
   | 'sessions'
   | 'invites'
   | 'resetTokens';
@@ -27,6 +29,7 @@ interface DocMap {
   roadmaps: RoadmapDoc;
   projects: ProjectDoc;
   notes: NoteDoc;
+  attachments: AttachmentDoc;
   sessions: SessionDoc;
   invites: InviteDoc;
   resetTokens: ResetTokenDoc;

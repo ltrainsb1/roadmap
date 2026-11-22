@@ -117,6 +117,21 @@ export interface NoteDoc {
   deletedAt: Date | null;
 }
 
+export interface AttachmentDoc {
+  _id: string;
+  tenantId: string;
+  roadmapId: string;
+  projectId: string;
+  /** Display name, already cleaned with `cleanFileName`. Never part of `key`. */
+  name: string;
+  /** Bytes. */
+  size: number;
+  /** Where the bytes are in the object store: `${tenantId}/${roadmapId}/${_id}`. Never sent to the browser. */
+  key: string;
+  uploadedById: string;
+  createdAt: Date;
+}
+
 export interface SessionDoc {
   _id: string;
   tenantId: string;

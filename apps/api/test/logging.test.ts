@@ -32,3 +32,29 @@ test('the request log Fastify writes carries no invite token', async () => {
   expect(logged).toContain('/api/invites/[redacted]/accept');
   expect(logged).not.toContain('s3cret-Tok_en');
 });
+
+test('FR-3.2: redactUrl keeps only the first 6 characters of a snapshot link id', () => {
+  const linkId = 'AbCdEf_secret-part-of-the-link';
+  expect(redactUrl(`/api/snapshots/${linkId}`)).toBe('/api/snapshots/AbCdEf…');
+  expect(redactUrl(`/api/snapshots/${linkId}/unlock`)).toBe('/api/snapshots/AbCdEf…/unlock');
+  expect(redactUrl(`/api/snapshots/${linkId}/content?notes=all`)).toBe('/api/snapshots/AbCdEf…/content?notes=all');
+  expect(redactUrl('/api/roadmaps/r1/snapshots/s1')).toBe('/api/roadmaps/r1/snapshots/s1');
+});
+
+test('FR-3.2: the request log Fastify writes carries no full snapshot link id', async () => {
+  const lines: string[] = [];
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      lines.push(chunk.toString());
+      done();
+    },
+  });
+  const app = Fastify({ logger: { stream, serializers: { req: serializeRequest } } });
+  app.post('/api/snapshots/:linkId/unlock', () => ({ ok: true }));
+  await app.inject({ method: 'POST', url: '/api/snapshots/AbCdEf_secret-part/unlock' });
+  await app.close();
+
+  const logged = lines.join('');
+  expect(logged).toContain('/api/snapshots/AbCdEf…/unlock');
+  expect(logged).not.toContain('secret-part');
+});

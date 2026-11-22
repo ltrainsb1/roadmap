@@ -30,6 +30,7 @@ import { registerPriorityRoutes } from './projects/priority-routes.ts';
 import { registerLifecycleRoutes } from './projects/lifecycle-routes.ts';
 import { registerProjectRoutes } from './projects/routes.ts';
 import { registerRoadmapRoutes } from './roadmaps/routes.ts';
+import { registerSnapshotPublicRoutes } from './snapshots/public-routes.ts';
 import { registerSnapshotRoutes } from './snapshots/routes.ts';
 import { registerLocalFileRoutes } from './files/local-routes.ts';
 import { createObjectStore, LocalObjectStore, MemoryObjectStore, type ObjectStore } from './files/object-store.ts';
@@ -69,6 +70,8 @@ export interface AppDeps {
 }
 
 const AUTH_PREFIX = '/api/auth/';
+/** Other routes that check a password before anyone is signed in, limited at the sign-in rate. */
+const RATE_LIMITED_ROUTES = new Set(['/api/snapshots/:linkId/unlock']);
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const production = deps.config.nodeEnv === 'production';
@@ -109,7 +112,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     max: deps.config.authRateLimitPerMin,
     timeWindow: '1 minute',
     // Match on the routed pattern: the raw URL can be percent-encoded (/api/%61uth/...).
-    allowList: (req) => !(req.routeOptions.url ?? '').startsWith(AUTH_PREFIX),
+    allowList: (req) => {
+      const url = req.routeOptions.url ?? '';
+      return !url.startsWith(AUTH_PREFIX) && !RATE_LIMITED_ROUTES.has(url);
+    },
   });
   await app.register(swagger, {
     openapi: { info: { title: 'Roadmap API', version: '1.0.0' } },
@@ -189,6 +195,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     ...(deps.maxSnapshots !== undefined && { maxSnapshots: deps.maxSnapshots }),
     ...(deps.maxSnapshotNotes !== undefined && { maxNotes: deps.maxSnapshotNotes }),
   });
+
+  registerSnapshotPublicRoutes(app, { db: deps.db, now });
 
   // Only stores that keep files on this server need the API to serve them; S3 links go straight to S3.
   if (objectStore instanceof LocalObjectStore || objectStore instanceof MemoryObjectStore) {

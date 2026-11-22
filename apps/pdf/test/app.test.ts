@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildPdfApp, loadPdfConfig, RenderTimeoutError, type Render } from '../src/app.ts';
 
@@ -207,5 +207,73 @@ test('FR-3.4: the config reads PORT, RENDER_ORIGIN, MAX_RENDERS and RENDER_TIMEO
     { RENDER_ORIGIN: 'http://web', PORT: 'x' },
   ]) {
     expect(() => loadPdfConfig(env)).toThrow(/Invalid configuration/);
+  }
+});
+
+test('FR-3.4: a render still unsettled past its deadline and grace fails the health check and asks for a restart once', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    let stuckCalls = 0;
+    const hung = deferred<Buffer>();
+    let entered = 0;
+    let bothIn!: () => void;
+    const bothEntered = new Promise<void>((resolve) => (bothIn = resolve));
+    const app = buildPdfApp({
+      render: () => {
+        if (++entered === 2) bothIn();
+        return hung.promise;
+      },
+      renderOrigin: ORIGIN,
+      maxRenders: 2,
+      timeoutMs: 1_000,
+      stuckGraceMs: 1_000,
+      onStuck: () => (stuckCalls += 1),
+    });
+    apps.push(app);
+    const body = { path: `/s/${LINK}/print/list`, token: 'tok' };
+
+    expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+    const first = post(app, body);
+    const second = post(app, body);
+    await bothEntered;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await first).statusCode).toBe(504);
+    expect((await second).statusCode).toBe(504);
+    // Past the deadline but inside the grace: not stuck yet.
+    expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+    expect(stuckCalls).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    const health = await app.inject({ method: 'GET', url: '/health' });
+    expect(health.statusCode).toBe(503);
+    expect(health.json()).toEqual({ status: 'stuck' });
+    // Both renders are stuck, but the server is asked to restart only once.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(stuckCalls).toBe(1);
+    hung.resolve(PDF);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('FR-3.4: a render that settles in time leaves the health check ok', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    let stuckCalls = 0;
+    const app = buildPdfApp({
+      render: () => Promise.resolve(PDF),
+      renderOrigin: ORIGIN,
+      maxRenders: 2,
+      timeoutMs: 1_000,
+      stuckGraceMs: 1_000,
+      onStuck: () => (stuckCalls += 1),
+    });
+    apps.push(app);
+    expect((await post(app, { path: `/s/${LINK}/print/list`, token: 'tok' })).statusCode).toBe(200);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(stuckCalls).toBe(0);
+    expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+  } finally {
+    vi.useRealTimers();
   }
 });

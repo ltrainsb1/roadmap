@@ -34,6 +34,9 @@ export function isBareOrigin(value: string): boolean {
 /** A snapshot link id is half of what opens it: logs keep its first 6 characters, as the API's logs do. */
 const redactLinks = (text: string) => text.replace(/(\/s\/[A-Za-z0-9_-]{0,6})[A-Za-z0-9_-]*/g, '$1…');
 
+/** Room past the render deadline for Chromium to close a context before a render counts as stuck. */
+export const DEFAULT_STUCK_GRACE_MS = 30_000;
+
 export interface PdfConfig {
   port: number;
   renderOrigin: string;
@@ -67,6 +70,10 @@ export function buildPdfApp(deps: {
   maxRenders: number;
   timeoutMs: number;
   logger?: boolean;
+  /** How long past `timeoutMs` a render may stay unsettled before the browser counts as stuck. */
+  stuckGraceMs?: number;
+  /** Called once, when a render first counts as stuck; the server closes the browser and exits. */
+  onStuck?: () => void;
 }): FastifyInstance {
   if (!isBareOrigin(deps.renderOrigin)) throw new Error('renderOrigin must be a bare http: or https: origin');
   const limiter = createLimiter(deps.maxRenders);
@@ -80,7 +87,26 @@ export function buildPdfApp(deps: {
     return reply.status(500).send({ error: 'internal' });
   });
 
-  app.get('/health', () => ({ status: 'ok' }));
+  // A render still unsettled well past its deadline means Chromium hangs without disconnecting. It holds its slot, so
+  // left alone every slot would end up taken for good: health fails, and the server is told once, to restart.
+  const stuckAfterMs = deps.timeoutMs + (deps.stuckGraceMs ?? DEFAULT_STUCK_GRACE_MS);
+  let stuck = false;
+  const watch = (job: Promise<unknown>) => {
+    const timer = setTimeout(() => {
+      if (stuck) return;
+      stuck = true;
+      app.log.error('a render is stuck past its deadline');
+      deps.onStuck?.();
+    }, stuckAfterMs);
+    void job.then(
+      () => clearTimeout(timer),
+      () => clearTimeout(timer),
+    );
+  };
+
+  app.get('/health', (_req, reply) =>
+    stuck ? reply.status(503).send({ status: 'stuck' }) : reply.send({ status: 'ok' }),
+  );
 
   app.post('/render', async (req, reply) => {
     const body = (req.body ?? {}) as { path?: unknown; token?: unknown };
@@ -94,6 +120,7 @@ export function buildPdfApp(deps: {
     // The slot stays taken until Chromium is really done, even when the reply has already gone out at the deadline.
     const job = limiter.run(() => deps.render({ url: url.href, token, timeoutMs: deps.timeoutMs }));
     job.catch(() => undefined);
+    watch(job);
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => reject(new RenderTimeoutError()), deps.timeoutMs);

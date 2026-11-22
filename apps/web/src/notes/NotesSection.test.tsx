@@ -105,7 +105,7 @@ function show(opts: { role?: Role; archived?: boolean; onDraftChange?: (hasText:
       />
     </QueryClientProvider>,
   );
-  return { onDraftChange };
+  return { onDraftChange, client };
 }
 
 const articleWith = (text: string) => {
@@ -404,7 +404,7 @@ describe('NotesSection', () => {
       expect(alert).toBeTruthy();
       // Directly above the bottom box.
       expect(alert?.nextElementSibling?.contains(newBox())).toBe(true);
-      expect(valueOf(newBox())).toBe('Mine, better');
+      await waitFor(() => expect(valueOf(newBox())).toBe('Mine, better'));
       await waitFor(() => expect(document.activeElement).toBe(newBox()));
       expect(onDraftChange).toHaveBeenLastCalledWith(true);
     });
@@ -426,7 +426,7 @@ describe('NotesSection', () => {
         expect(goneAlert()).toBeTruthy();
       });
       expect(screen.queryByRole('textbox', { name: 'Reply to Bob' })).toBeNull();
-      expect(valueOf(newBox())).toBe('Earlier\n\nMy reply');
+      await waitFor(() => expect(valueOf(newBox())).toBe('Earlier\n\nMy reply'));
       await waitFor(() => expect(document.activeElement).toBe(newBox()));
       expect(onDraftChange).toHaveBeenLastCalledWith(true);
 
@@ -482,6 +482,66 @@ describe('NotesSection', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
       expect(await screen.findByText('Note added.')).toBeTruthy();
       expect(sent).toHaveLength(2);
+    });
+
+    test('FR-1.5: a 404 on the bottom box says the item is gone, in that box, and keeps the text', async () => {
+      serve([note({ id: 'n1', body: 'Top' })], () => Promise.reject(new ApiError(404, 'not_found')));
+      show();
+      await screen.findByText('Top');
+      fireEvent.change(newBox(), { target: { value: 'Lost item' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toBe("This item no longer exists, or you don't have access to it.");
+      expect(goneAlert()).toBeUndefined();
+      expect(newBox().getAttribute('aria-describedby')).toContain(alert.parentElement!.id);
+      expect(valueOf(newBox())).toBe('Lost item');
+    });
+
+    test('FR-1.5: a refetch that removes the note being edited moves the changed text to the bottom box, with the alert above it', async () => {
+      serve([note({ id: 'n1', body: 'Top' }), note({ id: 'n2', body: 'Mine', authorId: ME })]);
+      const { client, onDraftChange } = show();
+      await screen.findByText('Mine');
+      fireEvent.click(within(articleWith('Mine')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Edit your note' }), { target: { value: 'Mine, better' } });
+      serve([note({ id: 'n1', body: 'Top' })]);
+      await act(() => client.invalidateQueries());
+      await waitFor(() => expect(goneAlert()).toBeTruthy());
+      expect(screen.queryByRole('textbox', { name: 'Edit your note' })).toBeNull();
+      const alert = goneAlert();
+      expect(alert?.nextElementSibling?.contains(newBox())).toBe(true);
+      await waitFor(() => expect(valueOf(newBox())).toBe('Mine, better'));
+      await waitFor(() => expect(document.activeElement).toBe(newBox()));
+      await waitFor(() => expect(onDraftChange).toHaveBeenLastCalledWith(true));
+    });
+
+    test('FR-1.5: a refetch that removes the note an unchanged reply box points at just closes the box', async () => {
+      serve([note({ id: 'n1', body: 'Top' }), note({ id: 'r1', parentId: 'n1', body: 'Inner', authorName: 'Cleo', authorId: 'u3' })]);
+      const { client } = show();
+      await screen.findByText('Inner');
+      fireEvent.click(within(articleWith('Inner')).getByRole('button', { name: 'Reply' }));
+      expect(screen.getByRole('textbox', { name: 'Reply to Cleo' })).toBeTruthy();
+      serve([note({ id: 'n1', body: 'Top' })]);
+      await act(() => client.invalidateQueries());
+      await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Reply to Cleo' })).toBeNull());
+      expect(goneAlert()).toBeUndefined();
+      expect(valueOf(newBox())).toBe('');
+    });
+
+    test('FR-1.5: after a reply is added, a refetch that removes its note hands nothing over', async () => {
+      serve([note({ id: 'n1', body: 'Top' }), note({ id: 'r1', parentId: 'n1', body: 'Inner', authorName: 'Cleo', authorId: 'u3' })], () =>
+        Promise.resolve(note({ id: 'r2', parentId: 'n1', body: 'Sent', authorId: ME })),
+      );
+      const { client } = show();
+      await screen.findByText('Inner');
+      fireEvent.click(within(articleWith('Inner')).getByRole('button', { name: 'Reply' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Reply to Cleo' }), { target: { value: 'Sent' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add reply' }));
+      expect(await screen.findByText('Note added.')).toBeTruthy();
+      serve([note({ id: 'n1', body: 'Top' }), note({ id: 'r2', parentId: 'n1', body: 'Sent', authorId: ME })]);
+      await act(() => client.invalidateQueries());
+      await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Reply to Cleo' })).toBeNull());
+      expect(goneAlert()).toBeUndefined();
+      expect(valueOf(newBox())).toBe('');
     });
 
     test('FR-1.5: "Note added." clears when the person next types in a note box', async () => {

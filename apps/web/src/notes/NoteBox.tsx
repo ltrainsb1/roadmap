@@ -25,8 +25,8 @@ interface NoteBoxProps {
   autoFocus?: boolean;
   /** Text handed over from another box: each new `n` adds it after a blank line (or fills an empty box) and focuses. */
   inject?: { text: string; n: number } | undefined;
-  /** Called on every change to the text. */
-  onType?: () => void;
+  /** Called with the new text on every change the person makes to it. */
+  onType?: (text: string) => void;
 }
 
 /** A labelled text box for a note, with the Markdown hint, its buttons and any error. */
@@ -78,7 +78,7 @@ export function NoteBox({ label, submitLabel, initial, members, busy, error, onS
           aria-invalid={error ? true : undefined}
           onChange={(e) => {
             setText(e.target.value);
-            onType?.();
+            onType?.(e.target.value);
           }}
         />
         <p id={hintId} className="hint">

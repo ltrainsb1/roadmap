@@ -104,6 +104,15 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
     setStatus('');
     setFinishFirst(false);
   }, []);
+  // What the person has typed in the open reply or edit box, to hand over if its note vanishes in a refetch.
+  const boxText = useRef<Partial<Record<'reply' | 'edit', string>>>({});
+  const typedIn = useMemo(() => {
+    const track = (key: 'reply' | 'edit') => (text: string) => {
+      boxText.current[key] = text;
+      typed();
+    };
+    return { reply: track('reply'), edit: track('edit') };
+  }, [typed]);
 
   const [drafts, setDrafts] = useState<Record<BoxKey, boolean>>({ new: false, reply: false, edit: false });
   const draftFor = useMemo(() => {
@@ -123,12 +132,20 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
   const controlId = (noteId: string, control: 'reply' | 'edit') => `note-${noteId}-${control}`;
   const boxId = (kind: 'reply' | 'edit') => `notes-${item.id}-${kind}`;
 
-  // A box whose note has left the list (deleted by someone else) is closed.
+  // A box whose note has left the list (deleted by someone else) is closed. Changed text in it moves to the bottom
+  // box, as when a save finds the note gone. While its save is in flight, the save's answer decides instead.
   useEffect(() => {
-    if (!open || !list) return;
+    if (!open || !list || pending[open.kind]) return;
     const target = open.kind === 'reply' ? open.to.id : open.note.id;
-    if (!list.some((n) => n.id === target && !n.deleted)) setOpen(null);
-  }, [open, list]);
+    if (list.some((n) => n.id === target && !n.deleted)) return;
+    const text = boxText.current[open.kind] ?? '';
+    const initial = open.kind === 'edit' ? open.note.body : '';
+    if (text !== initial && text.trim() !== '') {
+      setHandover((h) => ({ text, n: (h?.n ?? 0) + 1 }));
+      setGoneNotice(true);
+    }
+    setOpen(null);
+  }, [open, list, pending]);
 
   useEffect(() => {
     if (!focusAfterDelete || !list) return;
@@ -153,6 +170,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
     }
     setFinishFirst(false);
     setErrors((e) => ({ ...e, reply: undefined, edit: undefined }));
+    boxText.current = {};
     setOpen(box);
   };
   const closeBox = () => {
@@ -197,6 +215,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
     setStatus('');
     const saved = await attempt(key, body, () => add.mutateAsync({ body, mentionIds, parentId }));
     if (saved) {
+      if (key === 'reply') boxText.current.reply = '';
       setGoneNotice(false);
       setStatus('Note added.');
     }
@@ -256,7 +275,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
             onSubmit={saveEdit(n)}
             onCancel={closeBox}
             onDirtyChange={draftFor.edit}
-            onType={typed}
+            onType={typedIn.edit}
             autoFocus
           />
           {finishFirst && <Alert>{FINISH_FIRST}</Alert>}
@@ -333,7 +352,7 @@ export function NotesSection({ roadmapId, item, role, myId, members, timeZone, o
                     onSubmit={addNote('reply', thread.note.id)}
                     onCancel={closeBox}
                     onDirtyChange={draftFor.reply}
-                    onType={typed}
+                    onType={typedIn.reply}
                     autoFocus
                   />
                   {finishFirst && <Alert>{FINISH_FIRST}</Alert>}

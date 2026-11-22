@@ -282,3 +282,14 @@ export async function apiAs(page: Page) {
 export async function seedProject(call: Awaited<ReturnType<typeof apiAs>>, roadmapId: string, title: string, parentId: string | null = null) {
   return (await call<{ id: string }>('POST', `/api/roadmaps/${roadmapId}/projects`, { parentId, title })).id;
 }
+
+/** Adds a note to an item through the API, or a reply when `parentId` is a top-level note's id; returns its id. */
+export async function seedNote(
+  call: Awaited<ReturnType<typeof apiAs>>,
+  roadmapId: string,
+  projectId: string,
+  body: string,
+  parentId: string | null = null,
+) {
+  return (await call<{ id: string }>('POST', `/api/roadmaps/${roadmapId}/projects/${projectId}/notes`, { body, parentId })).id;
+}

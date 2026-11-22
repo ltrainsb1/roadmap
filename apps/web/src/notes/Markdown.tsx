@@ -1,5 +1,5 @@
 import { type Mention, mentionRanges } from '@roadmap/shared';
-import { Component, type ReactNode } from 'react';
+import { Component, memo, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 
 /** The parts of an mdast node the note plugin reads and writes. */
@@ -144,6 +144,8 @@ const components: Components = {
   a: ({ href, children }) => <NewTabLink href={href}>{children}</NewTabLink>,
   // Images are never loaded: an image shows as a link to it, with its alt text.
   img: ({ src, alt }) => <NewTabLink href={typeof src === 'string' ? src : undefined}>{alt}</NewTabLink>,
+  // A wide code block scrolls inside the note; focus lets a keyboard scroll it.
+  pre: ({ children }) => <pre tabIndex={0}>{children}</pre>,
   h1: BoldParagraph,
   h2: BoldParagraph,
   h3: BoldParagraph,
@@ -178,8 +180,15 @@ class PlainOnError extends Component<PlainOnErrorProps, { body: string; failed: 
   }
 }
 
-/** A note's text as CommonMark, without raw HTML, with recorded mentions highlighted. */
-export function Markdown({ body, mentions }: { body: string; mentions: readonly Mention[] }) {
+interface MarkdownProps {
+  body: string;
+  mentions: readonly Mention[];
+}
+
+const sameMentions = (a: readonly Mention[], b: readonly Mention[]) =>
+  a === b || (a.length === b.length && a.every((m, i) => m.userId === b[i]?.userId && m.name === b[i]?.name));
+
+function MarkdownNote({ body, mentions }: MarkdownProps) {
   return (
     <div className="markdown">
       <PlainOnError body={body}>
@@ -198,3 +207,9 @@ export function Markdown({ body, mentions }: { body: string; mentions: readonly 
     </div>
   );
 }
+
+/**
+ * A note's text as CommonMark, without raw HTML, with recorded mentions highlighted. It renders again only when
+ * the text or the mentions change, so typing elsewhere on the page does not parse every note again.
+ */
+export const Markdown = memo(MarkdownNote, (a, b) => a.body === b.body && sameMentions(a.mentions, b.mentions));

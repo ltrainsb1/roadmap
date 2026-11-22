@@ -1333,3 +1333,62 @@ select {
 .markdown-plain {
   white-space: pre-wrap;
 }
+
+/* Notes in the item panel (FR-1.5): threads oldest first, replies indented under their note. */
+.notes-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.note-threads,
+.note-replies {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.note-thread + .note-thread {
+  margin-top: 12px;
+}
+.note-replies {
+  margin: 4px 0 0 16px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+.note {
+  min-width: 0;
+  padding: 4px 0;
+}
+.note-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0 0 4px;
+}
+.note-meta time,
+.note-edited {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.note-deleted {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+.note-box {
+  margin-top: 8px;
+}
+.note-box .field {
+  margin-bottom: 8px;
+}
+.note-box textarea {
+  min-height: 5rem;
+}
+.note-box .alert {
+  margin-bottom: 8px;
+}

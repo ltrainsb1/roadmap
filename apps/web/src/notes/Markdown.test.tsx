@@ -69,6 +69,11 @@ describe('Markdown', () => {
     expect(root.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 
+  test('FR-1.5: a code block takes keyboard focus, so a wide one can be scrolled without a mouse', () => {
+    const root = show('```\nwide\n```');
+    expect(root.querySelector('pre')?.getAttribute('tabindex')).toBe('0');
+  });
+
   test('FR-1.5: an image is not loaded; it shows as a link with its alt text', () => {
     const root = show('![chart](https://example.com/a.png)');
     expect(root.querySelector('img')).toBeNull();

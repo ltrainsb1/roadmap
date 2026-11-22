@@ -13,6 +13,7 @@ import {
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { errorCode, errorMessage, GENERIC_ERROR, ITEM_READ_ONLY, itemActionMessage, messageFor } from '../api/errors.ts';
+import { NotesSection } from '../notes/NotesSection.tsx';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
@@ -74,8 +75,10 @@ interface PanelProps {
   onToggleAssignee: (itemId: string, userId: string, assigned: boolean) => void;
   /** Sets the priority label; saves at once and the page shows any error. */
   onSetPriorityLabel: (itemId: string, label: PriorityLabel | null) => void;
-  /** Tells the page whether the form has changes that are not saved. */
+  /** Tells the page whether the form, or a note box, has changes that are not saved. */
   onDirtyChange: (dirty: boolean) => void;
+  /** The signed-in person's time zone, for the times on notes. */
+  timeZone: string;
 }
 
 /**
@@ -83,7 +86,7 @@ interface PanelProps {
  * opens (the page keys it by item id) and is not touched by later refetches, so nothing typed is lost. Save
  * sends the version the form was started from, so a change made by someone else is a conflict, never overwritten.
  */
-export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onClose, onReload, members, ownChange, onToggleAssignee, onSetPriorityLabel, onDirtyChange }: PanelProps) {
+export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onClose, onReload, members, ownChange, onToggleAssignee, onSetPriorityLabel, onDirtyChange, timeZone }: PanelProps) {
   const update = useUpdateProject(roadmapId);
   const [values, setValues] = useState(() => valuesOf(item));
   // What the form was last started or saved from, to tell whether anything is unsaved.
@@ -105,7 +108,9 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
   // Opening the panel (or a different item) moves focus into it.
   useEffect(() => heading.current?.focus(), []);
 
-  const dirty = JSON.stringify(values) !== JSON.stringify(base);
+  // Text typed in a note box counts as unsaved too.
+  const [noteDraft, setNoteDraft] = useState(false);
+  const dirty = noteDraft || JSON.stringify(values) !== JSON.stringify(base);
   useEffect(() => {
     onDirtyChange(dirty);
     return () => onDirtyChange(false);
@@ -345,6 +350,15 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
           {saved ? 'Saved.' : ''}
         </div>
       </form>
+      <NotesSection
+        roadmapId={roadmapId}
+        item={item}
+        role={role}
+        myId={myId}
+        members={members}
+        timeZone={timeZone}
+        onDraftChange={setNoteDraft}
+      />
     </section>
   );
 }

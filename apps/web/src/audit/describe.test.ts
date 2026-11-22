@@ -138,4 +138,11 @@ describe('describeAuditEvent', () => {
       expect(project('project.delete', { before: 'oops' })).toBe('Maria deleted an item.');
     });
   });
+
+  test('FR-1.5: note events say a note was added, edited or deleted, without its text', () => {
+    const target = { type: 'note', id: 'n1' } as const;
+    expect(describeAuditEvent(event({ action: 'note.create', target, after: { projectId: 'p1' } }), nameOf)).toBe('Maria added a note.');
+    expect(describeAuditEvent(event({ action: 'note.update', target }), nameOf)).toBe('Maria edited a note.');
+    expect(describeAuditEvent(event({ action: 'note.delete', target }), nameOf)).toBe('Maria deleted a note.');
+  });
 });

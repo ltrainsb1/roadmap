@@ -46,8 +46,8 @@ services:
   clamav:
     image: clamav/clamav:1.4.7
     restart: unless-stopped
-    # Signatures take about 1 GB in memory, and twice that for a moment while freshclam reloads them.
-    mem_limit: 2g
+    # Signatures take about 1 GB in memory; a reload briefly holds two copies (about 1.9 GiB), so leave room above that.
+    mem_limit: 3g
     volumes:
       # The signature database: kept across restarts so a restart does not download it again.
       - clamav_db:/var/lib/clamav

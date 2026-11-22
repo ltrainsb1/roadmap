@@ -9,7 +9,8 @@
 #   mongo    no limit   460 MiB
 #   clamav   3g         1.5 GiB while loading its signatures; a reload briefly holds two copies (about 1.9 GiB)
 #   api      no limit   230 MiB
-#   pdf      1g         260 MiB (headless Chromium; at most 2 renders at once, so allow for more)
+#   pdf      1g         260 MiB (headless Chromium; at most 2 renders at once, so allow for more). The API refuses
+#                       a PDF of more than 700 rows (MAX_PDF_SIZE): two of that size at once peaked at 785 MiB.
 #   caddy    no limit    22 MiB
 # About 2.5 GiB at once, and up to 4.5 GiB if ClamAV and Chromium both reach their limits: size the POC server at
 # 8 GB, not 4.
@@ -97,15 +98,20 @@ services:
       CLAMD_HOST: clamav
       PDF: service
       PDF_URL: http://pdf:3200
+      # How long the API waits for one PDF: above the PDF service's RENDER_TIMEOUT_MS, so the service answers first,
+      # and below the 2-minute render token (the API refuses to start otherwise).
+      PDF_TIMEOUT_MS: ${PDF_TIMEOUT_MS:-60000}
       # The API takes the client address from X-Forwarded-For only from a peer on proxy_api, which is Caddy alone.
-      TRUSTED_PROXY_CIDR: ${PROXY_SUBNET:-172.30.255.0/24}
+      TRUSTED_PROXY_CIDR: ${PROXY_SUBNET:-10.254.254.0/24}
     depends_on:
       mongo:
         condition: service_healthy
       clamav:
         condition: service_healthy
+      # Started, not healthy: PDFs are an optional export. If Chromium cannot start on a host (its sandbox refused,
+      # AppArmor), sign-in and everything else still come up, and the API answers pdf_failed to a PDF request.
       pdf:
-        condition: service_healthy
+        condition: service_started
     networks:
       - default
       - proxy_api
@@ -142,6 +148,9 @@ services:
     restart: unless-stopped
     environment:
       RENDER_ORIGIN: http://caddy:8080
+      # The deadline for one render. The largest PDF the API allows (MAX_PDF_SIZE, 700 rows) took about 1 s on the
+      # devbox, so 45 s leaves a wide margin for a slower server.
+      RENDER_TIMEOUT_MS: ${RENDER_TIMEOUT_MS:-45000}
     networks:
       - pdf_api
       - pdf_render
@@ -217,7 +226,7 @@ networks:
   proxy_api:
     ipam:
       config:
-        - subnet: ${PROXY_SUBNET:-172.30.255.0/24}
+        - subnet: ${PROXY_SUBNET:-10.254.254.0/24}
   # Only the API and the PDF service.
   pdf_api:
     internal: true

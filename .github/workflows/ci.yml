@@ -132,7 +132,7 @@ jobs:
           exit-code: 1
           ignore-unfixed: true
       # ClamAV runs in production but is built upstream, not by us: its findings are listed here, and a fix means
-      # moving to a newer upstream tag. MinIO is not scanned: it runs only in this job, never in a deployment.
+      # an upstream rebuild or a newer tag (see the follow-ups document). MinIO is not scanned: it runs only in this job, never in a deployment.
       - name: List ClamAV image findings (upstream image, not a gate)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -150,7 +150,9 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
       - name: Smoke test
         env:
-          # The smoke script signs in with the setup link to check uploads, downloads and the virus scan.
+          # A throwaway stack, so the writing checks run: the script signs in with the setup link to check uploads,
+          # downloads and the virus scan.
+          SMOKE_WRITES: 'yes'
           SMOKE_SETUP_URL: ${{ steps.bootstrap.outputs.url }}
           SMOKE_CONNECT_TO: minio:9000:127.0.0.1:9000
         run: scripts/smoke.sh https://localhost

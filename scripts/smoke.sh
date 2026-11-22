@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Checks a running stack: scripts/smoke.sh [base_url]   (default https://localhost)
+# By default it only reads: health, the page and its headers, and that /api/me needs a session.
+# SMOKE_WRITES=yes also runs the file checks, which WRITE to the stack: using the setup link's tenant (made by the
+#   bootstrap command) they set its person's password and authenticator, and create a roadmap, an item and two files
+#   (a third, the test virus, is refused). Run them only against a throwaway stack, never one with real data.
 # SMOKE_RESOLVE=host:port:address is passed to curl --resolve, for a stack that runs on another machine.
 # SMOKE_CONNECT_TO=host:port:host2:port2 is passed to curl --connect-to, so a download link that names a host the
 #   machine running this script can't resolve (minio:9000 in the smoke stack) still reaches it.
 # SMOKE_WAIT_SECONDS (default 60) bounds the wait for /api/health before the checks run.
-# SMOKE_SETUP_URL is a setup link from the bootstrap command (dist/cli/bootstrap.js). The file checks sign in with it:
-#   they set a password, set up an authenticator code, create a roadmap and an item, and upload files to it. A link
-#   works once, so each run needs a new one. SMOKE_EMAIL (default you@example.com) is the address it was made for.
+# SMOKE_SETUP_URL is a setup link from the bootstrap command (dist/cli/bootstrap.js); the file checks sign in with it,
+#   and fail without it. A link works once, so each run with SMOKE_WRITES=yes needs a new one.
+#   SMOKE_EMAIL (default you@example.com) is the address it was made for.
 set -uo pipefail
 
 base="${1:-https://localhost}"
@@ -62,7 +66,12 @@ check "strict-transport-security header present" has_header strict-transport-sec
 me=$(curl "${curl_args[@]}" -o /dev/null -w '%{http_code}' "$base/api/me")
 check "GET /api/me returns 401 (got $me)" equals "$me" 401
 
-# ---- Files: sign in, then upload, download, and have a test virus refused.
+if [[ "${SMOKE_WRITES:-}" != yes ]]; then
+  echo "skip the file checks, which write to the stack (set SMOKE_WRITES=yes on a throwaway stack to run them)"
+  finish
+fi
+
+# ---- Files (SMOKE_WRITES=yes): sign in, then upload, download, and have a test virus refused.
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -82,6 +91,8 @@ status_of() { printf '%s' "$1" | tail -n1; }
 body_of() { printf '%s' "$1" | sed '$d'; }
 
 # RFC 6238 code (SHA-1, 30 seconds, 6 digits) for a base32 secret, with only bash and openssl.
+# A code computed just before a 30-second boundary arrives in the next window; that is safe because the server
+# accepts the previous and the next window too (verifyTotp in apps/api/src/auth/totp.ts, window: 1).
 base32_hex() {
   local s alphabet=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567 bits=0 value=0 hex='' c rest i
   s=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '=')
@@ -110,7 +121,7 @@ totp_code() {
   printf '%06d' $(((16#${mac:offset*2:8} & 0x7fffffff) % 1000000))
 }
 
-[[ -n "${SMOKE_SETUP_URL:-}" ]] || fatal "SMOKE_SETUP_URL is not set: the file checks need a setup link from the bootstrap command"
+[[ -n "${SMOKE_SETUP_URL:-}" ]] || fatal "SMOKE_WRITES=yes needs SMOKE_SETUP_URL: the file checks sign in with a setup link from the bootstrap command"
 setup_token=${SMOKE_SETUP_URL##*/}
 email=${SMOKE_EMAIL:-you@example.com}
 password="smoke-$(openssl rand -hex 16)"

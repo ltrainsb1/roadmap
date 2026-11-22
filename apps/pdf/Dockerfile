@@ -26,8 +26,10 @@ RUN node node_modules/playwright-core/cli.js install --with-deps --only-shell ch
 # The image only runs node: drop npm, npx and corepack, whose bundled packages carry their own CVEs.
 RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn*
 # A user of its own, apart from the node image's `node` user, as Playwright's Docker guidance suggests for a browser.
-# Chromium writes its temporary profile under /tmp and a little under $HOME.
-RUN groupadd --system pdf && useradd --system --gid pdf --create-home --home-dir /home/pdf pdf
+# Chromium writes its temporary profile under /tmp and a little under $HOME. A fixed uid and gid (10001), so the
+# compose file can give the read-only container a tmpfs home this user owns.
+RUN groupadd --system --gid 10001 pdf \
+  && useradd --system --uid 10001 --gid pdf --create-home --home-dir /home/pdf pdf
 USER pdf
 EXPOSE 3200
 CMD ["node", "--experimental-strip-types", "src/server.ts"]

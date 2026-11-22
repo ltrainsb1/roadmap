@@ -3,6 +3,17 @@
 # Needs deploy/poc/.env (copy .env.example and replace the placeholders).
 # Files go to S3 (S3_BUCKET) with the instance role's credentials; there is no MinIO here. The smoke run layers
 # docker-compose.smoke.yml on top to add one.
+#
+# Services and their memory: the limit where one is set, then the peak measured on the devbox smoke run (cgroup
+# memory.peak, after the smoke script plus list and timeline PDFs of a 200-item roadmap; Task 9 of the snapshots plan):
+#   mongo    no limit   460 MiB
+#   clamav   3g         1.5 GiB while loading its signatures; a reload briefly holds two copies (about 1.9 GiB)
+#   api      no limit   230 MiB
+#   pdf      1g         260 MiB (headless Chromium; at most 2 renders at once, so allow for more)
+#   caddy    no limit    22 MiB
+# About 2.5 GiB at once, and up to 4.5 GiB if ClamAV and Chromium both reach their limits: size the POC server at
+# 8 GB, not 4.
+
 name: roadmap-poc
 
 services:
@@ -84,11 +95,18 @@ services:
       S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET in deploy/poc/.env}
       SCANNER: clamd
       CLAMD_HOST: clamav
+      PDF: service
+      PDF_URL: http://pdf:3200
     depends_on:
       mongo:
         condition: service_healthy
       clamav:
         condition: service_healthy
+      pdf:
+        condition: service_healthy
+    networks:
+      - default
+      - pdf_api
     read_only: true
     tmpfs:
       - /tmp
@@ -108,6 +126,52 @@ services:
       retries: 12
       start_period: 30s
 
+  # Prints snapshot pages to PDF with headless Chromium. Only the API calls it (pdf_api), and it only opens pages
+  # from Caddy's internal listener (pdf_render). Both networks are internal: no route to MongoDB, ClamAV, S3/MinIO
+  # or the internet. No port is published.
+  pdf:
+    build:
+      context: ../..
+      dockerfile: apps/pdf/Dockerfile
+    image: roadmap-pdf:poc
+    restart: unless-stopped
+    environment:
+      RENDER_ORIGIN: http://caddy:8080
+    networks:
+      - pdf_api
+      - pdf_render
+    # Chromium's sandbox stays on. It needs user namespaces, which Docker's default seccomp profile refuses: this
+    # is that profile plus clone, setns and unshare (Playwright's utils/docker/seccomp_profile.json, v1.65.1).
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=chromium-seccomp.json
+    cap_drop: [ALL]
+    # The sandbox's zygote calls chroot inside the user namespace it creates, and the kernel lets it only if
+    # SYS_CHROOT is in the bounding set it inherits. The service runs as a non-root user with no-new-privileges, so
+    # it holds no capability in the container itself; without this, Chromium stops with
+    # "Check failed: sys_chroot("/proc/self/fdinfo/") == 0".
+    cap_add: [SYS_CHROOT]
+    read_only: true
+    # Chromium writes its profile under /tmp and a little under $HOME. Playwright starts it with
+    # --disable-dev-shm-usage, so shared memory goes to /tmp too and the default /dev/shm is enough.
+    tmpfs:
+      - /tmp
+      - /home/pdf:uid=10001,gid=10001,mode=0700
+    # Chromium's helper processes are reaped by an init, not by node.
+    init: true
+    mem_limit: 1g
+    healthcheck:
+      # 503 while a render is stuck; the service also exits by itself then, and restart brings it back.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3200/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
   caddy:
     build:
       context: ../..
@@ -119,9 +183,15 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # Port 8080, the PDF service's internal listener, is deliberately not published.
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
+    networks:
+      default:
+      # Caddy's internal listener binds to this alias only, so it answers on pdf_render and nowhere else.
+      pdf_render:
+        aliases: [caddy-render]
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -132,6 +202,15 @@ services:
     cap_add: [NET_BIND_SERVICE]
     security_opt:
       - no-new-privileges:true
+
+networks:
+  default:
+  # Only the API and the PDF service.
+  pdf_api:
+    internal: true
+  # Only the PDF service and Caddy's internal listener.
+  pdf_render:
+    internal: true
 
 volumes:
   caddy_data:

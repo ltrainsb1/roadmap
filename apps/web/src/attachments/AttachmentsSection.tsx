@@ -118,10 +118,10 @@ export function AttachmentsSection({ roadmapId, item, editable, timeZone }: Atta
       } catch (err) {
         say(uploadErrorMessage(err, name));
         const code = errorCode(err);
-        if (code === 'item_archived' || code === 'forbidden') {
-          // Nothing more can be added to it by this person.
+        if (code === 'item_archived' || code === 'not_found' || code === 'forbidden') {
+          // Nothing more can be added to it by this person: archived, gone, or no longer theirs to change.
           queue.current = [];
-          if (code === 'item_archived') refreshItem();
+          if (code !== 'forbidden') refreshItem();
           else refreshAccess();
         }
       }

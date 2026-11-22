@@ -287,6 +287,18 @@ describe('AttachmentsSection', () => {
     expect(mockUpload).toHaveBeenCalledTimes(1);
   });
 
+  test('FR-1.4: an upload refused because the item is gone sends none of the rest and refreshes the item', async () => {
+    serve(() => []);
+    mockUpload.mockRejectedValue(new ApiError(404, 'not_found'));
+    const { input, invalidate } = show();
+    await screen.findByText('No files yet.');
+    choose(input, [fileOf('a.txt', 5), fileOf('b.txt', 5), fileOf('c.txt', 5)]);
+    await waitFor(() => expect(alertText()).toBe("Couldn't add a.txt. Try again."));
+    await waitFor(() => expect(screen.queryByText(/^Uploading/)).toBeNull());
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects', 'r1'] });
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+  });
+
   test('FR-1.4: the same message from several files shows once', async () => {
     serve(() => []);
     mockUpload.mockRejectedValue(new ApiError(503, 'scan_unavailable'));

@@ -118,6 +118,13 @@ describe('ClamdScanner (FR-1.4)', () => {
     await expect(scanner(clamd.port).scan(Buffer.from('x'))).rejects.toBeInstanceOf(ScanUnavailableError);
   });
 
+  test('a reply longer than 4096 bytes without a terminating zero is ScanUnavailableError at once', async () => {
+    const clamd = await fakeClamd((all, s) => ended(all) && s.write('x'.repeat(4097)));
+    const started = Date.now();
+    await expect(scanner(clamd.port, 5000).scan(Buffer.from('x'))).rejects.toBeInstanceOf(ScanUnavailableError);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
   test('no reply within timeoutMs is ScanUnavailableError', async () => {
     const clamd = await fakeClamd(() => undefined);
     const started = Date.now();

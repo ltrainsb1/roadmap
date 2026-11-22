@@ -27,6 +27,9 @@ export class FakeScanner implements Scanner {
   }
 }
 
+/** Longest reply read from clamd; a real verdict is far shorter. */
+const MAX_REPLY_BYTES = 4096;
+
 /** Bytes per INSTREAM chunk. */
 export const CLAMD_CHUNK_BYTES = 64 * 1024;
 
@@ -88,6 +91,7 @@ export class ClamdScanner implements Scanner {
         reply = Buffer.concat([reply, d]);
         const end = reply.indexOf(0);
         if (end !== -1) finish(() => verdict(reply.subarray(0, end).toString('utf8').trim()));
+        else if (reply.length > MAX_REPLY_BYTES) fail('clamd_reply_too_long');
       });
       socket.on('error', (err) => fail('scan_connection_error', err));
       socket.on('close', () => fail('scan_connection_closed'));

@@ -1732,6 +1732,9 @@ a.btn {
    list has every item open; the timeline is a 240 px name column and exactly 760 px of schedule. */
 .print-page {
   padding: 0;
+  /* Joined letters such as "ff" become one glyph in some fonts, and a PDF reader then splits the word ("Kick-o ff")
+     when text is searched or copied. Plain letters keep the PDF's text whole. */
+  font-variant-ligatures: none;
 }
 .print-page .snapshot-heading {
   margin-bottom: 12px;

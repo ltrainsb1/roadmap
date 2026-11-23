@@ -489,6 +489,76 @@ select {
   overflow-wrap: anywhere;
 }
 
+.bell {
+  gap: 6px;
+}
+.bell-badge {
+  min-width: 1.5rem;
+  padding: 0 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5rem;
+  text-align: center;
+  color: var(--primary-text);
+  background: var(--danger);
+  border-radius: 999px;
+}
+@media (max-width: 599px) {
+  /* The link's accessible name keeps the word; only the icon and the badge show. */
+  .bell-label {
+    display: none;
+  }
+}
+
+.mark-all,
+.show-more {
+  margin-bottom: 16px;
+}
+.notification-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid #d5d9e0;
+}
+.notification a {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid #d5d9e0;
+}
+.notification a:hover .notification-sentence {
+  text-decoration: underline;
+}
+.notification-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.notification.unread .notification-sentence {
+  font-weight: 600;
+}
+.notification-excerpt,
+.notification-meta {
+  color: var(--muted);
+}
+.notification-meta {
+  font-size: 0.875rem;
+}
+.unread-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 8px;
+  background: var(--primary);
+  border-radius: 50%;
+}
+
 .projects-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

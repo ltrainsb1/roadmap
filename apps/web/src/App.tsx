@@ -11,6 +11,7 @@ import { RequireAuth } from './auth/RequireAuth.tsx';
 import { ResetPage } from './auth/ResetPage.tsx';
 import { AuditPage } from './audit/AuditPage.tsx';
 import { MembersPage } from './members/MembersPage.tsx';
+import { NotificationsPage } from './notifications/NotificationsPage.tsx';
 import { ProjectsPage } from './projects/ProjectsPage.tsx';
 import type { ProjectView } from './projects/ViewSwitcher.tsx';
 import { PickerPage } from './roadmaps/PickerPage.tsx';
@@ -128,6 +129,14 @@ export function App() {
             <Route path="snapshots" element={<SnapshotsPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>
+          <Route
+            path="/notifications"
+            element={
+              <RequireAuth>
+                <NotificationsPage />
+              </RequireAuth>
+            }
+          />
           <Route
             path="/settings/security"
             element={

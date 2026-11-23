@@ -1,7 +1,7 @@
 import { NOTIFICATION_TYPES, type EmailMode, type NotificationPrefs, type NotificationType } from '@roadmap/shared';
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { messageFor } from '../api/errors.ts';
+import { SETTINGS_LOAD_FAILED } from '../api/errors.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
@@ -225,7 +225,8 @@ function PrefsForm({ saved, timezone }: { saved: NotificationPrefs; timezone: st
           Save changes
         </Button>
         <div role="status" className="saved">
-          {status === 'saved' ? 'Saved.' : ''}
+          {/* A choice made while the save was on its way is not in it, so the screen is not what was saved. */}
+          {status === 'saved' && !dirty ? 'Saved.' : ''}
         </div>
       </form>
       {/* Outside the form: the dialog has a form of its own. */}
@@ -246,7 +247,7 @@ export function NotificationSettingsPage() {
       ) : (
         prefs.isError && (
           <>
-            <Alert>{messageFor(prefs.error)}</Alert>
+            <Alert>{SETTINGS_LOAD_FAILED}</Alert>
             <Button onClick={() => void prefs.refetch()}>Try again</Button>
           </>
         )

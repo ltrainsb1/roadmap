@@ -114,3 +114,6 @@ export const NOTIFICATIONS_LOAD_FAILED = "Couldn't load notifications. Try again
 
 /** "Mark all as read" failed. */
 export const NOTIFICATIONS_MARK_FAILED = "Couldn't mark notifications as read. Try again.";
+
+/** The email settings could not be fetched; a "Try again" button follows it. */
+export const SETTINGS_LOAD_FAILED = "Couldn't load your settings. Try again.";

@@ -171,6 +171,37 @@ test('FR-5.2: "Save changes" sends all four values and says "Saved."; a failure 
   expect(screen.queryByText('Saved.')).toBeNull();
 });
 
+test('FR-5.2: "Saved." shows only while the choices on screen are the ones saved', async () => {
+  let release: () => void = () => undefined;
+  serve(loaded(), (body) => new Promise((resolve) => (release = () => resolve(loaded(body)))));
+  renderPage();
+  await screen.findByRole('button', { name: 'Save changes' });
+  const unload = () => {
+    const e = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+
+  choose('Assigned to you', 'Off');
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() => expect(putCalls()).toHaveLength(1));
+  // Changed back while the save is on its way: the screen now differs from what that save stores.
+  choose('Assigned to you', 'Instantly');
+  expect(unload()).toBe(false);
+  release();
+  // Once the save lands, the screen has unsaved changes again, and "Saved." stays away.
+  await waitFor(() => expect(unload()).toBe(true));
+  expect(screen.getByRole('status').textContent).toBe('');
+  expect(checkedIn('Assigned to you')).toBe('instant');
+
+  // The next save stores what is on screen, and says so.
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() => expect(putCalls()).toHaveLength(2));
+  release();
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Saved.'));
+  expect(putCalls().map(([, o]) => (o as { body: NotificationPrefs }).body.assigned)).toEqual(['off', 'instant']);
+});
+
 test('FR-5.2: leaving with unsaved changes asks first, as the item form does', async () => {
   serve(loaded(), (body) => loaded(body));
   renderPage();
@@ -222,7 +253,7 @@ test('FR-5.2: settings that could not load say so, with "Try again"', async () =
     return fail ? Promise.reject(new ApiError(500, 'unknown')) : Promise.resolve(loaded());
   });
   renderPage();
-  expect((await screen.findByRole('alert')).textContent).toBe('Something went wrong. Try again.');
+  expect((await screen.findByRole('alert')).textContent).toBe("Couldn't load your settings. Try again.");
   expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
   fail = false;
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));

@@ -16,6 +16,7 @@ import { scoped } from '../src/db/scoped.ts';
 import type { AttachmentDoc, MembershipDoc, NoteDoc, ProjectDoc, RoadmapDoc, TenantDoc, UserDoc } from '../src/db/types.ts';
 import { MemoryObjectStore, type ObjectStore } from '../src/files/object-store.ts';
 import { FakeScanner, type Scanner } from '../src/files/scanner.ts';
+import { FakePdfRenderer, type PdfRenderer } from '../src/snapshots/pdf-renderer.ts';
 import { MemoryMailer } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
@@ -87,6 +88,8 @@ export interface TestApp {
   files: MemoryObjectStore;
   /** The app's virus scanner, unless `scanner` replaced it. */
   scanner: FakeScanner;
+  /** The app's PDF renderer, unless `pdfRenderer` replaced it. */
+  pdf: FakePdfRenderer;
   seed: Seeder;
   close(): Promise<void>;
 }
@@ -116,6 +119,16 @@ export interface TestAppOptions {
   maxConcurrentUploads?: number;
   /** Replaces how long the app waits for an upload's body. */
   uploadReadTimeoutMs?: number;
+  /** Replaces the per-roadmap snapshot limit. */
+  maxSnapshots?: number;
+  /** Replaces the most notes one snapshot may hold. */
+  maxSnapshotNotes?: number;
+  /** Replaces the fake PDF renderer the app is given (`TestApp.pdf` is then unused by the app). */
+  pdfRenderer?: PdfRenderer;
+  /** Replaces how many PDFs the app makes at once. */
+  maxPdfRenders?: number;
+  /** Wraps the database the app is given (seeding still uses the plain one), so a test can pause a query. */
+  wrapDb?: (db: Db) => Db;
 }
 
 // Argon2id (the default algorithm) at the minimum cost the library accepts.
@@ -143,12 +156,14 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   const mail = new MemoryMailer();
   const files = new MemoryObjectStore(config.appOrigin, opts.now);
   const scanner = new FakeScanner();
+  const pdf = new FakePdfRenderer();
   const app = await buildApp({
     config,
-    db,
+    db: opts.wrapDb ? opts.wrapDb(db) : db,
     mailer: mail,
     objectStore: opts.objectStore ?? files,
     scanner: opts.scanner ?? scanner,
+    pdfRenderer: opts.pdfRenderer ?? pdf,
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     ...(opts.webauthn ? { webauthn: opts.webauthn } : {}),
@@ -157,6 +172,9 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     ...(opts.maxFilesPerItem !== undefined ? { maxFilesPerItem: opts.maxFilesPerItem } : {}),
     ...(opts.maxConcurrentUploads !== undefined ? { maxConcurrentUploads: opts.maxConcurrentUploads } : {}),
     ...(opts.uploadReadTimeoutMs !== undefined ? { uploadReadTimeoutMs: opts.uploadReadTimeoutMs } : {}),
+    ...(opts.maxSnapshots !== undefined ? { maxSnapshots: opts.maxSnapshots } : {}),
+    ...(opts.maxSnapshotNotes !== undefined ? { maxSnapshotNotes: opts.maxSnapshotNotes } : {}),
+    ...(opts.maxPdfRenders !== undefined ? { maxPdfRenders: opts.maxPdfRenders } : {}),
   });
   opts.routes?.(app);
 
@@ -283,6 +301,7 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     mail,
     files,
     scanner,
+    pdf,
     seed,
     async close() {
       await app.close();

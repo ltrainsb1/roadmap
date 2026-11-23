@@ -57,24 +57,24 @@ export function wouldCycle(itemId: string, blockerIds: readonly string[], byId: 
   return false;
 }
 
-export interface TreeNode {
-  item: Project;
-  children: TreeNode[];
+export interface TreeNode<T = Project> {
+  item: T;
+  children: TreeNode<T>[];
   /** 1-based place among the siblings present. */
   position: number;
 }
 
-const byRankThenId = (a: Project, b: Project): number => a.rank - b.rank || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const byRankThenId = (a: { id: string; rank: number }, b: { id: string; rank: number }): number => a.rank - b.rank || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /** Roots first, children nested, each level sorted by rank then id. Items whose parent is missing are dropped. */
-export function buildTree(items: readonly Project[]): TreeNode[] {
-  const childrenOf = new Map<string | null, Project[]>();
+export function buildTree<T extends { id: string; parentId: string | null; rank: number }>(items: readonly T[]): TreeNode<T>[] {
+  const childrenOf = new Map<string | null, T[]>();
   for (const item of items) {
     const siblings = childrenOf.get(item.parentId);
     if (siblings) siblings.push(item);
     else childrenOf.set(item.parentId, [item]);
   }
-  const build = (parentId: string | null): TreeNode[] =>
+  const build = (parentId: string | null): TreeNode<T>[] =>
     (childrenOf.get(parentId) ?? [])
       .sort(byRankThenId)
       .map((item, index) => ({ item, children: build(item.id), position: index + 1 }));

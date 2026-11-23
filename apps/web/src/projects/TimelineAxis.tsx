@@ -19,7 +19,18 @@ function TickRow({ ticks, className }: { ticks: TimelineTick[]; className: strin
  * The Timeline's header row: "Name", then the dates over the schedule. Only the two column headings reach assistive
  * technology; every row says its own dates in words.
  */
-export function TimelineAxis({ range, zoom, today }: { range: TimelineRange; zoom: TimelineZoom; today: string }) {
+export function TimelineAxis({
+  range,
+  zoom,
+  today,
+  markerLabel = 'Today',
+}: {
+  range: TimelineRange;
+  zoom: TimelineZoom;
+  /** Where the marker sits: today in the app, the "as of" date in a snapshot. */
+  today: string;
+  markerLabel?: string;
+}) {
   const { major, minor } = timelineTicks(range, zoom);
   return (
     <thead>
@@ -33,7 +44,7 @@ export function TimelineAxis({ range, zoom, today }: { range: TimelineRange; zoo
             <TickRow ticks={major} className="axis-major" />
             {minor.length > 0 && <TickRow ticks={minor} className="axis-minor" />}
             <span className="today-label" style={{ left: xOf(today, range) }}>
-              Today
+              {markerLabel}
             </span>
           </div>
         </th>

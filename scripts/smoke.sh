@@ -3,7 +3,9 @@
 # By default it only reads: health, the page and its headers, and that /api/me needs a session.
 # SMOKE_WRITES=yes also runs the file checks, which WRITE to the stack: using the setup link's tenant (made by the
 #   bootstrap command) they set its person's password and authenticator, and create a roadmap, an item and two files
-#   (a third, the test virus, is refused). Run them only against a throwaway stack, never one with real data.
+#   (a third, the test virus, is refused). Then they share the roadmap as a snapshot, open it with its password,
+#   have the PDF service print it, check port 8080 (the PDF service's internal listener) does not answer, and revoke
+#   the snapshot. Run them only against a throwaway stack, never one with real data.
 # SMOKE_RESOLVE=host:port:address is passed to curl --resolve, for a stack that runs on another machine.
 # SMOKE_CONNECT_TO=host:port:host2:port2 is passed to curl --connect-to, so a download link that names a host the
 #   machine running this script can't resolve (minio:9000 in the smoke stack) still reaches it.
@@ -39,6 +41,8 @@ has_header() { printf '%s' "$headers" | grep -qi "^$1:"; }
 header_starts() { printf '%s' "$headers" | grep -qi "^$1"; }
 is_html() { printf '%s' "$headers" | grep -qi '^content-type:.*text/html'; }
 body_contains() { printf '%s' "$body" | grep -qF "$1"; }
+body_contains_in() { printf '%s' "$1" | grep -qF "$2"; }
+not() { ! "$@" 2> /dev/null; }
 # The string value of a top-level JSON field (no escapes in the values these checks read).
 json_field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\\([^\"]*\\)\".*/\\1/p"; }
 
@@ -186,5 +190,61 @@ head -c $((25 * 1024 * 1024)) /dev/zero > "$largest"
 res=$(api POST "$files_path" -F "file=@$largest;filename=largest.bin;type=application/octet-stream")
 check "upload a 25 MB file returns 201 (got $(status_of "$res"))" equals "$(status_of "$res")" 201
 
-if [[ "$failures" -gt 0 ]]; then echo "$failures check(s) failed"; exit 1; fi
-echo "smoke passed"
+# ---- Snapshots and PDFs (SMOKE_WRITES=yes): share the roadmap by link and password, print it through the PDF
+# service, then revoke it. The snapshot is revoked even when a check before that fails.
+
+snap_password="smoke-$(openssl rand -hex 12)"
+res=$(api_json POST "/api/roadmaps/$roadmap_id/snapshots" \
+  "{\"name\":\"Smoke snapshot\",\"asOf\":\"$(date -u +%F)\",\"password\":\"$snap_password\",\"expiresAt\":null,\"include\":{\"notes\":false,\"assignees\":false}}")
+snapshot_id=$(json_field "$(body_of "$res")" id)
+link_id=$(json_field "$(body_of "$res")" linkId)
+[[ "$(status_of "$res")" == 201 && -n "$snapshot_id" && -n "$link_id" ]] || fatal "create a snapshot (got $(status_of "$res"))"
+snap="/api/snapshots/$link_id"
+viewer="$work/viewer-cookies"
+# viewer METHOD PATH [curl args...]: as api, but as someone with no account: only the snapshot's own cookie.
+viewer() {
+  local method=$1 path=$2
+  shift 2
+  curl "${curl_args[@]}" -b "$viewer" -c "$viewer" -X "$method" -w '\n%{http_code}' "$@" "$base$path"
+}
+
+res=$(viewer GET "$snap")
+check "the snapshot link answers (got $(status_of "$res"))" equals "$(status_of "$res")" 200
+headers=$(curl "${curl_args[@]}" -D - -o /dev/null "$base/s/$link_id")
+check "the snapshot page says noindex, nofollow" header_starts 'x-robots-tag: noindex, nofollow'
+headers=$(curl "${curl_args[@]}" -D - -o /dev/null "$base$snap")
+check "the snapshot API says noindex, nofollow" header_starts 'x-robots-tag: noindex, nofollow'
+res=$(viewer GET "$snap/content")
+check "the snapshot's content needs its password first (got $(status_of "$res"))" equals "$(status_of "$res")" 401
+res=$(viewer POST "$snap/unlock" -H 'content-type: application/json' --data-binary "{\"password\":\"$snap_password\"}")
+check "the right password opens the snapshot (got $(status_of "$res"))" equals "$(status_of "$res")" 204
+res=$(viewer GET "$snap/content")
+check "the opened snapshot's content is readable (got $(status_of "$res"))" equals "$(status_of "$res")" 200
+check "the content is the roadmap's" body_contains_in "$(body_of "$res")" 'Smoke item'
+
+# Chromium in the PDF service prints the page from Caddy's internal listener; the API stores it and links to it.
+res=$(viewer POST "$snap/pdf" -H 'content-type: application/json' --data-binary '{"view":"list"}')
+check "the list PDF is made (got $(status_of "$res"))" equals "$(status_of "$res")" 200
+url=$(json_field "$(body_of "$res")" url)
+if [[ -n "$url" ]]; then
+  pdf="$work/snapshot.pdf"
+  curl "${curl_args[@]}" -o "$pdf" "$url"
+  check "the PDF's download link returns a PDF" equals "$(head -c 5 "$pdf" 2>/dev/null)" '%PDF-'
+else
+  check "the PDF request returned a download link" false
+fi
+
+# The internal listener (8080) is for the PDF service only: never published, so nothing answers it from here.
+host_port=${base#*://}
+host_port=${host_port%%/*}
+internal_host=${host_port%:*}
+internal_args=(-sS --max-time 10 -o /dev/null)
+if [[ -n "${SMOKE_RESOLVE:-}" ]]; then internal_args+=(--resolve "$internal_host:8080:${SMOKE_RESOLVE#*:*:}"); fi
+check "port 8080 does not answer from outside the stack" not curl "${internal_args[@]}" "http://$internal_host:8080/"
+
+res=$(api DELETE "/api/roadmaps/$roadmap_id/snapshots/$snapshot_id")
+check "revoke the snapshot (got $(status_of "$res"))" equals "$(status_of "$res")" 204
+res=$(viewer GET "$snap")
+check "the revoked snapshot's link is not found (got $(status_of "$res"))" equals "$(status_of "$res")" 404
+
+finish

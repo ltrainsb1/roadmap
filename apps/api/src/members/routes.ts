@@ -15,10 +15,11 @@ import { canEver, type PolicyContext } from '../policy/policy.ts';
 import type { ObjectStore } from '../files/object-store.ts';
 import { deleteContentOf, deleteStoredFiles } from '../projects/content.ts';
 import { roadmapParams } from '../params.ts';
+import { deleteSnapshots } from '../snapshots/store.ts';
 
 export interface MemberRouteDeps {
   now: () => Date;
-  /** Where the roadmap's files are; deleting the roadmap deletes them. */
+  /** Where the roadmap's files and snapshot PDFs are; deleting the roadmap deletes them. */
   objectStore: ObjectStore;
 }
 
@@ -243,6 +244,7 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
       const keys = await actor.db.withTransaction(async (s) => {
         // Later plans extend this with the other data that hangs off a roadmap.
         const { keys } = await deleteContentOf(s, { roadmapId });
+        const snapshots = await deleteSnapshots(s, { roadmapId });
         await s.collection('projects').deleteMany({ roadmapId });
         await s.collection('invites').deleteMany({ roadmapId });
         await s.collection('memberships').deleteMany({ roadmapId });
@@ -255,7 +257,7 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
           before: { name: roadmap.name },
           ip: req.ip,
         });
-        return keys;
+        return [...keys, ...snapshots.keys];
       });
       await deleteStoredFiles(deps.objectStore, keys, req.log);
       return reply.status(204).send(null);

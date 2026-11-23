@@ -26,6 +26,14 @@ describe('error messages', () => {
     ['other_tenant', 'This email belongs to a different organization. Ask the person who invited you to use another address.'],
     ['enroll_not_started', 'Start setting up your authenticator app again.'],
     ['mfa_required', 'Finish signing in first.'],
+    ['as_of_in_future', 'Choose today or an earlier date.'],
+    ['expiry_in_past', 'Choose a date after today.'],
+    ['expiry_too_far', 'Choose a date within two years.'],
+    ['too_many_snapshots', 'This roadmap already has 50 snapshots. Revoke one to create another.'],
+    ['too_many_notes', 'This roadmap has more than 5,000 notes. Create the snapshot without notes.'],
+    ['wrong_password', "That password isn't right."],
+    ['snapshot_locked', 'Too many wrong passwords. Try again in 15 minutes.'],
+    ['rate_limited', 'Too many attempts. Wait a minute and try again.'],
     ['something_new', 'Something went wrong. Try again.'],
   ])('%s', (code, text) => {
     expect(errorMessage(code)).toBe(text);

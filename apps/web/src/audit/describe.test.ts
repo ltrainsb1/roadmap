@@ -154,4 +154,15 @@ describe('describeAuditEvent', () => {
       'Maria tried to add a file that failed the virus check.',
     );
   });
+
+  test('FR-3.1: snapshot events say a snapshot was created, revoked, opened or locked, without its name or link', () => {
+    const target = { type: 'snapshot', id: 's1' } as const;
+    expect(describeAuditEvent(event({ action: 'snapshot.create', target, after: { name: 'Board pack' } }), nameOf)).toBe('Maria created a snapshot.');
+    expect(describeAuditEvent(event({ action: 'snapshot.revoke', target, before: { name: 'Board pack' } }), nameOf)).toBe('Maria revoked a snapshot.');
+    const system = { type: 'system' } as const;
+    expect(describeAuditEvent(event({ action: 'snapshot.access', actor: system, target }), nameOf)).toBe('A snapshot was opened.');
+    expect(describeAuditEvent(event({ action: 'snapshot.locked', actor: system, target }), nameOf)).toBe(
+      'A snapshot link was locked after too many wrong passwords.',
+    );
+  });
 });

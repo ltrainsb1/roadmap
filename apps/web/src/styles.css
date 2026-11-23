@@ -1496,3 +1496,372 @@ select {
 .note-box .alert {
   margin-bottom: 8px;
 }
+
+/* Snapshots: a create button, then one card per snapshot. */
+.snapshot-create {
+  margin-bottom: 16px;
+}
+.snapshot-error {
+  margin-bottom: 16px;
+}
+.snapshot-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.snapshot-card {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border: 1px solid #d5d9e0;
+  border-radius: 6px;
+}
+.snapshot-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+}
+.snapshot-head h2 {
+  margin: 0;
+  /* A name can be one long word. */
+  overflow-wrap: anywhere;
+}
+.snapshot-facts {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+.snapshot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+a.btn {
+  text-decoration: none;
+}
+.dialog-extra {
+  margin-bottom: 16px;
+}
+/* A hint under a checkbox lines up with its label. */
+.check-hint {
+  margin: -12px 0 8px 32px;
+}
+
+/* The snapshot viewer (FR-3.2, FR-3.3): pages for people with a link and a password, with no app header. */
+.viewer-card {
+  margin-top: 8vh;
+  padding: 24px;
+  border: 1px solid #d5d9e0;
+  border-radius: 8px;
+}
+.viewer-card h1 {
+  overflow-wrap: anywhere;
+}
+.viewer-help {
+  margin: 16px 0 0;
+  color: var(--muted);
+}
+.snapshot-page {
+  padding-top: 16px;
+}
+.snapshot-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0 16px;
+  margin-bottom: 8px;
+}
+.snapshot-heading {
+  min-width: 0;
+}
+.snapshot-header h1 {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.snapshot-as-of {
+  margin-bottom: 16px;
+  color: var(--muted);
+}
+.snapshot-zoom {
+  max-width: 12rem;
+}
+/* A title that opens its details: it reads as the row's link, and is a 44 px target. */
+.snapshot-title {
+  min-height: var(--control-height);
+  padding: 10px 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--primary);
+  text-align: left;
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.snapshot-list .item-title {
+  overflow-wrap: anywhere;
+}
+.details-row > td {
+  padding: 8px 16px 16px;
+  background: var(--surface);
+}
+.snapshot-details {
+  max-width: 48rem;
+}
+.details-part {
+  margin-top: 12px;
+}
+.details-part h2 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+.details-part ul {
+  margin: 0;
+  padding-inline-start: 20px;
+}
+.details-part .details-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0;
+  list-style: none;
+}
+.details-part a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height);
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+/* Plain text as written: line breaks kept, long words broken. */
+.plain-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.details-part.notes-section {
+  margin-top: 16px;
+  padding-top: 12px;
+}
+/* Below 600 px each item is a card: its name, then each fact with its column's name before it. */
+@media (max-width: 599px) {
+  .snapshot-list thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .snapshot-list,
+  .snapshot-list tbody,
+  .snapshot-list tr,
+  .snapshot-list th,
+  .snapshot-list td {
+    display: block;
+  }
+  .snapshot-list tr {
+    margin-bottom: 8px;
+    padding: 4px 12px 8px;
+    border: 1px solid #d5d9e0;
+    border-radius: 6px;
+  }
+  .snapshot-list tr.details-open {
+    margin-bottom: 0;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
+  .snapshot-list tr.details-row {
+    padding: 0;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+  }
+  .snapshot-list th,
+  .snapshot-list td {
+    padding: 2px 0;
+    border: none;
+  }
+  .snapshot-list td[data-label] {
+    display: flex;
+    gap: 12px;
+  }
+  .snapshot-list td[data-label]::before {
+    flex: none;
+    width: 6.5rem;
+    color: var(--muted);
+    content: attr(data-label);
+  }
+  .snapshot-list .details-row > td {
+    padding: 4px 12px 12px;
+  }
+  .snapshot-list tr.depth-2 {
+    margin-inline-start: 12px;
+  }
+  .snapshot-list tr.depth-3 {
+    margin-inline-start: 24px;
+  }
+  .snapshot-list tr.depth-4 {
+    margin-inline-start: 36px;
+  }
+  .snapshot-list .depth-2 .name,
+  .snapshot-list .depth-3 .name,
+  .snapshot-list .depth-4 .name {
+    padding-inline-start: 0;
+  }
+}
+
+/* Download PDF (FR-3.4): beside the views, and its status or message under the header. */
+.snapshot-pdf {
+  margin-bottom: 16px;
+}
+.snapshot-pdf[aria-disabled='true'] {
+  color: var(--muted);
+  cursor: progress;
+}
+.snapshot-pdf-status {
+  margin: 0 0 16px;
+}
+.snapshot-pdf-status:empty {
+  margin: 0;
+}
+
+/* The print pages (FR-3.4): what the PDF service prints on A4 landscape with 12 mm margins, about 1,030 px wide. The
+   list has every item open; the timeline is a 240 px name column and exactly 760 px of schedule. */
+.print-page {
+  padding: 0;
+  /* Joined letters such as "ff" become one glyph in some fonts, and a PDF reader then splits the word ("Kick-o ff")
+     when text is searched or copied. Plain letters keep the PDF's text whole. */
+  font-variant-ligatures: none;
+}
+.print-page .snapshot-heading {
+  margin-bottom: 12px;
+}
+.print-page h1 {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.print-page .snapshot-as-of {
+  margin: 0;
+}
+.print-note {
+  margin: 0;
+  color: var(--muted);
+}
+.print-list {
+  font-size: 0.875rem;
+}
+/* Compact, so a long snapshot takes fewer pages. */
+.print-list th,
+.print-list td {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.print-list tr:not(.details-row) .name-cell {
+  width: 40%;
+  font-weight: 600;
+}
+.print-list .details-part {
+  margin-top: 4px;
+}
+.print-list .details-part h2 {
+  margin-bottom: 0;
+  font-size: 0.875rem;
+}
+.print-list .details-part.notes-section {
+  margin-top: 6px;
+  padding-top: 4px;
+}
+.print-list .note-threads {
+  margin-bottom: 0;
+}
+.print-list .note-thread + .note-thread {
+  margin-top: 4px;
+}
+.print-list .note {
+  padding: 2px 0;
+}
+.print-list .note-meta {
+  margin-bottom: 0;
+}
+.print-list .note-meta time,
+.print-list .note-edited {
+  font-size: 0.8125rem;
+}
+.print-list .note p {
+  margin: 0;
+}
+.print-list thead th {
+  border-bottom: 2px solid #d5d9e0;
+}
+.print-list .details-row > td {
+  padding: 0 16px 8px;
+}
+.print-list .details-row .snapshot-details {
+  max-width: none;
+}
+.print-list tr.details-open > th,
+.print-list tr.details-open > td {
+  border-bottom: none;
+}
+/* Links can't be followed on paper: plain text with the address after it. */
+.print-page .details-part a {
+  display: inline;
+  min-height: 0;
+}
+.link-address {
+  overflow-wrap: anywhere;
+}
+.print-timeline .name-col,
+.print-timeline .name-cell {
+  position: static;
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
+}
+.print-timeline .name-cell {
+  height: 32px;
+  font-size: 0.875rem;
+}
+.print-timeline .name {
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+.print-status {
+  color: var(--muted);
+}
+.print-timeline .schedule-col,
+.print-timeline .track-cell {
+  width: 760px;
+  min-width: 760px;
+  max-width: 760px;
+}
+@media print {
+  body {
+    background: #ffffff;
+  }
+  /* Each page starts with the table's column headings. */
+  .print-page thead {
+    display: table-header-group;
+  }
+  /* An item's row, a note and a part of an item's details stay on one page when they fit on one, and an item stays
+     with its details. A details row itself may run on to the next page, between its parts and notes. */
+  .print-page tr:not(.details-row),
+  .print-page .note,
+  .print-page .details-part:not(.notes-section),
+  .print-page .details-part > h2 {
+    break-inside: avoid;
+  }
+  .print-page tr.details-open,
+  .print-page .details-part > h2 {
+    break-after: avoid;
+  }
+}
+/* With nothing above them, an item's notes need no rule to set them apart. */
+.print-list .snapshot-details > .notes-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}

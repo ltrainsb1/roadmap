@@ -9,6 +9,10 @@ import type {
   ResetTokenDoc,
   RoadmapDoc,
   SessionDoc,
+  SnapshotDoc,
+  SnapshotItemDoc,
+  SnapshotNoteDoc,
+  SnapshotSessionDoc,
   UserDoc,
 } from './types.ts';
 
@@ -21,7 +25,11 @@ export type CollectionName =
   | 'attachments'
   | 'sessions'
   | 'invites'
-  | 'resetTokens';
+  | 'resetTokens'
+  | 'snapshots'
+  | 'snapshotItems'
+  | 'snapshotNotes'
+  | 'snapshotSessions';
 
 interface DocMap {
   users: UserDoc;
@@ -33,6 +41,10 @@ interface DocMap {
   sessions: SessionDoc;
   invites: InviteDoc;
   resetTokens: ResetTokenDoc;
+  snapshots: SnapshotDoc;
+  snapshotItems: SnapshotItemDoc;
+  snapshotNotes: SnapshotNoteDoc;
+  snapshotSessions: SnapshotSessionDoc;
 }
 export type DocFor<N extends CollectionName> = DocMap[N];
 
@@ -40,6 +52,8 @@ export interface ScopedCollection<T extends { tenantId: string }> {
   findOne(filter: Filter<T>): Promise<T | null>;
   find(filter: Filter<T>, opts?: { sort?: Sort; limit?: number }): Promise<T[]>;
   insertOne(doc: Omit<T, 'tenantId'>): Promise<T>;
+  /** Inserts every doc with this tenant's id; an empty array writes nothing. */
+  insertMany(docs: Array<Omit<T, 'tenantId'>>): Promise<void>;
   updateOne(filter: Filter<T>, update: UpdateFilter<T>): Promise<{ matched: number }>;
   updateMany(filter: Filter<T>, update: UpdateFilter<T>): Promise<{ matched: number }>;
   findOneAndUpdate(filter: Filter<T>, update: UpdateFilter<T>): Promise<T | null>;
@@ -120,6 +134,11 @@ function makeScoped(db: Db, tenantId: string, session?: ClientSession): ScopedDb
         const full = { ...doc, tenantId } as unknown as T;
         await col.insertOne(full as never, opts);
         return full;
+      },
+      async insertMany(docs) {
+        if (docs.length === 0) return;
+        assertNoForeignTenant(docs, tenantId, 'doc');
+        await col.insertMany(docs.map((doc) => ({ ...doc, tenantId })) as never, opts);
       },
       async updateOne(filter, update) {
         assertUpdateSafe(update, tenantId);

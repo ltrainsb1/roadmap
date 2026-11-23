@@ -90,6 +90,14 @@ export function describeAuditEvent(e: AuditEvent, nameOf: (userId: string) => st
       return `${who} removed a file.`;
     case 'attachment.rejected':
       return `${who} tried to add a file that failed the virus check.`;
+    case 'snapshot.create':
+      return `${who} created a snapshot.`;
+    case 'snapshot.revoke':
+      return `${who} revoked a snapshot.`;
+    case 'snapshot.access':
+      return 'A snapshot was opened.';
+    case 'snapshot.locked':
+      return 'A snapshot link was locked after too many wrong passwords.';
     default:
       return `${who} made a change: ${e.action}.`;
   }

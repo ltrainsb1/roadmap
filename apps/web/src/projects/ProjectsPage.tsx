@@ -13,7 +13,7 @@ import { SelectField } from '../ui/SelectField.tsx';
 import { FILTERS_PANEL_ID, FiltersPanel } from './FiltersPanel.tsx';
 import { BoardView } from './BoardView.tsx';
 import { filtersForReader, filtersFromSearch, hasNarrowing, searchFor, viewOf, viewOptionsFromSearch, type ViewOptions } from './filters.ts';
-import { levelPlural } from './names.ts';
+import { levelPlural, ZOOM_NAMES } from './names.ts';
 import { actionsButtonId } from './itemParts.tsx';
 import {
   NEW_PROJECT_BUTTON_ID,
@@ -35,7 +35,6 @@ import { viewPath, ViewSwitcher, type ProjectView } from './ViewSwitcher.tsx';
 
 const FILTERS_BUTTON_ID = 'filters-button';
 const SEARCH_ID = 'project-search';
-const ZOOM_NAMES: Record<TimelineZoom, string> = { weeks: 'Weeks', months: 'Months', quarters: 'Quarters' };
 const LEVELS: readonly ViewOptions['level'][] = [1, 2, 3, 4];
 
 /** The items of one roadmap in one view, with the search, filters, view switcher and the item panel. */

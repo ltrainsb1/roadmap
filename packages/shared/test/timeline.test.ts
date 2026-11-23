@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { barFor, dayNumber, timelineRange, timelineTicks, xOf, type Project } from '../src/index.ts';
+import { barFor, dayNumber, fitTimeline, timelineRange, timelineTicks, xOf, type Project } from '../src/index.ts';
 
 const make = (id: string, over: Partial<Project> = {}): Project => ({
   id,
@@ -134,5 +134,18 @@ describe('timeline maths', () => {
     expect(at('2027-01-10', '2027-01-20').start).toBe('2026-12-01');
     expect(at('2027-12-01', '2027-12-10').end).toBe('2028-01-31');
     expect(at('2027-12-01', '2028-01-15').end).toBe('2028-02-29');
+  });
+});
+
+describe('fitTimeline', () => {
+  test('FR-3.4: fitTimeline scales the whole range to the width and picks the zoom by span', () => {
+    const item = (startDate: string, endDate: string) => ({ startDate, endDate, milestones: [] });
+    const short = fitTimeline([item('2026-03-10', '2026-03-20')], '2026-03-15', 700);
+    expect(short.zoom).toBe('weeks');
+    expect(short.range.days).toBe(timelineRange([item('2026-03-10', '2026-03-20')], '2026-03-15', 'weeks').days);
+    expect(short.range.width).toBeCloseTo(700, 3);
+    expect(short.range.width).toBeLessThanOrEqual(700);
+    expect(fitTimeline([item('2026-01-01', '2026-12-31')], '2026-06-01', 700).zoom).toBe('months');
+    expect(fitTimeline([item('2026-01-01', '2030-12-31')], '2026-06-01', 700).zoom).toBe('quarters');
   });
 });

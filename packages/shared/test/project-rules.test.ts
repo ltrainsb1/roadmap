@@ -289,3 +289,11 @@ describe('treeOrder', () => {
     expect([...order]).toEqual([['A', 0], ['A1', 1], ['A2', 2], ['B', 3]]);
   });
 });
+
+describe('buildTree over any shape', () => {
+  test('FR-3.3: buildTree nests any item that has id, parentId and rank', () => {
+    const tree = buildTree([{ id: 'b', parentId: 'a', rank: 0 }, { id: 'a', parentId: null, rank: 0 }]);
+    expect(tree.map((n) => n.item.id)).toEqual(['a']);
+    expect(tree[0]!.children.map((n) => n.item.id)).toEqual(['b']);
+  });
+});

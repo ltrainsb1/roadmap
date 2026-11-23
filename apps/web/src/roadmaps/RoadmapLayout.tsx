@@ -65,7 +65,9 @@ export function RoadmapLayout() {
         value={roadmapId}
         onChange={(e) => {
           const target = roadmaps.data.find((r) => r.roadmapId === e.target.value);
-          const keep = target && section === '/audit' && !can({ role: target.role, action: 'audit.view' }) ? '/projects' : section;
+          // A staff-only tab is kept only where the person is staff too.
+          const staffOnly = (section === '/audit' && 'audit.view') || (section === '/snapshots' && 'snapshot.create');
+          const keep = target && staffOnly && !can({ role: target.role, action: staffOnly }) ? '/projects' : section;
           void navigate(`/r/${encodeURIComponent(e.target.value)}${keep}`);
         }}
       >
@@ -85,6 +87,7 @@ export function RoadmapLayout() {
           Projects
         </Link>
         <NavLink to={`${base}/members`}>Members</NavLink>
+        {can({ role: current.role, action: 'snapshot.create' }) && <NavLink to={`${base}/snapshots`}>Snapshots</NavLink>}
         {can({ role: current.role, action: 'audit.view' }) && <NavLink to={`${base}/audit`}>Audit log</NavLink>}
       </nav>
       <Outlet context={{ roadmapId, roadmapName: current.roadmapName, role: current.role } satisfies RoadmapContext} />

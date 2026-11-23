@@ -2,7 +2,9 @@
 	order rate_limit before basicauth
 }
 
-{$DOMAIN} {
+# Everything a site does: the headers, the API behind /api and the web app's files. The public site and the
+# internal listener below both import it, so the PDF service sees exactly the pages people see.
+(app) {
 	header {
 		# The same policy the API sends (apps/api/src/app.ts).
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
@@ -12,6 +14,10 @@
 		-Server
 	}
 
+	# Snapshots are shared by link; search engines must not list them.
+	@snapshot path /s/* /api/snapshots/*
+	header @snapshot X-Robots-Tag "noindex, nofollow"
+
 	handle /api/* {
 		rate_limit {
 			zone api {
@@ -19,9 +25,13 @@
 				events 100
 				window 1m
 			}
+			# Sign-in and a snapshot's password: the same strict limit. Two match blocks: either one counts.
 			zone auth {
 				match {
 					path /api/auth/*
+				}
+				match {
+					path_regexp ^/api/snapshots/[^/]+/unlock$
 				}
 				key {remote_host}
 				events 10
@@ -52,4 +62,18 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+{$DOMAIN} {
+	import app
+}
+
+# The PDF service's origin (RENDER_ORIGIN=http://caddy:8080): plain HTTP, on an internal network only the PDF
+# service shares with Caddy. The port is never published, and Caddy listens on it only at its address on that
+# network (caddy-render, an alias the compose file gives it there), so no other container reaches it either.
+# The render token travels in a request header, not a cookie, so no TLS is needed here.
+http://:8080 {
+	# Every render comes from the one PDF container, so all of them share one address and one rate-limit budget.
+	bind caddy-render
+	import app
 }

@@ -3,6 +3,7 @@ import type {
   InviteDoc,
   ResetTokenDoc,
   SessionDoc,
+  SnapshotDoc,
   TenantDoc,
   UserDoc,
   WebauthnChallengeDoc,
@@ -16,6 +17,7 @@ export function unscoped(db: Db) {
   const resets = db.collection<ResetTokenDoc>('resetTokens');
   const challenges = db.collection<WebauthnChallengeDoc>('webauthnChallenges');
   const tenants = db.collection<TenantDoc>('tenants');
+  const snapshots = db.collection<SnapshotDoc>('snapshots');
 
   return {
     findUserByEmail: (email: string): Promise<UserDoc | null> => users.findOne({ email }),
@@ -32,6 +34,8 @@ export function unscoped(db: Db) {
       challenges.findOneAndDelete({ _id: id }),
     findUserByCredentialId: (id: string): Promise<UserDoc | null> =>
       users.findOne({ 'passkeys.credentialId': id }),
+    /** A viewer opening a snapshot link: the tenant is known only once the snapshot is found. */
+    findSnapshotByLinkId: (linkId: string): Promise<SnapshotDoc | null> => snapshots.findOne({ linkId }),
     async insertTenant(t: TenantDoc): Promise<void> {
       await tenants.insertOne(t);
     },

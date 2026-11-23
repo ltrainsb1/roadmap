@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { Fragment, useEffect, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setUnauthorizedHandler } from './api/client.ts';
 import { EnrollTotpPage } from './auth/EnrollTotpPage.tsx';
@@ -16,6 +16,10 @@ import type { ProjectView } from './projects/ViewSwitcher.tsx';
 import { PickerPage } from './roadmaps/PickerPage.tsx';
 import { RoadmapIndex, RoadmapLayout } from './roadmaps/RoadmapLayout.tsx';
 import { SecurityPage } from './settings/SecurityPage.tsx';
+import { SnapshotsPage } from './snapshots/SnapshotsPage.tsx';
+import { LinkProblem, SnapshotGate, ToSnapshotGate } from './viewer/SnapshotGate.tsx';
+import { PrintPage } from './viewer/PrintPage.tsx';
+import { SnapshotLayout } from './viewer/SnapshotLayout.tsx';
 
 const queryClient = new QueryClient();
 
@@ -39,6 +43,12 @@ function ProjectsRoute({ view }: { view: ProjectView }) {
   return <ProjectsPage key={roadmapId} view={view} />;
 }
 
+/** Keyed by link, so a password typed or a branch collapsed for one snapshot never carries over to another. */
+function PerLink({ children }: { children: ReactNode }) {
+  const { linkId } = useParams();
+  return <Fragment key={linkId}>{children}</Fragment>;
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -57,6 +67,43 @@ export function App() {
           <Route path="/forgot" element={<ForgotPage />} />
           <Route path="/reset/:token" element={<ResetPage />} />
           <Route path="/invite/:token" element={<InvitePage />} />
+          {/*
+            A snapshot's pages, for people with a link and a password and no account: outside RequireAuth, with no app
+            header, and every call quiet, so nothing here ever sends anyone to sign in. Any other address under /s
+            stays under /s rather than falling to the catch-all below.
+          */}
+          <Route
+            path="/s/:linkId"
+            element={
+              <PerLink>
+                <SnapshotGate />
+              </PerLink>
+            }
+          />
+          <Route
+            path="/s/:linkId/list"
+            element={
+              <PerLink>
+                <SnapshotLayout view="list" />
+              </PerLink>
+            }
+          />
+          <Route
+            path="/s/:linkId/timeline"
+            element={
+              <PerLink>
+                <SnapshotLayout view="timeline" />
+              </PerLink>
+            }
+          />
+          {/*
+            What the PDF service prints, opened with a render token: one content call, no password page. Any other
+            view under /print goes to the password page with the rest.
+          */}
+          <Route path="/s/:linkId/print/list" element={<PrintPage view="list" />} />
+          <Route path="/s/:linkId/print/timeline" element={<PrintPage view="timeline" />} />
+          <Route path="/s/:linkId/*" element={<ToSnapshotGate />} />
+          <Route path="/s" element={<LinkProblem kind="not_found" />} />
           <Route
             path="/"
             element={
@@ -78,6 +125,7 @@ export function App() {
             <Route path="timeline/:projectId?" element={<ProjectsRoute view="timeline" />} />
             <Route path="board/:projectId?" element={<ProjectsRoute view="board" />} />
             <Route path="members" element={<MembersPage />} />
+            <Route path="snapshots" element={<SnapshotsPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>
           <Route

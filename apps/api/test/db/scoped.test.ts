@@ -130,6 +130,21 @@ describe('scoped', () => {
     expect(await a.findOne({ _id: 'u1' })).toMatchObject({ name: 'N', tenantId: 'A' });
   });
 
+  test('Tenant isolation: insertMany stamps the tenant, writes nothing for an empty array, and rejects another tenant', async () => {
+    const a = scoped(db, 'A').collection('users');
+    await a.insertMany([]);
+    await a.insertMany([user('m1', 'm1@x.com'), user('m2', 'm2@x.com')]);
+    const stored = await db.collection<{ _id: string; tenantId: string }>('users').find({}).sort({ _id: 1 }).toArray();
+    expect(stored.map((u) => [u._id, u.tenantId])).toEqual([
+      ['m1', 'A'],
+      ['m2', 'A'],
+    ]);
+    await expect(a.insertMany([user('m3', 'm3@x.com'), { ...user('m4', 'm4@x.com'), tenantId: 'B' } as never])).rejects.toThrow(
+      /tenantId/,
+    );
+    expect(await db.collection('users').countDocuments({})).toBe(2);
+  });
+
   test('audit collection exposes no update or delete', async () => {
     const audit = scoped(db, 'A').audit;
     expect('updateOne' in audit).toBe(false);
@@ -196,6 +211,10 @@ describe('unscoped', () => {
     await db.collection('users').updateOne({ _id: 'u1' as never }, { $set: { passkeys: [{ credentialId: 'cred1' }] } });
     expect((await un.findUserByCredentialId('cred1'))?._id).toBe('u1');
     expect(await un.findUserByCredentialId('nope')).toBeNull();
+
+    await db.collection('snapshots').insertOne({ _id: 'snap1' as never, tenantId: 'A', linkId: 'link1' });
+    expect(await un.findSnapshotByLinkId('link1')).toMatchObject({ _id: 'snap1', tenantId: 'A' });
+    expect(await un.findSnapshotByLinkId('nope')).toBeNull();
   });
 });
 
@@ -203,7 +222,21 @@ describe('ensureIndexes', () => {
   test('ensureIndexes creates tenant-first indexes and the audit TTL', async () => {
     await ensureIndexes(db);
     await ensureIndexes(db); // idempotent
-    const names = ['users', 'memberships', 'roadmaps', 'sessions', 'invites', 'resetTokens', 'auditEvents', 'webauthnChallenges', 'attachments'];
+    const names = [
+      'users',
+      'memberships',
+      'roadmaps',
+      'sessions',
+      'invites',
+      'resetTokens',
+      'auditEvents',
+      'webauthnChallenges',
+      'attachments',
+      'snapshots',
+      'snapshotItems',
+      'snapshotNotes',
+      'snapshotSessions',
+    ];
     const exceptions = new Set([
       'users.email',
       'sessions.tokenHash',
@@ -211,6 +244,8 @@ describe('ensureIndexes', () => {
       'resetTokens.tokenHash',
       'webauthnChallenges._id',
       'users.passkeys.credentialId',
+      'snapshots.linkId',
+      'snapshotSessions.tokenHash',
     ]);
     const all: Record<string, Awaited<ReturnType<ReturnType<Db['collection']>['indexes']>>> = {};
     for (const n of names) {
@@ -227,7 +262,7 @@ describe('ensureIndexes', () => {
     const find = (c: string, key: Record<string, number>) =>
       all[c]!.find((i) => JSON.stringify(i.key) === JSON.stringify(key));
     expect(find('auditEvents', { timestamp: 1 })?.expireAfterSeconds).toBe(2592000);
-    for (const c of ['sessions', 'resetTokens', 'webauthnChallenges']) {
+    for (const c of ['sessions', 'resetTokens', 'webauthnChallenges', 'snapshotSessions']) {
       expect(find(c, { expiresAt: 1 })?.expireAfterSeconds).toBe(0);
     }
     const m = find('memberships', { tenantId: 1, roadmapId: 1, userId: 1 });
@@ -236,5 +271,11 @@ describe('ensureIndexes', () => {
     expect(find('attachments', { tenantId: 1, projectId: 1, createdAt: 1 })).toBeDefined();
     expect(find('attachments', { tenantId: 1, roadmapId: 1 })).toBeDefined();
     expect(find('users', { 'passkeys.credentialId': 1 })?.sparse).toBe(true);
+    expect(find('snapshots', { linkId: 1 })?.unique).toBe(true);
+    expect(find('snapshotSessions', { tokenHash: 1 })?.unique).toBe(true);
+    expect(find('snapshots', { tenantId: 1, roadmapId: 1, createdAt: -1 })).toBeDefined();
+    expect(find('snapshotItems', { tenantId: 1, snapshotId: 1 })).toBeDefined();
+    expect(find('snapshotNotes', { tenantId: 1, snapshotId: 1, itemId: 1, createdAt: 1 })).toBeDefined();
+    expect(find('snapshotSessions', { tenantId: 1, snapshotId: 1 })).toBeDefined();
   });
 });

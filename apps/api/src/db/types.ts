@@ -1,4 +1,4 @@
-import type { Milestone, PriorityLabel, ProjectLink, ProjectStatus, Role } from '@roadmap/shared';
+import type { Milestone, PriorityLabel, ProjectLink, ProjectStatus, Role, SnapshotItem } from '@roadmap/shared';
 
 // _id is a UUID v7 string. Every doc except TenantDoc and WebauthnChallengeDoc carries tenantId.
 // Later tasks add their fields to these types.
@@ -63,6 +63,8 @@ export interface RoadmapDoc {
   membershipRevision?: number;
   /** Bumped by every reorder that writes, so two reorders in one roadmap conflict and run one after the other. */
   orderRevision?: number;
+  /** Bumped by every snapshot create, so concurrent creates (and a create and the roadmap's delete) conflict and run one after the other. */
+  snapshotRevision?: number;
   createdAt: Date;
 }
 
@@ -130,6 +132,67 @@ export interface AttachmentDoc {
   key: string;
   uploadedById: string;
   createdAt: Date;
+}
+
+export interface SnapshotDoc {
+  _id: string;
+  tenantId: string;
+  roadmapId: string;
+  /** The secret part of the snapshot's link; stored as it is so Admins can copy the link again. */
+  linkId: string;
+  name: string;
+  /** The date label the Admin chose, YYYY-MM-DD. */
+  asOf: string;
+  roadmapName: string;
+  include: { notes: boolean; assignees: boolean };
+  passwordHash: string;
+  expiresAt: Date | null;
+  itemCount: number;
+  noteCount: number;
+  failedUnlocks: number;
+  lockedUntil: Date | null;
+  openCount: number;
+  lastOpenedAt: Date | null;
+  /** Object-store keys of the PDFs made so far. */
+  pdfs: { list?: string; timeline?: string };
+  createdBy: string;
+  createdAt: Date;
+}
+
+/** One frozen item. `itemId` is the live item's id, which `parentId` and `blockedBy` refer to. */
+export interface SnapshotItemDoc extends Omit<SnapshotItem, 'id'> {
+  _id: string;
+  tenantId: string;
+  roadmapId: string;
+  snapshotId: string;
+  itemId: string;
+}
+
+/** One frozen note. `noteId` is the live note's id, which a reply's `parentId` refers to. */
+export interface SnapshotNoteDoc {
+  _id: string;
+  tenantId: string;
+  roadmapId: string;
+  snapshotId: string;
+  itemId: string;
+  noteId: string;
+  parentId: string | null;
+  authorName: string | null;
+  body: string;
+  /** Names of the people mentioned. */
+  mentions: string[];
+  createdAt: Date;
+  edited: boolean;
+  deleted: boolean;
+}
+
+export interface SnapshotSessionDoc {
+  _id: string;
+  tenantId: string;
+  snapshotId: string;
+  tokenHash: string;
+  kind: 'viewer' | 'render';
+  expiresAt: Date;
 }
 
 export interface SessionDoc {

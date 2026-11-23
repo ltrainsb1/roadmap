@@ -1,7 +1,7 @@
-import { buildTree, type SnapshotContent, type SnapshotItem, type TreeNode } from '@roadmap/shared';
+import { buildTree, formatDates, type SnapshotContent, type SnapshotItem, type TreeNode } from '@roadmap/shared';
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Chevron } from '../projects/itemParts.tsx';
-import { formatDates, levelName, statusName } from '../projects/names.ts';
+import { levelName, statusName } from '../projects/names.ts';
 import { hasDetails, SnapshotItemDetails } from './SnapshotItemDetails.tsx';
 
 /** Adds `id` to the set if it is not there, takes it out if it is. */

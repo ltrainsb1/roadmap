@@ -35,14 +35,6 @@ export const formatDay = (date: string): string => formatDayUtc(date);
 /** A milestone as "Milestone: Beta, 3 Mar 2027". */
 export const formatMilestone = (m: { name: string; date: string }): string => `Milestone: ${m.name}, ${formatDay(m.date)}`;
 
-/** Start and end dates (`YYYY-MM-DD` or null) as one phrase: "3 Mar to 28 Apr 2027", "From 3 Mar 2027", "Until 28 Apr 2027", "No dates". */
-export function formatDates(start: string | null, end: string | null): string {
-  if (start && end) return `${formatDayUtc(start, { year: start.slice(0, 4) !== end.slice(0, 4) })} to ${formatDay(end)}`;
-  if (start) return `From ${formatDay(start)}`;
-  if (end) return `Until ${formatDay(end)}`;
-  return 'No dates';
-}
-
 /** The sentence for one warning, naming the other item by its title. */
 export function warningText(warning: ProjectWarning, byId: ReadonlyMap<string, Project>): string {
   if (warning.kind === 'outside_parent') return `Dates fall outside ${byId.get(warning.parentId)?.title ?? 'the parent'}'s dates.`;

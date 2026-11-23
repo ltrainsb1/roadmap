@@ -1,7 +1,7 @@
-import { buildTree, fitTimeline, type SnapshotContent, type SnapshotItem, type SnapshotNote, type SnapshotView, type TreeNode } from '@roadmap/shared';
+import { buildTree, formatDates, fitTimeline, type SnapshotContent, type SnapshotItem, type SnapshotNote, type SnapshotView, type TreeNode } from '@roadmap/shared';
 import { Component, Fragment, useEffect, useMemo, type ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
-import { formatDates, formatDay, levelName, statusName } from '../projects/names.ts';
+import { formatDay, levelName, statusName } from '../projects/names.ts';
 import { TimelineAxis } from '../projects/TimelineAxis.tsx';
 import { Track } from '../projects/timelineParts.tsx';
 import { hasDetails, SnapshotItemDetails } from './SnapshotItemDetails.tsx';

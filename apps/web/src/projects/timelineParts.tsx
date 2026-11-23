@@ -1,5 +1,5 @@
-import { barFor, xOf, type Project, type TimelineRange } from '@roadmap/shared';
-import { formatDates, formatMilestone } from './names.ts';
+import { barFor, formatDates, xOf, type Project, type TimelineRange } from '@roadmap/shared';
+import { formatMilestone } from './names.ts';
 
 /** Pieces of a Timeline row that the app's Timeline and a snapshot's both draw. */
 

@@ -80,6 +80,14 @@ export function formatDayUtc(date: string, opts?: { year?: boolean }): string {
   return opts?.year === false ? day : `${day} ${d.getUTCFullYear()}`;
 }
 
+/** Start and end dates (`YYYY-MM-DD` or null) as one phrase: "3 Mar to 28 Apr 2027", "From 3 Mar 2027", "Until 28 Apr 2027", "No dates". */
+export function formatDates(start: string | null, end: string | null): string {
+  if (start && end) return `${formatDayUtc(start, { year: start.slice(0, 4) !== end.slice(0, 4) })} to ${formatDayUtc(end)}`;
+  if (start) return `From ${formatDayUtc(start)}`;
+  if (end) return `Until ${formatDayUtc(end)}`;
+  return 'No dates';
+}
+
 /** The row and email sentence, with no trailing full stop when `forSubject`. */
 export function notificationSentence(
   n: Pick<Notification, 'projectTitle' | 'actorName' | 'hasActor' | 'detail'>,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PREFS,
+  formatDates,
   formatDayUtc,
   noteExcerpt,
   notificationPrefsSchema,
@@ -101,5 +102,27 @@ describe('notifications', () => {
       expect(notificationPrefsSchema.safeParse({ ...DEFAULT_PREFS, [key]: 'daily' }).success).toBe(false);
     }
     expect(notificationPrefsSchema.safeParse({ assigned: 'instant' }).success).toBe(false);
+  });
+});
+
+describe('date phrases', () => {
+  it('FR-1.7: both dates in one year drop the year from the first', () => {
+    expect(formatDates('2027-03-03', '2027-04-28')).toBe('3 Mar to 28 Apr 2027');
+  });
+  it('FR-1.7: both dates in different years keep both years', () => {
+    expect(formatDates('2026-12-01', '2027-01-15')).toBe('1 Dec 2026 to 15 Jan 2027');
+  });
+  it('FR-1.7: a start alone, an end alone, and no dates', () => {
+    expect(formatDates('2027-03-03', null)).toBe('From 3 Mar 2027');
+    expect(formatDates(null, '2027-04-28')).toBe('Until 28 Apr 2027');
+    expect(formatDates(null, null)).toBe('No dates');
+  });
+  it('FR-1.7: September is "Sep" on any ICU', () => {
+    expect(formatDates('2027-09-01', '2027-09-30')).toBe('1 Sep to 30 Sep 2027');
+    expect(formatDates('2027-09-01', null)).toBe('From 1 Sep 2027');
+    expect(formatDates(null, '2027-09-30')).toBe('Until 30 Sep 2027');
+  });
+  it("FR-1.7: a date is never shifted by the reader's time zone", () => {
+    expect(formatDates('2027-01-01', null)).toBe('From 1 Jan 2027');
   });
 });

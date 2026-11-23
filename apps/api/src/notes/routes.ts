@@ -176,13 +176,14 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
         const authorName = await nameOf(s, current.authorId);
         const sameMentions = mentionIdsOf(mentions).join('\n') === mentionIdsOf(current.mentions).join('\n');
         if (body === current.body && sameMentions) return toNoteDto(current, authorName);
+        const now = deps.now();
         const updated = await s
           .collection('notes')
-          .findOneAndUpdate({ _id: noteId, roadmapId, projectId }, { $set: { body, mentions, editedAt: deps.now() } });
+          .findOneAndUpdate({ _id: noteId, roadmapId, projectId }, { $set: { body, mentions, editedAt: now } });
         if (!updated) throw new HttpError(404, 'not_found');
         const before = new Set(mentionIdsOf(current.mentions));
         const added = mentionIdsOf(mentions).filter((id) => !before.has(id));
-        await notifyMentioned(s, { roadmapId, item, actorId: actor.userId, noteBody: body, userIds: added, now: deps.now() });
+        await notifyMentioned(s, { roadmapId, item, actorId: actor.userId, noteBody: body, userIds: added, now });
         await audit.record(s, {
           action: 'note.update',
           actor: { type: 'user', userId: actor.userId },

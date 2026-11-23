@@ -61,6 +61,11 @@ export interface MembershipDoc {
   userId: string;
   role: Role;
   createdAt: Date;
+  /**
+   * Bumped each time a notification is written for this member. Removal deletes this document, so a notification
+   * written at the same instant conflicts with the removal and one of the two transactions retries.
+   */
+  notifyRevision?: number;
 }
 
 export interface RoadmapDoc {

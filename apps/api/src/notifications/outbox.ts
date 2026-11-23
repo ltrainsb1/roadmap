@@ -26,6 +26,12 @@ async function write(
   const members = await s.collection('memberships').find({ roadmapId: e.roadmapId, userId: { $in: candidates } });
   const memberIds = new Set(members.map((m) => m.userId));
   const recipients = candidates.filter((id) => memberIds.has(id));
+  if (recipients.length === 0) return;
+  // The guard against a concurrent member removal: removal deletes these same membership documents, so one of the two
+  // transactions conflicts and retries. Either the removal sees this row and deletes it, or this sees no membership.
+  await s
+    .collection('memberships')
+    .updateMany({ _id: { $in: members.map((m) => m._id) } }, { $inc: { notifyRevision: 1 } });
   const rows: Array<Omit<NotificationDoc, 'tenantId'>> = recipients.flatMap((userId) =>
     details.map((detail) => ({
       _id: uuidv7(),

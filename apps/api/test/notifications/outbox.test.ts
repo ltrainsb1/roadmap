@@ -1,45 +1,102 @@
+import type { Collection, Db } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
 import type { NotificationDoc, UserDoc } from '../../src/db/types.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
 
 let t: TestApp;
+let paused: TestApp;
+
+/** One-shot hooks for the `paused` app: before a notification insert, and before a membership delete. */
+const hooks: { beforeNotify: (() => Promise<void>) | null; beforeMemberDelete: (() => void) | null } = {
+  beforeNotify: null,
+  beforeMemberDelete: null,
+};
+
+/** Wraps one method of a collection so it runs `before` first. */
+function hookMethod(col: Collection, method: 'insertMany' | 'deleteOne', before: () => Promise<void> | void): Collection {
+  return new Proxy(col, {
+    get(target, prop) {
+      if (prop === method) {
+        return async (...args: unknown[]) => {
+          await before();
+          return (target[method] as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
+/** The app's database, with `notifications.insertMany` and `memberships.deleteOne` passing through `hooks` first. */
+function withHooks(db: Db): Db {
+  return new Proxy(db, {
+    get(target, prop) {
+      if (prop === 'collection') {
+        return (name: string) => {
+          const col = target.collection(name);
+          if (name === 'notifications') {
+            return hookMethod(col, 'insertMany', async () => {
+              const hook = hooks.beforeNotify;
+              hooks.beforeNotify = null;
+              await hook?.();
+            });
+          }
+          if (name === 'memberships') {
+            return hookMethod(col, 'deleteOne', () => {
+              const hook = hooks.beforeMemberDelete;
+              hooks.beforeMemberDelete = null;
+              hook?.();
+            });
+          }
+          return col;
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
 beforeAll(async () => {
   t = await makeTestApp();
+  paused = await makeTestApp({ wrapDb: withHooks });
 }, 120_000);
 afterAll(async () => {
   await t?.close();
+  await paused?.close();
 });
 
 type Who = 'O' | 'A' | 'C' | 'D';
 
 /** A roadmap with owner O (Olive), admin A (Ann), contributors C (Cal) and D (Dee), and outsider X (same tenant). */
-async function world() {
-  const tenantId = (await t.seed.tenant())._id;
+async function world(app: TestApp = t) {
+  const tenantId = (await app.seed.tenant())._id;
   const users = {
-    O: await t.seed.user(tenantId),
-    A: await t.seed.user(tenantId),
-    C: await t.seed.user(tenantId),
-    D: await t.seed.user(tenantId),
+    O: await app.seed.user(tenantId),
+    A: await app.seed.user(tenantId),
+    C: await app.seed.user(tenantId),
+    D: await app.seed.user(tenantId),
   };
-  const X = await t.seed.user(tenantId);
+  const X = await app.seed.user(tenantId);
   const names: Record<Who, string> = { O: 'Olive', A: 'Ann', C: 'Cal', D: 'Dee' };
   for (const who of Object.keys(users) as Who[]) {
-    await t.db.collection<UserDoc>('users').updateOne({ _id: users[who]._id }, { $set: { name: names[who] } });
+    await app.db.collection<UserDoc>('users').updateOne({ _id: users[who]._id }, { $set: { name: names[who] } });
   }
-  const roadmap = await t.seed.roadmap(tenantId, users.O._id, 'Launch');
-  await t.seed.member(tenantId, roadmap._id, users.A._id, 'admin');
-  await t.seed.member(tenantId, roadmap._id, users.C._id, 'contributor');
-  await t.seed.member(tenantId, roadmap._id, users.D._id, 'contributor');
+  const roadmap = await app.seed.roadmap(tenantId, users.O._id, 'Launch');
+  await app.seed.member(tenantId, roadmap._id, users.A._id, 'admin');
+  await app.seed.member(tenantId, roadmap._id, users.C._id, 'contributor');
+  await app.seed.member(tenantId, roadmap._id, users.D._id, 'contributor');
   const sess = {
-    O: await signInAs(t.app, t.db, users.O._id),
-    A: await signInAs(t.app, t.db, users.A._id),
-    C: await signInAs(t.app, t.db, users.C._id),
-    D: await signInAs(t.app, t.db, users.D._id),
+    O: await signInAs(app.app, app.db, users.O._id),
+    A: await signInAs(app.app, app.db, users.A._id),
+    C: await signInAs(app.app, app.db, users.C._id),
+    D: await signInAs(app.app, app.db, users.D._id),
   };
   const ids = { O: users.O._id, A: users.A._id, C: users.C._id, D: users.D._id, X: X._id };
   const send = (who: Who, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-    t.app.inject({
+    app.app.inject({
       method,
       url,
       headers: { cookie: sess[who].cookie, 'x-csrf-token': sess[who].csrf },
@@ -54,9 +111,9 @@ async function world() {
     send(who, 'POST', `${itemUrl(projectId)}/notes`, payload);
   const editNote = (who: Who, projectId: string, noteId: string, payload: Record<string, unknown>) =>
     send(who, 'PATCH', `${itemUrl(projectId)}/notes/${noteId}`, payload);
-  const item = (o: Parameters<TestApp['seed']['project']>[2] = {}) => t.seed.project(tenantId, roadmap._id, o);
+  const item = (o: Parameters<TestApp['seed']['project']>[2] = {}) => app.seed.project(tenantId, roadmap._id, o);
   const rows = (filter: Record<string, unknown> = {}) =>
-    t.db
+    app.db
       .collection<NotificationDoc>('notifications')
       .find({ tenantId, ...filter }, { sort: { _id: 1 } })
       .toArray();
@@ -141,6 +198,23 @@ describe('dates changed', () => {
         after: { startDate: '2026-03-01', endDate: '2026-04-15' },
       },
     });
+  });
+
+  test('FR-5.1: changing only the start date writes one "dates" row with the end date unchanged', async () => {
+    const w = await world();
+    const item = await w.item({ startDate: '2026-03-01', endDate: '2026-03-31', assigneeIds: [w.ids.D] });
+    expect((await w.edit('O', item._id, { version: 1, startDate: '2026-03-10' })).statusCode).toBe(200);
+    expect((await w.rows()).map((r) => [r.userId, r.type, r.detail])).toEqual([
+      [
+        w.ids.D,
+        'dates_changed',
+        {
+          kind: 'dates',
+          before: { startDate: '2026-03-01', endDate: '2026-03-31' },
+          after: { startDate: '2026-03-10', endDate: '2026-03-31' },
+        },
+      ],
+    ]);
   });
 
   test('FR-5.1: adding, moving and removing milestones writes one row each; renaming one writes none; changing the title writes none', async () => {
@@ -297,6 +371,41 @@ describe('deleting', () => {
     const del = await w.send('O', 'DELETE', `/api/roadmaps/${w.roadmap._id}`, { confirmName: 'Launch' });
     expect(del.statusCode).toBe(204);
     expect((await w.rows()).map((r) => r._id).sort()).toEqual([dInOther, cInOther].sort());
+  });
+});
+
+describe('races', () => {
+  test('FR-5.1: a note mentioning someone at the moment they are removed never leaves a row for a non-member', { timeout: 60_000 }, async () => {
+    const w = await world(paused);
+    for (let round = 1; round <= 10; round += 1) {
+      const item = await paused.seed.project(w.tenantId, w.roadmap._id);
+      const D = await paused.seed.user(w.tenantId);
+      await paused.db.collection<UserDoc>('users').updateOne({ _id: D._id }, { $set: { name: `Dee${round}` } });
+      await paused.seed.member(w.tenantId, w.roadmap._id, D._id, 'contributor');
+      // The note save waits, inside its transaction and after its membership checks, just before it writes the row;
+      // the removal starts then, and the note goes on once the removal is about to delete the membership.
+      let atNotify!: () => void;
+      const reachedNotify = new Promise<void>((resolve) => (atNotify = resolve));
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      hooks.beforeNotify = () => {
+        atNotify();
+        return released;
+      };
+      hooks.beforeMemberDelete = release;
+      const saving = w.addNote('C', item._id, { body: `hi @Dee${round}`, mentionIds: [D._id] });
+      await reachedNotify;
+      const [saved, removed] = await Promise.all([
+        saving,
+        w.send('O', 'DELETE', `/api/roadmaps/${w.roadmap._id}/members/${D._id}`),
+      ]);
+      hooks.beforeNotify = null;
+      hooks.beforeMemberDelete = null;
+      expect(saved.statusCode, saved.body).toBe(201);
+      expect(removed.statusCode, removed.body).toBe(204);
+      expect(await paused.db.collection('memberships').countDocuments({ userId: D._id })).toBe(0);
+      expect(await w.rows({ userId: D._id })).toEqual([]);
+    }
   });
 });
 

@@ -68,13 +68,21 @@ describe('worker: one pass', () => {
     const w = await world();
     await row(t, w.tenantId, { ...w.base, now: early });
     await row(t, w.tenantId, { ...w.base, type: 'dates_changed', detail: dates, now: early });
-    // The due-soon step is the one that reads items; make every read of them fail.
+    // The due-soon step is the one that scans items across tenants (a `distinct`); make that scan fail. The other
+    // steps read items too, by id, and those reads still work.
     const broken = new Proxy(t.db, {
       get(target, prop) {
         if (prop === 'collection') {
           return (name: string) => {
-            if (name === 'projects') throw new Error('projects are unreachable');
-            return target.collection(name);
+            const col = target.collection(name);
+            if (name !== 'projects') return col;
+            return new Proxy(col, {
+              get(c, p) {
+                if (p === 'distinct') return () => Promise.reject(new Error('projects are unreachable'));
+                const v: unknown = Reflect.get(c, p, c);
+                return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(c) : v;
+              },
+            });
           };
         }
         const value: unknown = Reflect.get(target, prop, target);

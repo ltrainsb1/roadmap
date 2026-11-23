@@ -47,11 +47,16 @@ async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Dat
     );
   if (claimedDay.matched === 0) return null;
 
-  const memberships = await s.collection('memberships').find({ userId, roadmapId: { $in: [...new Set(waiting.map((r) => r.roadmapId))] } });
+  const [memberships, items] = await Promise.all([
+    s.collection('memberships').find({ userId, roadmapId: { $in: [...new Set(waiting.map((r) => r.roadmapId))] } }),
+    s.collection('projects').find({ _id: { $in: [...new Set(waiting.map((r) => r.projectId))] } }),
+  ]);
   const mine = new Set(memberships.map((m) => m.roadmapId));
+  // A row can outlive its item's delete (a due-soon reminder written just after it); it goes in no digest.
+  const live = new Set(items.map((p) => `${p.roadmapId}:${p._id}`));
   const rows: NotificationDoc[] = [];
   for (const r of waiting) {
-    if (!mine.has(r.roadmapId)) {
+    if (!mine.has(r.roadmapId) || !live.has(`${r.roadmapId}:${r.projectId}`)) {
       await skip(s, r._id, now);
       continue;
     }

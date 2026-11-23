@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
 import { DEFAULT_PREFS, type NotificationPage, type PrefsResponse } from '@roadmap/shared';
-import type { AuditEventDoc, NotificationDoc, RoadmapDoc, UserDoc } from '../../src/db/types.ts';
+import type { AuditEventDoc, NotificationDoc, ProjectDoc, RoadmapDoc, UserDoc } from '../../src/db/types.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
 
 let t: TestApp;
@@ -196,6 +196,24 @@ describe('notification list', () => {
     });
     expect(items.find((n) => n.id === byAnn)).toMatchObject({ actorName: null, hasActor: true, roadmapName: 'Launch 2' });
     expect(items.find((n) => n.id === noActor)).toMatchObject({ actorName: null, hasActor: false });
+  });
+
+  test('FR-5.3: the list leaves out rows whose item or roadmap has just gone', async () => {
+    const w = await world();
+    const kept = await row(w, w.cal._id, { createdAt: new Date(base.getTime() - 1000) });
+    // A row whose item was deleted a moment ago (a due-soon reminder written just after the delete).
+    const goneItem = await t.seed.project(w.tenantId, w.roadmap._id, { title: 'Gone' });
+    await row({ ...w, project: goneItem }, w.cal._id, { createdAt: new Date(base.getTime() - 2000) });
+    await t.db.collection<ProjectDoc>('projects').deleteOne({ _id: goneItem._id });
+    // A row on a roadmap deleted during the request: its cascade has not reached the row or the membership yet.
+    const vanishing = await t.seed.roadmap(w.tenantId, w.olive._id, 'Vanishing');
+    await t.seed.member(w.tenantId, vanishing._id, w.cal._id, 'contributor');
+    await row(w, w.cal._id, { roadmapId: vanishing._id, createdAt: new Date(base.getTime() - 3000) });
+    await t.db.collection<RoadmapDoc>('roadmaps').deleteOne({ _id: vanishing._id });
+
+    const p = await page(w.sess.cal);
+    expect(p.items.map((n) => n.id)).toEqual([kept]);
+    expect(p.items.every((n) => n.roadmapName !== '')).toBe(true);
   });
 
   test('FR-5.3: someone else\'s notification id, a made-up id and a cursor from another person\'s list change and reveal nothing', async () => {

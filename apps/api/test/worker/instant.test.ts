@@ -148,6 +148,19 @@ describe('worker: instant emails', () => {
     expect((await rowsFor(t, w.sam))[0]!.email.state).toBe('skipped');
   });
 
+  test('FR-5.1: a row whose item was deleted a moment ago is skipped, not emailed', async () => {
+    const c = clock(T0);
+    const w = await world();
+    const mail = new MemoryMailer();
+    // As a due-soon reminder written just after the item's delete would leave it: the row outlived the cascade.
+    await row(t, w.tenantId, { roadmapId: w.roadmap._id, userId: w.sam._id, item: w.item, actorId: w.priya._id, now: c.now() });
+    await scoped(t.db, w.tenantId).collection('projects').deleteOne({ _id: w.item._id });
+
+    await runPass(workerDeps(t, c, mail));
+    expect(mail.sent).toHaveLength(0);
+    expect((await rowsFor(t, w.sam))[0]!.email.state).toBe('skipped');
+  });
+
   test('FR-5.1: two passes running at once send each email once', async () => {
     const c = clock(T0);
     const w = await world();

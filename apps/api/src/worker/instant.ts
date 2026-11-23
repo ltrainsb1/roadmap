@@ -43,13 +43,14 @@ export async function sendInstant(deps: WorkerDeps): Promise<{ sent: number; fai
     const user = await userOf(s, r.userId);
     const mode = user ? effectivePrefs(user)[r.type] : 'off';
     if (mode === 'digest') return null;
-    if (!user || mode === 'off' || !(await isMember(s, r.roadmapId, r.userId))) {
+    // Not shown: the item or roadmap is gone (see toNotifications).
+    const n = shown.get(r._id);
+    if (!user || mode === 'off' || !n || !(await isMember(s, r.roadmapId, r.userId))) {
       await skip(s, r._id, now);
       return null;
     }
     const claimed = await claim(s, r._id, deps.now());
     if (!claimed) return null;
-    const n = shown.get(r._id)!;
     try {
       await deps.mailer.send({ to: user.email, ...instantEmail(n, { appOrigin: deps.appOrigin, timeZone: user.timezone }) });
     } catch (err) {

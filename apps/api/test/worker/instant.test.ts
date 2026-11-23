@@ -148,17 +148,22 @@ describe('worker: instant emails', () => {
     expect((await rowsFor(t, w.sam))[0]!.email.state).toBe('skipped');
   });
 
-  test('FR-5.1: a row whose item was deleted a moment ago is skipped, not emailed', async () => {
+  test('FR-5.1: a row whose item was deleted a moment ago is deleted, not emailed, whatever the email setting', async () => {
     const c = clock(T0);
     const w = await world();
     const mail = new MemoryMailer();
     // As a due-soon reminder written just after the item's delete would leave it: the row outlived the cascade.
     await row(t, w.tenantId, { roadmapId: w.roadmap._id, userId: w.sam._id, item: w.item, actorId: w.priya._id, now: c.now() });
+    // The same for a row set to "off", and for one waiting for the digest (it is 4 am for Sam).
+    await setPref(t, w.sam, 'mentioned', 'off');
+    await setPref(t, w.sam, 'dates_changed', 'digest');
+    await row(t, w.tenantId, { roadmapId: w.roadmap._id, userId: w.sam._id, item: w.item, actorId: w.priya._id, now: c.now(), type: 'mentioned', detail: { kind: 'mentioned', excerpt: 'Hi' } });
+    await row(t, w.tenantId, { roadmapId: w.roadmap._id, userId: w.sam._id, item: w.item, actorId: w.priya._id, now: c.now(), type: 'dates_changed', detail: dates });
     await scoped(t.db, w.tenantId).collection('projects').deleteOne({ _id: w.item._id });
 
     await runPass(workerDeps(t, c, mail));
     expect(mail.sent).toHaveLength(0);
-    expect((await rowsFor(t, w.sam))[0]!.email.state).toBe('skipped');
+    expect(await rowsFor(t, w.sam)).toEqual([]);
   });
 
   test('FR-5.1: two passes running at once send each email once', async () => {

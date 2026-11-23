@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { scoped } from '../../src/db/scoped.ts';
 import type { UserDoc } from '../../src/db/types.ts';
 import { MemoryMailer } from '../../src/mail/mailer.ts';
+import { sendDigests } from '../../src/worker/digest.ts';
 import { runPass } from '../../src/worker/run.ts';
 import { makeTestApp, type TestApp } from '../helpers.ts';
 import { FOOTER, FlakyMailer, clock, dates, itemUrl, person, row, rowsFor, workerDeps } from './fixtures.ts';
@@ -150,21 +151,22 @@ describe('worker: digests', () => {
     expect(to(mail, w.me)[0]!.text).not.toContain('Beta');
   });
 
-  test('FR-5.2: the digest leaves out a row whose item was deleted a moment ago, and skips it', async () => {
+  test('FR-5.2: the digest leaves out a row whose item was deleted a moment ago, and the row is deleted', async () => {
     const w = await world('UTC');
     const kept = await w.change('alpha', '2026-11-10T06:00:00Z');
     const gone = await w.change('beta', '2026-11-10T06:30:00Z');
     // As a due-soon reminder written just after the item's delete would leave it: the row outlived the cascade.
     await scoped(t.db, w.tenantId).collection('projects').deleteOne({ _id: w.b._id });
     const mail = new MemoryMailer();
-    await runPass(workerDeps(t, clock('2026-11-10T08:00:00Z'), mail));
+    // The digest step on its own: in a whole pass the instant step, which runs first, deletes the row already.
+    await sendDigests(workerDeps(t, clock('2026-11-10T08:00:00Z'), mail));
     const sent = to(mail, w.me);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain('Ship it');
     expect(sent[0]!.text).not.toContain('Plan it');
     expect(sent[0]!.text).not.toContain('Beta');
-    const states = new Map((await rowsFor(t, w.me)).map((r) => [r._id, r.email.state]));
-    expect([states.get(kept._id), states.get(gone._id)]).toEqual(['sent', 'skipped']);
+    expect((await rowsFor(t, w.me)).map((r) => [r._id, r.email.state])).toEqual([[kept._id, 'sent']]);
+    expect(gone._id).not.toBe(kept._id);
   });
 
   test('FR-5.2: on a day with nothing waiting at 8 am, a change made later waits for the next morning', async () => {

@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
 import { DEFAULT_PREFS, type NotificationPage, type PrefsResponse } from '@roadmap/shared';
 import type { AuditEventDoc, NotificationDoc, ProjectDoc, RoadmapDoc, UserDoc } from '../../src/db/types.ts';
+import { runPass } from '../../src/worker/run.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
+import { workerDeps } from '../worker/fixtures.ts';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -221,6 +223,24 @@ describe('notification list', () => {
     const p = await page(w.sess.cal);
     expect(p.items.map((n) => n.id)).toEqual([kept]);
     expect(p.items.every((n) => n.roadmapName !== '')).toBe(true);
+  });
+
+  test('FR-5.3: after one worker pass, the unread count matches the list again when a row\'s item has gone', async () => {
+    const w = await world();
+    // Emails for these are off: the row still goes.
+    await t.db.collection<UserDoc>('users').updateOne({ _id: w.cal._id }, { $set: { notificationPrefs: { assigned: 'off' } } });
+    await row(w, w.cal._id, { createdAt: new Date(base.getTime() - 1000) });
+    const goneItem = await t.seed.project(w.tenantId, w.roadmap._id, { title: 'Gone' });
+    await row({ ...w, project: goneItem }, w.cal._id, { createdAt: new Date(base.getTime() - 2000) });
+    await t.db.collection<ProjectDoc>('projects').deleteOne({ _id: goneItem._id });
+    // Between the delete and the next pass, the list's own filter hides the row.
+    expect((await page(w.sess.cal)).items).toHaveLength(1);
+
+    await runPass(workerDeps(t, { now: () => base }));
+    const p = await page(w.sess.cal);
+    expect(p.items).toHaveLength(1);
+    expect(p.unread).toBe(1);
+    expect(await unread(w.sess.cal)).toBe(1);
   });
 
   test('FR-5.3: someone else\'s notification id, a made-up id and a cursor from another person\'s list change and reveal nothing', async () => {

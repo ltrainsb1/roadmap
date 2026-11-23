@@ -61,3 +61,11 @@ export async function skip(s: ScopedDb, id: string, now: Date): Promise<void> {
     .collection('notifications')
     .updateOne({ $and: [{ _id: id }, emailDue(now)] }, { $set: { 'email.state': 'skipped', 'email.leaseUntil': null } });
 }
+
+/**
+ * Deletes a row whose item (or roadmap) is gone: a due-soon reminder written just after its item's delete outlives
+ * the cascade. Deleting it, whatever the email setting, keeps the unread count in step with the list.
+ */
+export async function dropGone(s: ScopedDb, id: string): Promise<void> {
+  await s.collection('notifications').deleteOne({ _id: id });
+}

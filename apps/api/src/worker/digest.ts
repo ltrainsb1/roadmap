@@ -3,7 +3,7 @@ import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { NotificationDoc, UserDoc } from '../db/types.ts';
 import { effectivePrefs, toNotifications } from '../notifications/dto.ts';
 import { digestEmail } from './emails.ts';
-import { claim, errorText, markFailed, markSent, skip } from './claims.ts';
+import { claim, dropGone, errorText, markFailed, markSent, skip } from './claims.ts';
 import { localDate, localHour } from './local-time.ts';
 import type { WorkerDeps } from './run.ts';
 import { emailDue, workerDb } from '../db/worker-db.ts';
@@ -52,11 +52,15 @@ async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Dat
     s.collection('projects').find({ _id: { $in: [...new Set(waiting.map((r) => r.projectId))] } }),
   ]);
   const mine = new Set(memberships.map((m) => m.roadmapId));
-  // A row can outlive its item's delete (a due-soon reminder written just after it); it goes in no digest.
+  // A row can outlive its item's delete (a due-soon reminder written just after it); it is deleted, in no digest.
   const live = new Set(items.map((p) => `${p.roadmapId}:${p._id}`));
   const rows: NotificationDoc[] = [];
   for (const r of waiting) {
-    if (!mine.has(r.roadmapId) || !live.has(`${r.roadmapId}:${r.projectId}`)) {
+    if (!live.has(`${r.roadmapId}:${r.projectId}`)) {
+      await dropGone(s, r._id);
+      continue;
+    }
+    if (!mine.has(r.roadmapId)) {
       await skip(s, r._id, now);
       continue;
     }

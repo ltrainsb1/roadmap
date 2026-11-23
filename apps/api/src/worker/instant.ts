@@ -5,7 +5,7 @@ import { effectivePrefs, toNotifications } from '../notifications/dto.ts';
 import { instantEmail } from './emails.ts';
 import type { WorkerDeps } from './run.ts';
 import { workerDb } from '../db/worker-db.ts';
-import { claim, errorText, markFailed, markSent, skip } from './claims.ts';
+import { claim, dropGone, errorText, markFailed, markSent, skip } from './claims.ts';
 
 const BATCH = 100;
 
@@ -41,11 +41,15 @@ export async function sendInstant(deps: WorkerDeps): Promise<{ sent: number; fai
   async function handle(r: NotificationDoc, shown: Map<string, Notification>): Promise<'sent' | 'failed' | null> {
     const s = scoped(deps.db, r.tenantId);
     const user = await userOf(s, r.userId);
+    // Not shown: the item or roadmap is gone (see toNotifications). The row goes, whatever the email setting.
+    const n = shown.get(r._id);
+    if (!n) {
+      await dropGone(s, r._id);
+      return null;
+    }
     const mode = user ? effectivePrefs(user)[r.type] : 'off';
     if (mode === 'digest') return null;
-    // Not shown: the item or roadmap is gone (see toNotifications).
-    const n = shown.get(r._id);
-    if (!user || mode === 'off' || !n || !(await isMember(s, r.roadmapId, r.userId))) {
+    if (!user || mode === 'off' || !(await isMember(s, r.roadmapId, r.userId))) {
       await skip(s, r._id, now);
       return null;
     }

@@ -86,10 +86,15 @@ describe('notification list', () => {
   test('FR-5.3: the list is newest first, 30 at a time, and the cursor continues where it stopped with nothing repeated or skipped', async () => {
     const w = await world();
     const ids: string[] = [];
-    // 65 rows a second apart, except rows 29 and 30 (the first page's boundary), which share a timestamp.
+    // 65 rows a second apart, except rows 29 and 30 (the first page's boundary), which share a timestamp. Their ids are
+    // fixed, so the tie is broken the same way every run: 29's id is the larger, so it ends page one.
+    const tied: Record<number, string> = {
+      29: '00000000-0000-7000-8000-000000000002',
+      30: '00000000-0000-7000-8000-000000000001',
+    };
     for (let i = 0; i < 65; i++) {
       const createdAt = new Date(base.getTime() - (i === 30 ? 29 : i) * 1000);
-      ids.push(await row(w, w.cal._id, { createdAt }));
+      ids.push(await row(w, w.cal._id, { createdAt, ...(tied[i] !== undefined && { _id: tied[i] }) }));
     }
     // A row of Olive's never shows in Cal's list.
     await row(w, w.olive._id);
@@ -99,8 +104,10 @@ describe('notification list', () => {
     expect(first.items).toHaveLength(30);
     expect(first.nextCursor).not.toBeNull();
     seen.push(...first.items);
+    expect(first.items[29]!.id).toBe(tied[29]);
     const second = await page(w.sess.cal, `?cursor=${first.nextCursor!}`);
     expect(second.items).toHaveLength(30);
+    expect(second.items[0]!.id).toBe(tied[30]);
     seen.push(...second.items);
     const third = await page(w.sess.cal, `?cursor=${second.nextCursor!}`);
     expect(third.items).toHaveLength(5);

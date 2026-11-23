@@ -181,6 +181,22 @@ describe('assigned', () => {
   });
 });
 
+describe('assigned, sent twice at once', () => {
+  test('FR-5.1: two identical assignee saves sent at once write one "assigned" row per new assignee', async () => {
+    const w = await world();
+    for (let round = 0; round < 10; round += 1) {
+      const item = await w.item({ assigneeIds: [w.ids.O] });
+      const results = await Promise.all([
+        w.assign('A', item._id, [w.ids.O, w.ids.C, w.ids.D]),
+        w.assign('A', item._id, [w.ids.O, w.ids.C, w.ids.D]),
+      ]);
+      expect(results.map((r) => r.statusCode), `round ${round}`).toEqual([200, 200]);
+      const rows = await w.rows({ projectId: item._id });
+      expect(rows.map((r) => r.userId).sort(), `round ${round}`).toEqual([w.ids.C, w.ids.D].sort());
+    }
+  });
+});
+
 describe('dates changed', () => {
   test("FR-5.1: changing an item's end date notifies its assignees with the old and new dates, but not the person who changed it", async () => {
     const w = await world();

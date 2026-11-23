@@ -104,9 +104,20 @@ function start(
   keep?: (line: string) => boolean,
 ): ChildProcess {
   const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  // A chunk can end part-way through a line; with `keep`, that part waits for the rest before the line is judged.
+  let partial = '';
   child.stdout?.on('data', (d: Buffer) => {
-    const text = keep ? d.toString().split('\n').filter((l) => l && keep(l)).map((l) => `${l}\n`).join('') : d.toString();
+    if (!keep) {
+      process.stdout.write(`[${name}] ${d.toString()}`);
+      return;
+    }
+    const lines = (partial + d.toString()).split('\n');
+    partial = lines.pop() ?? '';
+    const text = lines.filter((l) => l && keep(l)).map((l) => `${l}\n`).join('');
     if (text) process.stdout.write(`[${name}] ${text}`);
+  });
+  child.stdout?.on('end', () => {
+    if (keep && partial && keep(partial)) process.stdout.write(`[${name}] ${partial}\n`);
   });
   child.stderr?.on('data', (d: Buffer) => process.stderr.write(`[${name}] ${d.toString()}`));
   return child;

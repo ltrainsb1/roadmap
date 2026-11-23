@@ -461,8 +461,13 @@ test('FR-1.9: a card can be moved by touch at 375 px', async ({ page, call, road
   await expect(page.getByText('Moved Hire to In progress.', { exact: true })).toBeAttached();
   await expect(column(page, 'In progress, 2 items')).toContainText('Hire');
   await expect(column(page, 'Not started, 0 items')).toContainText('No items');
-  const { items } = await call<{ items: { title: string; status: string }[] }>('GET', `/api/roadmaps/${roadmap.id}/projects`);
-  expect(items.find((i) => i.title === 'Hire')?.status).toBe('in_progress');
+  // The board shows the move before the server has stored it.
+  await expect
+    .poll(async () => {
+      const { items } = await call<{ items: { title: string; status: string }[] }>('GET', `/api/roadmaps/${roadmap.id}/projects`);
+      return items.find((i) => i.title === 'Hire')?.status;
+    })
+    .toBe('in_progress');
 });
 
 test('FR-1.7: screen readers are told what happened', async ({ page, call, roadmap }) => {

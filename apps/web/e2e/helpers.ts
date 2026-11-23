@@ -10,15 +10,31 @@ import { authenticator } from 'otplib';
 const run = promisify(execFile);
 const bootstrapCli = path.resolve(import.meta.dirname, '../../api/dist/cli/bootstrap.js');
 
-/** The last email sent to `to`. Mail is sent after the HTTP reply, so this waits for it. */
-export async function readLastMail(to: string): Promise<{ subject: string; text: string }> {
+type Mail = { to: string; subject: string; text: string };
+
+/**
+ * Every email in the outbox, oldest first. The API and the worker both append to it, so the last line may be part-way
+ * through being written: it is left out, and the next read finds it whole.
+ */
+async function readOutbox(): Promise<Mail[]> {
   const file = process.env.E2E_MAIL_OUTBOX;
   if (!file) throw new Error('E2E_MAIL_OUTBOX is not set; global setup did not run');
+  const lines = (await readFile(file, 'utf8').catch(() => '')).split('\n').filter(Boolean);
+  return lines.flatMap((l, i): Mail[] => {
+    try {
+      return [JSON.parse(l) as Mail];
+    } catch (err) {
+      if (i === lines.length - 1) return [];
+      throw err;
+    }
+  });
+}
+
+/** The last email sent to `to`. Mail is sent after the HTTP reply, so this waits for it. */
+export async function readLastMail(to: string): Promise<{ subject: string; text: string }> {
   const deadline = Date.now() + 10_000;
   for (;;) {
-    const lines = (await readFile(file, 'utf8').catch(() => '')).split('\n').filter(Boolean);
-    const mails = lines.map((l) => JSON.parse(l) as { to: string; subject: string; text: string });
-    const last = mails.reverse().find((m) => m.to === to);
+    const last = (await readOutbox()).reverse().find((m) => m.to === to);
     if (last) return { subject: last.subject, text: last.text };
     if (Date.now() > deadline) throw new Error(`no mail to ${to} within 10 s`);
     await new Promise((r) => setTimeout(r, 200));
@@ -27,10 +43,7 @@ export async function readLastMail(to: string): Promise<{ subject: string; text:
 
 /** Every email sent to `to` so far, oldest first. Unlike `readLastMail` it does not wait. */
 export async function readMails(to: string): Promise<{ subject: string; text: string }[]> {
-  const file = process.env.E2E_MAIL_OUTBOX;
-  if (!file) throw new Error('E2E_MAIL_OUTBOX is not set; global setup did not run');
-  const lines = (await readFile(file, 'utf8').catch(() => '')).split('\n').filter(Boolean);
-  return lines.map((l) => JSON.parse(l) as { to: string; subject: string; text: string }).filter((m) => m.to === to);
+  return (await readOutbox()).filter((m) => m.to === to).map(({ subject, text }) => ({ subject, text }));
 }
 
 /** When the notifications worker last finished a pass (the heartbeat file's modification time, in ms). */

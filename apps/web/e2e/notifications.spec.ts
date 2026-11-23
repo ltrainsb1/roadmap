@@ -1,4 +1,4 @@
-import { apiAs, expectNoA11yViolations, readLastMail, seedProject, useCspGuard } from './helpers.ts';
+import { apiAs, expectNoA11yViolations, projectRow, readLastMail, seedProject, useCspGuard } from './helpers.ts';
 import { expect, joinByApi, test, type ApiCall } from './fixtures.ts';
 
 useCspGuard();
@@ -113,6 +113,53 @@ test('FR-5.3: the list and the empty state pass axe; at 375 px there is no sidew
   await expect(rows.getByText('Unread', { exact: true })).toHaveCount(0);
   await expect(m.getByRole('link', { name: 'Notifications', exact: true })).toBeVisible();
   await expectNoA11yViolations(m);
+
+  await member.context.close();
+});
+
+test('FR-5.3: the list\'s load and mark failures pass axe; a roadmap screen at 375 px with an unread count has no sideways scroll', async ({
+  browser,
+  call,
+  roadmap,
+}) => {
+  const id = roadmap.id;
+  const member = await joinByApi(browser, call, id, 'contributor', 'checker');
+  const m = member.page;
+  await m.setViewportSize({ width: 375, height: 667 });
+  const noSidewaysScroll = () => m.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+  const itemId = await seedProject(call, id, 'Checkout');
+  await call('PUT', `/api/roadmaps/${id}/projects/${itemId}/assignees`, { userIds: [await userIdOf(call, id, member.user.email)] });
+
+  // The roadmap's own screen, with the badge in the header.
+  await m.goto(`/r/${id}/projects`);
+  await expect(m.getByRole('link', { name: 'Notifications, 1 unread' })).toBeVisible();
+  await expect(projectRow(m, 'Checkout')).toBeVisible();
+  expect(await noSidewaysScroll()).toBe(true);
+
+  // The list cannot load.
+  let failList = true;
+  await m.route(
+    (url) => url.pathname === '/api/notifications',
+    (route) => (failList ? route.fulfill({ status: 500, json: { error: 'unknown' } }) : route.continue()),
+  );
+  await m.goto('/notifications');
+  // The query is tried a few times before it gives up, so this waits longer than most.
+  await expect(m.getByRole('alert')).toHaveText("Couldn't load notifications. Try again.", { timeout: 20_000 });
+  await expect(m.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expectNoA11yViolations(m);
+  expect(await noSidewaysScroll()).toBe(true);
+
+  failList = false;
+  await m.getByRole('button', { name: 'Try again' }).click();
+  const rows = m.getByRole('list', { name: 'Notifications' }).getByRole('listitem');
+  await expect(rows).toHaveCount(1);
+
+  // Marking them read fails.
+  await m.route('**/api/notifications/read-all', (route) => route.fulfill({ status: 500, json: { error: 'unknown' } }));
+  await m.getByRole('button', { name: 'Mark all as read' }).click();
+  await expect(m.getByRole('alert')).toHaveText("Couldn't mark notifications as read. Try again.");
+  await expectNoA11yViolations(m);
+  expect(await noSidewaysScroll()).toBe(true);
 
   await member.context.close();
 });

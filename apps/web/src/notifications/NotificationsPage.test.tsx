@@ -4,7 +4,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { api, ApiError } from '../api/client.ts';
-import { formatWhen } from '../audit/dates.ts';
 import { NotificationsPage } from './NotificationsPage.tsx';
 import { NOTIFICATIONS_KEY, UNREAD_KEY } from './useNotifications.ts';
 
@@ -17,7 +16,6 @@ vi.mock('../auth/useMe.ts', () => ({
 }));
 
 const mockApi = vi.mocked(api);
-const TZ = 'Europe/Paris';
 
 beforeEach(() => mockApi.mockReset());
 afterEach(cleanup);
@@ -118,11 +116,11 @@ test('FR-5.3: each kind of row shows its exact sentence, the roadmap and the tim
   ]);
   expect(rows.map((r) => part(r, 'notification-excerpt'))).toEqual([null, null, null, null, null, '“Can you check the copy?”', null, null, null]);
 
-  const when = formatWhen('2027-01-12T09:30:00.000Z', TZ);
-  expect(part(rows[0]!, 'notification-meta')).toBe(`Launch plan · ${when}`);
-  expect(part(rows[1]!, 'notification-meta')).toBe(`3 Mar to 28 Apr 2027 → 5 Mar to 28 Apr 2027 · Launch plan · ${when}`);
-  // A roadmap gone mid-request leaves only the time.
-  expect(part(rows[8]!, 'notification-meta')).toBe(formatWhen('2027-07-01T22:15:00.000Z', TZ));
+  // Times are in the person's zone (Paris, UTC+1 in January and +2 in July).
+  expect(part(rows[0]!, 'notification-meta')).toBe('Launch plan · 12 Jan 2027 at 10:30');
+  expect(part(rows[1]!, 'notification-meta')).toBe('3 Mar to 28 Apr 2027 → 5 Mar to 28 Apr 2027 · Launch plan · 12 Jan 2027 at 10:30');
+  // A row with no roadmap name shows only the time.
+  expect(part(rows[8]!, 'notification-meta')).toBe('2 Jul 2027 at 00:15');
   expect(rows[0]!.querySelector('time')?.getAttribute('dateTime')).toBe('2027-01-12T09:30:00.000Z');
 
   expect(rows.map((r) => within(r).queryByText('Unread') !== null)).toEqual([true, false, false, false, false, true, false, false, false]);

@@ -2,12 +2,12 @@ import { formatDates, notificationSentence, type Notification } from '@roadmap/s
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { NOTIFICATIONS_LOAD_FAILED, NOTIFICATIONS_MARK_FAILED } from '../api/errors.ts';
-import { formatWhen } from '../audit/dates.ts';
 import { useMe } from '../auth/useMe.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Layout } from '../ui/Layout.tsx';
 import { useMarkAllRead, useMarkRead, useNotifications } from './useNotifications.ts';
+import { formatNotificationTime } from './when.ts';
 
 /** "{old dates} → {new dates}" for a dates row, then the roadmap (left out if it is gone), then the time. */
 function metaParts(n: Notification, timeZone: string) {
@@ -20,7 +20,7 @@ function metaParts(n: Notification, timeZone: string) {
   return (
     <>
       {parts.map((p) => `${p} · `).join('')}
-      <time dateTime={n.createdAt}>{formatWhen(n.createdAt, timeZone)}</time>
+      <time dateTime={n.createdAt}>{formatNotificationTime(n.createdAt, timeZone)}</time>
     </>
   );
 }

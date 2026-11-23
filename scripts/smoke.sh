@@ -43,11 +43,13 @@ fatal() { # a check failed and the ones after it depend on it
   finish
 }
 equals() { [[ "$1" == "$2" ]]; }
-has_header() { printf '%s' "$headers" | grep -qi "^$1:"; }
-header_starts() { printf '%s' "$headers" | grep -qi "^$1"; }
-is_html() { printf '%s' "$headers" | grep -qi '^content-type:.*text/html'; }
-body_contains() { printf '%s' "$body" | grep -qF "$1"; }
-body_contains_in() { printf '%s' "$1" | grep -qF "$2"; }
+# Not grep -q: under pipefail, grep stopping at its first match can leave the writer to die of SIGPIPE, which would
+# read as no match.
+has_header() { printf '%s' "$headers" | grep -i "^$1:" > /dev/null; }
+header_starts() { printf '%s' "$headers" | grep -i "^$1" > /dev/null; }
+is_html() { printf '%s' "$headers" | grep -i '^content-type:.*text/html' > /dev/null; }
+body_contains() { printf '%s' "$body" | grep -F "$1" > /dev/null; }
+body_contains_in() { printf '%s' "$1" | grep -F "$2" > /dev/null; }
 not() { ! "$@" 2> /dev/null; }
 # The string value of a top-level JSON field (no escapes in the values these checks read).
 json_field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\\([^\"]*\\)\".*/\\1/p"; }
@@ -288,7 +290,12 @@ check "assign the new member to the item (got $(status_of "$res"))" equals "$(st
 
 # The worker sends instant emails on its next pass (every WORKER_INTERVAL_MS, 30 seconds by default).
 subject="$assigner assigned you to Smoke item"
-worker_sent() { outbox worker | grep -F "\"to\":\"$invitee\"" | grep -qF "\"subject\":\"$subject\""; }
+# The outbox is read once per poll; the greps read all of it (no -q: see has_header).
+worker_sent() {
+  local mail
+  mail=$(outbox worker)
+  printf '%s\n' "$mail" | grep -F "\"to\":\"$invitee\"" | grep -F "\"subject\":\"$subject\"" > /dev/null
+}
 deadline=$((SECONDS + wait_seconds))
 until worker_sent || ((SECONDS >= deadline)); do sleep 2; done
 check "the worker emails \"$subject\" to the new member" worker_sent

@@ -282,6 +282,8 @@ describe('ensureIndexes', () => {
     expect(dedupe?.unique).toBe(true);
     expect(dedupe?.partialFilterExpression).toEqual({ dedupeKey: { $exists: true } });
     expect(find('notifications', { 'email.state': 1, 'email.nextAttemptAt': 1 })).toBeDefined();
+    // A note's delete or edit finds the mention rows it wrote.
+    expect(find('notifications', { tenantId: 1, noteId: 1 })?.partialFilterExpression).toEqual({ noteId: { $exists: true } });
     expect(find('snapshots', { tenantId: 1, roadmapId: 1, createdAt: -1 })).toBeDefined();
     expect(find('snapshotItems', { tenantId: 1, snapshotId: 1 })).toBeDefined();
     expect(find('snapshotNotes', { tenantId: 1, snapshotId: 1, itemId: 1, createdAt: 1 })).toBeDefined();

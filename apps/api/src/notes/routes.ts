@@ -16,7 +16,7 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { ScopedDb } from '../db/scoped.ts';
 import type { NoteDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
-import { notifyMentioned } from '../notifications/outbox.ts';
+import { deleteMentions, notifyMentioned, updateMentions } from '../notifications/outbox.ts';
 import type { PolicyContext } from '../policy/policy.ts';
 import { loadProject } from '../projects/access.ts';
 import { assertOpenForContent } from '../projects/content.ts';
@@ -144,7 +144,15 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
           deletedAt: null,
         });
         const userIds = mentionIdsOf(doc.mentions);
-        await notifyMentioned(s, { roadmapId, item, actorId: actor.userId, noteBody: body, userIds, now: doc.createdAt });
+        await notifyMentioned(s, {
+          roadmapId,
+          item,
+          actorId: actor.userId,
+          noteId: doc._id,
+          noteBody: body,
+          userIds,
+          now: doc.createdAt,
+        });
         await audit.record(s, {
           action: 'note.create',
           actor: { type: 'user', userId: actor.userId },
@@ -183,7 +191,9 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
         if (!updated) throw new HttpError(404, 'not_found');
         const before = new Set(mentionIdsOf(current.mentions));
         const added = mentionIdsOf(mentions).filter((id) => !before.has(id));
-        await notifyMentioned(s, { roadmapId, item, actorId: actor.userId, noteBody: body, userIds: added, now });
+        // The rows the note wrote before follow its new text, and go for anyone it no longer mentions.
+        await updateMentions(s, { roadmapId, noteId, noteBody: body, userIds: mentionIdsOf(mentions) });
+        await notifyMentioned(s, { roadmapId, item, actorId: actor.userId, noteId, noteBody: body, userIds: added, now });
         await audit.record(s, {
           action: 'note.update',
           actor: { type: 'user', userId: actor.userId },
@@ -211,6 +221,8 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
         await assertOpenForContent(s, roadmapId, projectId);
         const note = await loadNote(s, roadmapId, projectId, noteId);
         const notes = s.collection('notes');
+        // Whether the note goes or stays as a placeholder, its text leaves the mentions it sent.
+        await deleteMentions(s, { roadmapId, noteIds: [noteId] });
         if (note.parentId !== null) {
           await notes.deleteOne({ _id: noteId, roadmapId });
           // A deleted note was kept only to hold its thread; with its last reply gone, it goes too.

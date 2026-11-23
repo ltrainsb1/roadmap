@@ -1,8 +1,11 @@
 import type { Collection, Db } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
-import type { NotificationDoc, UserDoc } from '../../src/db/types.ts';
+import type { NoteDoc, NotificationDoc, UserDoc } from '../../src/db/types.ts';
+import { MemoryMailer } from '../../src/mail/mailer.ts';
+import { runPass } from '../../src/worker/run.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
+import { workerDeps } from '../worker/fixtures.ts';
 
 let t: TestApp;
 let paused: TestApp;
@@ -314,6 +317,63 @@ describe('mentioned', () => {
     // A body-only edit with the same mentions writes nothing more.
     expect((await w.editNote('C', item._id, noteId, { body: 'ask @Ann and @Dee now', mentionIds: [w.ids.A, w.ids.D] })).statusCode).toBe(200);
     expect(await w.rows()).toHaveLength(1);
+  });
+});
+
+describe('a note deleted or edited after it mentioned someone', () => {
+  /** One worker pass on the real clock; returns the subjects emailed to `userIds`. */
+  async function emailedTo(w: Awaited<ReturnType<typeof world>>, userIds: string[]): Promise<string[]> {
+    const users = await t.db.collection<UserDoc>('users').find({ _id: { $in: userIds } }).toArray();
+    const addresses = new Set(users.map((u) => u.email));
+    const mail = new MemoryMailer();
+    await runPass(workerDeps(t, { now: () => new Date() }, mail));
+    return mail.sent.filter((m) => addresses.has(m.to)).map((m) => m.subject);
+  }
+
+  test('FR-5.1: a deleted note\'s mention is neither listed nor emailed', async () => {
+    const w = await world();
+    const item = await w.item({ title: 'Billing' });
+    const created = await w.addNote('C', item._id, { body: 'oops @Ann', mentionIds: [w.ids.A] });
+    expect(created.statusCode).toBe(201);
+    const noteId = created.json<{ id: string }>().id;
+    expect((await w.rows()).map((r) => [r.userId, r.noteId])).toEqual([[w.ids.A, noteId]]);
+
+    expect((await w.send('C', 'DELETE', `${w.itemUrl(item._id)}/notes/${noteId}`)).statusCode).toBe(204);
+    expect(await w.rows()).toEqual([]);
+    expect(await emailedTo(w, [w.ids.A])).toEqual([]);
+  });
+
+  test('FR-5.1: a note deleted to a "This note was deleted." placeholder takes its mentions with it', async () => {
+    const w = await world();
+    const item = await w.item({ title: 'Billing' });
+    const created = await w.addNote('C', item._id, { body: 'oops @Ann', mentionIds: [w.ids.A] });
+    const noteId = created.json<{ id: string }>().id;
+    const reply = await w.addNote('D', item._id, { body: 'a reply', mentionIds: [], parentId: noteId });
+    expect(reply.statusCode).toBe(201);
+
+    expect((await w.send('C', 'DELETE', `${w.itemUrl(item._id)}/notes/${noteId}`)).statusCode).toBe(204);
+    expect((await t.db.collection<NoteDoc>('notes').findOne({ _id: noteId }))?.deletedAt).toBeInstanceOf(Date);
+    expect(await w.rows()).toEqual([]);
+    expect(await emailedTo(w, [w.ids.A])).toEqual([]);
+  });
+
+  test('FR-5.1: an edit that drops one of two mentioned people removes only that person\'s row and updates the other\'s excerpt', async () => {
+    const w = await world();
+    const item = await w.item({ title: 'Billing' });
+    const created = await w.addNote('C', item._id, { body: 'ask @Ann and @Dee', mentionIds: [w.ids.A, w.ids.D] });
+    const noteId = created.json<{ id: string }>().id;
+    const before = await w.rows();
+    const deeRow = before.find((r) => r.userId === w.ids.D)!;
+    // Dee's email has gone already; her row still takes the new text.
+    await t.db.collection<NotificationDoc>('notifications').updateOne({ _id: deeRow._id }, { $set: { 'email.state': 'sent' } });
+
+    const res = await w.editNote('C', item._id, noteId, { body: 'just @Dee now', mentionIds: [w.ids.D] });
+    expect(res.statusCode).toBe(200);
+    const after = await w.rows();
+    expect(after.map((r) => [r._id, r.userId, r.noteId, r.detail, r.email.state])).toEqual([
+      [deeRow._id, w.ids.D, noteId, { kind: 'mentioned', excerpt: 'just @Dee now' }, 'sent'],
+    ]);
+    expect(await emailedTo(w, [w.ids.A])).toEqual([]);
   });
 });
 

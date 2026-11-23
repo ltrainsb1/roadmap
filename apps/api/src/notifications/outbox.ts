@@ -23,6 +23,7 @@ export function notificationRow(p: {
   detail: NotificationDetail;
   now: Date;
   dedupeKey?: string;
+  noteId?: string;
 }): Omit<NotificationDoc, 'tenantId'> {
   return {
     _id: uuidv7(),
@@ -34,6 +35,7 @@ export function notificationRow(p: {
     projectTitle: p.item.title,
     detail: p.detail,
     ...(p.dedupeKey === undefined ? {} : { dedupeKey: p.dedupeKey }),
+    ...(p.noteId === undefined ? {} : { noteId: p.noteId }),
     createdAt: p.now,
     readAt: null,
     email: { state: 'pending', attempts: 0, nextAttemptAt: p.now, leaseUntil: null, sentAt: null },
@@ -47,6 +49,7 @@ async function write(
   type: NotificationType,
   userIds: string[],
   details: NotificationDetail[],
+  noteId?: string,
 ): Promise<void> {
   const candidates = [...new Set(userIds)].filter((id) => id !== e.actorId);
   if (candidates.length === 0 || details.length === 0) return;
@@ -61,7 +64,7 @@ async function write(
     .updateMany({ _id: { $in: members.map((m) => m._id) } }, { $inc: { notifyRevision: 1 } });
   const rows = recipients.flatMap((userId) =>
     details.map((detail) =>
-      notificationRow({ roadmapId: e.roadmapId, userId, type, actorId: e.actorId, item: e.item, detail, now: e.now }),
+      notificationRow({ roadmapId: e.roadmapId, userId, type, actorId: e.actorId, item: e.item, detail, now: e.now, noteId }),
     ),
   );
   await s.collection('notifications').insertMany(rows);
@@ -114,7 +117,28 @@ export async function notifyDatesChanged(
 /** "Mentioned" for each person given, with a plain excerpt of the note. On an edit, pass only the newly mentioned. */
 export async function notifyMentioned(
   s: ScopedDb,
-  e: { roadmapId: string; item: ProjectDoc; actorId: string; noteBody: string; userIds: string[]; now: Date },
+  e: { roadmapId: string; item: ProjectDoc; actorId: string; noteId: string; noteBody: string; userIds: string[]; now: Date },
 ): Promise<void> {
-  await write(s, e, 'mentioned', e.userIds, [{ kind: 'mentioned', excerpt: noteExcerpt(e.noteBody) }]);
+  await write(s, e, 'mentioned', e.userIds, [{ kind: 'mentioned', excerpt: noteExcerpt(e.noteBody) }], e.noteId);
+}
+
+/**
+ * After a note is edited: rows for people it no longer mentions go, and rows for those it still mentions take the new
+ * excerpt, whether or not their email has gone. Call before notifyMentioned for the newly mentioned.
+ */
+export async function updateMentions(
+  s: ScopedDb,
+  e: { roadmapId: string; noteId: string; noteBody: string; userIds: string[] },
+): Promise<void> {
+  const rows = s.collection('notifications');
+  await rows.deleteMany({ roadmapId: e.roadmapId, noteId: e.noteId, userId: { $nin: e.userIds } });
+  await rows.updateMany(
+    { roadmapId: e.roadmapId, noteId: e.noteId },
+    { $set: { 'detail.excerpt': noteExcerpt(e.noteBody) } },
+  );
+}
+
+/** A deleted note's mention rows, so its text is neither listed nor emailed; a pending email finds no row to claim. */
+export async function deleteMentions(s: ScopedDb, e: { roadmapId: string; noteIds: string[] }): Promise<void> {
+  await s.collection('notifications').deleteMany({ roadmapId: e.roadmapId, noteId: { $in: e.noteIds } });
 }

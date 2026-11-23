@@ -61,6 +61,8 @@ const INDEXES: Record<string, IndexDescription[]> = {
     { key: { 'email.state': 1, 'email.nextAttemptAt': 1 } },
     // One due-soon reminder per person and date; other rows carry no dedupeKey.
     { key: { tenantId: 1, userId: 1, dedupeKey: 1 }, unique: true, partialFilterExpression: { dedupeKey: { $exists: true } } },
+    // A note's delete or edit finds the mention rows it wrote; other rows carry no noteId.
+    { key: { tenantId: 1, noteId: 1 }, partialFilterExpression: { noteId: { $exists: true } } },
     { key: { createdAt: 1 }, expireAfterSeconds: NOTIFICATION_TTL_SECONDS },
   ],
   webauthnChallenges: [{ key: { expiresAt: 1 }, expireAfterSeconds: 0 }],

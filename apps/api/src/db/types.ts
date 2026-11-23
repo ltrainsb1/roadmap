@@ -294,6 +294,8 @@ export interface NotificationDoc {
   detail: NotificationDetail;
   /** Due soon only: `due:{projectId}:{end|milestoneId}:{date}`; unique per tenant and recipient. */
   dedupeKey?: string;
+  /** Mentioned only: the note that mentioned the recipient, so deleting or editing the note reaches this row. */
+  noteId?: string;
   createdAt: Date;
   readAt: Date | null;
   email: {

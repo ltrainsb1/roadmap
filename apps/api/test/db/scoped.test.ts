@@ -236,6 +236,7 @@ describe('ensureIndexes', () => {
       'snapshotItems',
       'snapshotNotes',
       'snapshotSessions',
+      'notifications',
     ];
     const exceptions = new Set([
       'users.email',
@@ -246,6 +247,8 @@ describe('ensureIndexes', () => {
       'users.passkeys.credentialId',
       'snapshots.linkId',
       'snapshotSessions.tokenHash',
+      // The worker's cross-tenant scan for rows due to send.
+      'notifications.email.state',
     ]);
     const all: Record<string, Awaited<ReturnType<ReturnType<Db['collection']>['indexes']>>> = {};
     for (const n of names) {
@@ -273,6 +276,14 @@ describe('ensureIndexes', () => {
     expect(find('users', { 'passkeys.credentialId': 1 })?.sparse).toBe(true);
     expect(find('snapshots', { linkId: 1 })?.unique).toBe(true);
     expect(find('snapshotSessions', { tokenHash: 1 })?.unique).toBe(true);
+    // FR-5.1: notifications are kept 90 days, and one due-soon reminder exists per person and dedupe key.
+    expect(find('notifications', { createdAt: 1 })?.expireAfterSeconds).toBe(90 * 86400);
+    const dedupe = find('notifications', { tenantId: 1, userId: 1, dedupeKey: 1 });
+    expect(dedupe?.unique).toBe(true);
+    expect(dedupe?.partialFilterExpression).toEqual({ dedupeKey: { $exists: true } });
+    expect(find('notifications', { 'email.state': 1, 'email.nextAttemptAt': 1 })).toBeDefined();
+    // A note's delete or edit finds the mention rows it wrote.
+    expect(find('notifications', { tenantId: 1, noteId: 1 })?.partialFilterExpression).toEqual({ noteId: { $exists: true } });
     expect(find('snapshots', { tenantId: 1, roadmapId: 1, createdAt: -1 })).toBeDefined();
     expect(find('snapshotItems', { tenantId: 1, snapshotId: 1 })).toBeDefined();
     expect(find('snapshotNotes', { tenantId: 1, snapshotId: 1, itemId: 1, createdAt: 1 })).toBeDefined();

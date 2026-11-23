@@ -1,0 +1,134 @@
+import { z } from 'zod';
+
+export const NOTIFICATION_TYPES = ['assigned', 'mentioned', 'dates_changed', 'due_soon'] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+export const EMAIL_MODES = ['instant', 'digest', 'off'] as const;
+export type EmailMode = (typeof EMAIL_MODES)[number];
+
+export type NotificationPrefs = Record<NotificationType, EmailMode>;
+
+export const DEFAULT_PREFS: NotificationPrefs = {
+  assigned: 'instant',
+  mentioned: 'instant',
+  dates_changed: 'digest',
+  due_soon: 'digest',
+};
+
+export const NOTIFICATION_LIMITS = { excerpt: 200, pageSize: 30, keepDays: 90, dueSoonDays: 3, digestHour: 8 } as const;
+
+const dateRangeSchema = z.object({ startDate: z.string().nullable(), endDate: z.string().nullable() });
+
+export const notificationDetailSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('assigned') }),
+  z.object({ kind: z.literal('mentioned'), excerpt: z.string() }),
+  z.object({ kind: z.literal('dates'), before: dateRangeSchema, after: dateRangeSchema }),
+  z.object({ kind: z.literal('milestone'), change: z.enum(['moved', 'added', 'removed']), name: z.string(), date: z.string() }),
+  z.object({ kind: z.literal('due_end'), date: z.string() }),
+  z.object({ kind: z.literal('due_milestone'), name: z.string(), date: z.string() }),
+]);
+export type NotificationDetail = z.infer<typeof notificationDetailSchema>;
+
+export const notificationSchema = z.object({
+  id: z.string(),
+  type: z.enum(NOTIFICATION_TYPES),
+  roadmapId: z.string(),
+  roadmapName: z.string(),
+  projectId: z.string(),
+  projectTitle: z.string(),
+  /** Null when there is no actor (see `hasActor`) or the actor's account is gone. */
+  actorName: z.string().nullable(),
+  hasActor: z.boolean(),
+  detail: notificationDetailSchema,
+  createdAt: z.string(),
+  read: z.boolean(),
+});
+export type Notification = z.infer<typeof notificationSchema>;
+
+export const notificationPageSchema = z.object({
+  items: z.array(notificationSchema),
+  nextCursor: z.string().nullable(),
+  unread: z.number().int(),
+});
+export type NotificationPage = z.infer<typeof notificationPageSchema>;
+
+export const unreadCountSchema = z.object({ unread: z.number().int() });
+export type UnreadCount = z.infer<typeof unreadCountSchema>;
+
+export const notificationPrefsSchema = z.object({
+  assigned: z.enum(EMAIL_MODES),
+  mentioned: z.enum(EMAIL_MODES),
+  dates_changed: z.enum(EMAIL_MODES),
+  due_soon: z.enum(EMAIL_MODES),
+});
+
+export const prefsResponseSchema = z.object({ prefs: notificationPrefsSchema, timezone: z.string() });
+export type PrefsResponse = z.infer<typeof prefsResponseSchema>;
+
+/** Fixed names, not Intl: short month names differ between ICU versions ("Sep" or "Sept"). */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/**
+ * One calendar date (`YYYY-MM-DD`) as "3 Mar 2027", or "3 Mar" with `year: false`.
+ * Throws a RangeError when `date` is not a real calendar date.
+ */
+export function formatDayUtc(date: string, opts?: { year?: boolean }): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const d = m ? new Date(`${date}T00:00:00Z`) : new Date(NaN);
+  if (!m || Number.isNaN(d.getTime()) || d.getUTCDate() !== Number(m[3])) throw new RangeError(`Invalid date: ${date}`);
+  const day = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]!}`;
+  return opts?.year === false ? day : `${day} ${d.getUTCFullYear()}`;
+}
+
+/** Start and end dates (`YYYY-MM-DD` or null) as one phrase: "3 Mar to 28 Apr 2027", "From 3 Mar 2027", "Until 28 Apr 2027", "No dates". */
+export function formatDates(start: string | null, end: string | null): string {
+  if (start && end) return `${formatDayUtc(start, { year: start.slice(0, 4) !== end.slice(0, 4) })} to ${formatDayUtc(end)}`;
+  if (start) return `From ${formatDayUtc(start)}`;
+  if (end) return `Until ${formatDayUtc(end)}`;
+  return 'No dates';
+}
+
+/** The row and email sentence, with no trailing full stop when `forSubject`. */
+export function notificationSentence(
+  n: Pick<Notification, 'projectTitle' | 'actorName' | 'hasActor' | 'detail'>,
+  opts?: { forSubject?: boolean },
+): string {
+  const who = n.actorName ?? 'A former member';
+  const title = n.projectTitle;
+  const d = n.detail;
+  let text: string;
+  switch (d.kind) {
+    case 'assigned':
+      text = `${who} assigned you to ${title}`;
+      break;
+    case 'mentioned':
+      text = `${who} mentioned you on ${title}`;
+      break;
+    case 'dates':
+      text = `${who} changed the dates on ${title}`;
+      break;
+    case 'milestone':
+      text =
+        d.change === 'moved'
+          ? `${who} moved the milestone ${d.name} on ${title} to ${formatDayUtc(d.date)}`
+          : `${who} ${d.change} the milestone ${d.name} on ${title}`;
+      break;
+    case 'due_end':
+      text = `${title} is due ${formatDayUtc(d.date)}`;
+      break;
+    case 'due_milestone':
+      text = `The milestone ${d.name} on ${title} is on ${formatDayUtc(d.date)}`;
+      break;
+  }
+  return opts?.forSubject ? text : `${text}.`;
+}
+
+/** Plain text, line breaks as spaces, trimmed, at most 200 UTF-16 units without splitting a surrogate pair. */
+export function noteExcerpt(body: string): string {
+  const flat = body.replace(/\s+/g, ' ').trim();
+  if (flat.length <= NOTIFICATION_LIMITS.excerpt) return flat;
+  let end: number = NOTIFICATION_LIMITS.excerpt;
+  const last = flat.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return flat.slice(0, end).trimEnd();
+}

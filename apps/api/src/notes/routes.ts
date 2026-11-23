@@ -16,6 +16,7 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { ScopedDb } from '../db/scoped.ts';
 import type { NoteDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
+import { deleteMentions, notifyMentioned, updateMentions } from '../notifications/outbox.ts';
 import type { PolicyContext } from '../policy/policy.ts';
 import { loadProject } from '../projects/access.ts';
 import { assertOpenForContent } from '../projects/content.ts';
@@ -119,7 +120,7 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
       const { roadmapId, projectId } = req.params;
       const { body, mentionIds, parentId } = req.body;
       const note = await actor.db.withTransaction(async (s) => {
-        await assertOpenForContent(s, roadmapId, projectId);
+        const item = await assertOpenForContent(s, roadmapId, projectId);
         const notes = s.collection('notes');
         if (parentId !== null) {
           // A deleted top-level note is kept only while it has replies, so it can take more. The delete of its last
@@ -141,6 +142,16 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
           createdAt: deps.now(),
           editedAt: null,
           deletedAt: null,
+        });
+        const userIds = mentionIdsOf(doc.mentions);
+        await notifyMentioned(s, {
+          roadmapId,
+          item,
+          actorId: actor.userId,
+          noteId: doc._id,
+          noteBody: body,
+          userIds,
+          now: doc.createdAt,
         });
         await audit.record(s, {
           action: 'note.create',
@@ -167,16 +178,22 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
       const { roadmapId, projectId, noteId } = req.params;
       const { body, mentionIds } = req.body;
       return actor.db.withTransaction(async (s) => {
-        await assertOpenForContent(s, roadmapId, projectId);
+        const item = await assertOpenForContent(s, roadmapId, projectId);
         const current = await loadNote(s, roadmapId, projectId, noteId);
         const mentions = await mentionsIn(s, roadmapId, body, mentionIds);
         const authorName = await nameOf(s, current.authorId);
         const sameMentions = mentionIdsOf(mentions).join('\n') === mentionIdsOf(current.mentions).join('\n');
         if (body === current.body && sameMentions) return toNoteDto(current, authorName);
+        const now = deps.now();
         const updated = await s
           .collection('notes')
-          .findOneAndUpdate({ _id: noteId, roadmapId, projectId }, { $set: { body, mentions, editedAt: deps.now() } });
+          .findOneAndUpdate({ _id: noteId, roadmapId, projectId }, { $set: { body, mentions, editedAt: now } });
         if (!updated) throw new HttpError(404, 'not_found');
+        const before = new Set(mentionIdsOf(current.mentions));
+        const added = mentionIdsOf(mentions).filter((id) => !before.has(id));
+        // The rows the note wrote before follow its new text, and go for anyone it no longer mentions.
+        await updateMentions(s, { roadmapId, noteId, noteBody: body, userIds: mentionIdsOf(mentions) });
+        await notifyMentioned(s, { roadmapId, item, actorId: actor.userId, noteId, noteBody: body, userIds: added, now });
         await audit.record(s, {
           action: 'note.update',
           actor: { type: 'user', userId: actor.userId },
@@ -204,6 +221,8 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
         await assertOpenForContent(s, roadmapId, projectId);
         const note = await loadNote(s, roadmapId, projectId, noteId);
         const notes = s.collection('notes');
+        // Whether the note goes or stays as a placeholder, its text leaves the mentions it sent.
+        await deleteMentions(s, { roadmapId, noteIds: [noteId] });
         if (note.parentId !== null) {
           await notes.deleteOne({ _id: noteId, roadmapId });
           // A deleted note was kept only to hold its thread; with its last reply gone, it goes too.

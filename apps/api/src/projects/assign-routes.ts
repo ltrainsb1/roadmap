@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createAuditLog } from '../audit/audit.ts';
 import { HttpError } from '../errors.ts';
+import { notifyAssigned } from '../notifications/outbox.ts';
 import { loadProject, toProjectDto } from './access.ts';
 import { projectParams } from '../params.ts';
 
@@ -48,6 +49,8 @@ export function registerAssignRoutes(app: FastifyInstance, deps: AssignRouteDeps
           );
         // Gone or changed since the read above: a versioned request treats both as a conflict, as the edit route does.
         if (!updated) throw version !== undefined ? new HttpError(409, 'conflict') : new HttpError(404, 'not_found');
+        const addedUserIds = wanted.filter((id) => !current.assigneeIds.includes(id));
+        await notifyAssigned(s, { roadmapId, item: updated, actorId: actor.userId, addedUserIds, now: deps.now() });
         await audit.record(s, {
           action: 'project.assign',
           actor: { type: 'user', userId: actor.userId },

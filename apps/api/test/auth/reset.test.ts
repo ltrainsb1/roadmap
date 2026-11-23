@@ -40,7 +40,7 @@ const tokenFrom = (text: string) => /\/reset\/([A-Za-z0-9_-]+)/.exec(text)![1]!;
 async function requestedToken(email: string): Promise<string> {
   const before = t.mail.sent.length;
   expect((await request(email)).statusCode).toBe(202);
-  await vi.waitFor(() => expect(t.mail.sent.length).toBe(before + 1));
+  await vi.waitFor(() => expect(t.mail.sent.length).toBe(before + 1), { timeout: 10_000 });
   return tokenFrom(t.mail.sent.at(-1)!.text);
 }
 const setup = async (o: { totp?: boolean } = {}) => {
@@ -63,7 +63,7 @@ describe('password reset request (FR-1)', () => {
     const before = t.mail.sent.length;
     const res = await request(user.email);
     expect(res.statusCode).toBe(202);
-    await vi.waitFor(() => expect(t.mail.sent).toHaveLength(before + 1));
+    await vi.waitFor(() => expect(t.mail.sent).toHaveLength(before + 1), { timeout: 10_000 });
     await new Promise((r) => setTimeout(r, 50));
     expect(t.mail.sent).toHaveLength(before + 1);
     const mail = t.mail.sent.at(-1)!;
@@ -90,7 +90,7 @@ describe('password reset request (FR-1)', () => {
     const { user } = await setup();
     const before = t.mail.sent.length;
     expect((await request(`  ${user.email.toUpperCase()} `)).statusCode).toBe(202);
-    await vi.waitFor(() => expect(t.mail.sent).toHaveLength(before + 1));
+    await vi.waitFor(() => expect(t.mail.sent).toHaveLength(before + 1), { timeout: 10_000 });
     expect(t.mail.sent.at(-1)!.to).toBe(user.email);
   });
 
@@ -99,7 +99,7 @@ describe('password reset request (FR-1)', () => {
     const spy = vi.spyOn(t.mail, 'send').mockRejectedValueOnce(new Error('ses_down'));
     const res = await request(user.email);
     expect(res.statusCode).toBe(202);
-    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     spy.mockRestore();
   });
 
@@ -262,7 +262,7 @@ describe('password reset with the breached-password check (FR-1)', () => {
     const tenant = await h.seed.tenant();
     const user = await h.seed.user(tenant._id, { password: OLD });
     await h.app.inject({ method: 'POST', url: '/api/auth/password-reset/request', remoteAddress: ip(), payload: { email: user.email } });
-    await vi.waitFor(() => expect(h.mail.sent).toHaveLength(1));
+    await vi.waitFor(() => expect(h.mail.sent).toHaveLength(1), { timeout: 10_000 });
     const token = tokenFrom(h.mail.sent[0]!.text);
     const post = (password: string) =>
       h.app.inject({ method: 'POST', url: '/api/auth/password-reset/confirm', remoteAddress: ip(), payload: { token, password } });

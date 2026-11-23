@@ -9,8 +9,10 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "bootstrap": "node --experimental-strip-types src/cli/bootstrap.ts",
-    "build": "esbuild src/server.ts --bundle --alias:@roadmap/shared=../../packages/shared/src/index.ts --platform=node --format=esm --target=node24 --packages=external --outfile=dist/server.js && pnpm build:cli",
-    "build:cli": "esbuild src/cli/bootstrap.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outfile=dist/cli/bootstrap.js"
+    "worker": "node --experimental-strip-types src/worker.ts",
+    "build": "esbuild src/server.ts --bundle --alias:@roadmap/shared=../../packages/shared/src/index.ts --platform=node --format=esm --target=node24 --packages=external --outfile=dist/server.js && pnpm build:cli && pnpm build:worker",
+    "build:cli": "esbuild src/cli/bootstrap.ts --bundle --alias:@roadmap/shared=../../packages/shared/src/index.ts --platform=node --format=esm --target=node24 --packages=external --outfile=dist/cli/bootstrap.js",
+    "build:worker": "esbuild src/worker.ts --bundle --alias:@roadmap/shared=../../packages/shared/src/index.ts --platform=node --format=esm --target=node24 --packages=external --outfile=dist/worker.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1175.0",

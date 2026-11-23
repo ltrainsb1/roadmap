@@ -6,10 +6,16 @@
 #   (a third, the test virus, is refused). Then they share the roadmap as a snapshot, open it with its password,
 #   have the PDF service print it, check port 8080 (the PDF service's internal listener) does not answer, and revoke
 #   the snapshot. Run them only against a throwaway stack, never one with real data.
+# SMOKE_COMPOSE is the stack's Compose command (for example "docker compose -f deploy/poc/docker-compose.yml -f
+#   deploy/poc/docker-compose.smoke.yml"). With it, and SMOKE_WRITES=yes, the email checks run too: they invite a
+#   second person, read the invite link from the API container's outbox file (MAILER=file), accept it, assign that
+#   person to the item, and wait for the worker container to write the assignment email to its own outbox file.
+#   They also check the worker is healthy. Without it these checks are skipped.
 # SMOKE_RESOLVE=host:port:address is passed to curl --resolve, for a stack that runs on another machine.
 # SMOKE_CONNECT_TO=host:port:host2:port2 is passed to curl --connect-to, so a download link that names a host the
 #   machine running this script can't resolve (minio:9000 in the smoke stack) still reaches it.
-# SMOKE_WAIT_SECONDS (default 60) bounds the wait for /api/health before the checks run.
+# SMOKE_WAIT_SECONDS (default 60) bounds the wait for /api/health before the checks run, and the wait for the
+#   assignment email.
 # SMOKE_SETUP_URL is a setup link from the bootstrap command (dist/cli/bootstrap.js); the file checks sign in with it,
 #   and fail without it. A link works once, so each run with SMOKE_WRITES=yes needs a new one.
 #   SMOKE_EMAIL (default you@example.com) is the address it was made for.
@@ -37,11 +43,13 @@ fatal() { # a check failed and the ones after it depend on it
   finish
 }
 equals() { [[ "$1" == "$2" ]]; }
-has_header() { printf '%s' "$headers" | grep -qi "^$1:"; }
-header_starts() { printf '%s' "$headers" | grep -qi "^$1"; }
-is_html() { printf '%s' "$headers" | grep -qi '^content-type:.*text/html'; }
-body_contains() { printf '%s' "$body" | grep -qF "$1"; }
-body_contains_in() { printf '%s' "$1" | grep -qF "$2"; }
+# Not grep -q: under pipefail, grep stopping at its first match can leave the writer to die of SIGPIPE, which would
+# read as no match.
+has_header() { printf '%s' "$headers" | grep -i "^$1:" > /dev/null; }
+header_starts() { printf '%s' "$headers" | grep -i "^$1" > /dev/null; }
+is_html() { printf '%s' "$headers" | grep -i '^content-type:.*text/html' > /dev/null; }
+body_contains() { printf '%s' "$body" | grep -F "$1" > /dev/null; }
+body_contains_in() { printf '%s' "$1" | grep -F "$2" > /dev/null; }
 not() { ! "$@" 2> /dev/null; }
 # The string value of a top-level JSON field (no escapes in the values these checks read).
 json_field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\\([^\"]*\\)\".*/\\1/p"; }
@@ -246,5 +254,53 @@ res=$(api DELETE "/api/roadmaps/$roadmap_id/snapshots/$snapshot_id")
 check "revoke the snapshot (got $(status_of "$res"))" equals "$(status_of "$res")" 204
 res=$(viewer GET "$snap")
 check "the revoked snapshot's link is not found (got $(status_of "$res"))" equals "$(status_of "$res")" 404
+
+# ---- Notifications (SMOKE_WRITES=yes and SMOKE_COMPOSE): an assignment reaches the assigned person by email.
+
+if [[ -z "${SMOKE_COMPOSE:-}" ]]; then
+  echo "skip the email checks, which read the containers' mail (set SMOKE_COMPOSE to the stack's Compose command to run them)"
+  finish
+fi
+# outbox SERVICE: what that container's file mailer has written (nothing yet if it has sent no mail).
+outbox() {
+  # shellcheck disable=SC2086,SC2016 # SMOKE_COMPOSE is a command and its arguments; the variable is the container's
+  $SMOKE_COMPOSE exec -T "$1" sh -c 'cat "$MAIL_OUTBOX_FILE" 2> /dev/null' 2> /dev/null || true
+}
+# The member entry (one object of the members list) with this email address.
+member_with_email() { printf '%s' "$1" | sed 's/},{/}\n{/g' | grep -F "\"email\":\"$2\""; }
+
+invitee="smoke-$(openssl rand -hex 6)@example.com"
+res=$(api_json POST "/api/roadmaps/$roadmap_id/invites" "{\"email\":\"$invitee\",\"role\":\"contributor\"}")
+[[ "$(status_of "$res")" == 201 ]] || fatal "invite a second person (got $(status_of "$res"))"
+invite_token=$(outbox api | grep -F "\"to\":\"$invitee\"" | grep -o '/invite/[A-Za-z0-9_-]*' | tail -n1 | sed 's|^/invite/||')
+[[ -n "$invite_token" ]] || fatal "the invite email is in the API's outbox"
+echo "ok   the invite email is in the API's outbox"
+# A new account, with no cookies: the signed-in person's session must not be replaced by the new one.
+res=$(curl "${curl_args[@]}" -X POST -H 'content-type: application/json' -w '\n%{http_code}' \
+  --data-binary "{\"name\":\"Smoke Teammate\",\"password\":\"smoke-$(openssl rand -hex 16)\",\"timezone\":\"UTC\"}" \
+  "$base/api/invites/$invite_token/accept")
+check "the invite is accepted with a new account (got $(status_of "$res"))" equals "$(status_of "$res")" 200
+
+res=$(api GET "/api/roadmaps/$roadmap_id/members")
+invitee_id=$(json_field "$(member_with_email "$(body_of "$res")" "$invitee")" userId)
+assigner=$(json_field "$(member_with_email "$(body_of "$res")" "$email")" name)
+[[ -n "$invitee_id" && -n "$assigner" ]] || fatal "the new member is in the members list (got $(status_of "$res"))"
+res=$(api_json PUT "/api/roadmaps/$roadmap_id/projects/$item_id/assignees" "{\"userIds\":[\"$invitee_id\"]}")
+check "assign the new member to the item (got $(status_of "$res"))" equals "$(status_of "$res")" 200
+
+# The worker sends instant emails on its next pass (every WORKER_INTERVAL_MS, 30 seconds by default).
+subject="$assigner assigned you to Smoke item"
+# The outbox is read once per poll; the greps read all of it (no -q: see has_header).
+worker_sent() {
+  local mail
+  mail=$(outbox worker)
+  printf '%s\n' "$mail" | grep -F "\"to\":\"$invitee\"" | grep -F "\"subject\":\"$subject\"" > /dev/null
+}
+deadline=$((SECONDS + wait_seconds))
+until worker_sent || ((SECONDS >= deadline)); do sleep 2; done
+check "the worker emails \"$subject\" to the new member" worker_sent
+# shellcheck disable=SC2086 # SMOKE_COMPOSE is a command and its arguments
+worker_health=$($SMOKE_COMPOSE ps --format '{{.Health}}' worker 2> /dev/null)
+check "the worker is healthy (got ${worker_health:-no worker})" equals "$worker_health" healthy
 
 finish

@@ -25,6 +25,7 @@ import { registerAttachmentRoutes } from './attachments/routes.ts';
 import { registerAuditRoutes } from './audit/routes.ts';
 import { registerMemberRoutes } from './members/routes.ts';
 import { registerNoteRoutes } from './notes/routes.ts';
+import { registerNotificationRoutes } from './notifications/routes.ts';
 import { registerAssignRoutes } from './projects/assign-routes.ts';
 import { registerPriorityRoutes } from './projects/priority-routes.ts';
 import { registerLifecycleRoutes } from './projects/lifecycle-routes.ts';
@@ -171,6 +172,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   registerRoadmapRoutes(app, { now });
+  registerNotificationRoutes(app, { now });
 
   registerInviteRoutes(app, {
     db: deps.db,

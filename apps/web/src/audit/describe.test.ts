@@ -165,4 +165,11 @@ describe('describeAuditEvent', () => {
       'A snapshot link was locked after too many wrong passwords.',
     );
   });
+
+  test('FR-5.2: user.notification_prefs says the person changed their email settings, without the choices', () => {
+    const after = { prefs: { assigned: 'off', mentioned: 'instant', dates_changed: 'digest', due_soon: 'digest' } };
+    expect(describeAuditEvent(event({ action: 'user.notification_prefs', target: { type: 'user', id: 'u1' }, after }), nameOf)).toBe(
+      'Maria changed their email notification settings.',
+    );
+  });
 });

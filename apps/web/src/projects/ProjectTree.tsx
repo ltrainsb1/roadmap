@@ -1,4 +1,4 @@
-import { buildTree, can, projectWarnings, type Project, type ProjectStatus, type Role, type TreeNode } from '@roadmap/shared';
+import { buildTree, can, formatDates, projectWarnings, type Project, type ProjectStatus, type Role, type TreeNode } from '@roadmap/shared';
 import {
   closestCenter,
   DndContext,
@@ -20,7 +20,7 @@ import { MouseAndPenSensor } from './dragSensors.ts';
 import { actionsButtonId, dragHandleIcon, NameCell } from './itemParts.tsx';
 import { StatusMenu } from './StatusMenu.tsx';
 import { isAssigned } from './useProjects.ts';
-import { addChildLabel, formatDates, warningText } from './names.ts';
+import { addChildLabel, warningText } from './names.ts';
 
 /** Where the add row is open: under `parentId`, or at the top level when null. */
 export interface AddTarget {

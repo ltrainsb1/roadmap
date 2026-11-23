@@ -3,13 +3,14 @@ import { useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { GENERIC_ERROR } from '../api/errors.ts';
 import { signOut } from '../auth/signOut.ts';
+import { NotificationBell } from '../notifications/NotificationBell.tsx';
 import { Button } from './Button.tsx';
 
 interface LayoutProps {
   children: ReactNode;
   /** Sign-in screens are one narrow column; app screens use the wider one. */
   width?: 'narrow' | 'wide';
-  /** Adds the Security link and the Sign out button to the header. */
+  /** Adds the notifications bell, the Security link and the Sign out button to the header. */
   signedIn?: boolean;
   /** Extra header content for a signed-in screen, such as the roadmap picker. */
   headerExtra?: ReactNode;
@@ -39,6 +40,7 @@ export function Layout({ children, width = 'narrow', signedIn = false, headerExt
           {headerExtra}
           {signedIn && (
             <nav aria-label="Account" className="account-nav">
+              <NotificationBell />
               <Link to="/settings/security" className="text-link">
                 Security
               </Link>

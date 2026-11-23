@@ -1,4 +1,14 @@
-import type { Milestone, PriorityLabel, ProjectLink, ProjectStatus, Role, SnapshotItem } from '@roadmap/shared';
+import type {
+  Milestone,
+  NotificationDetail,
+  NotificationPrefs,
+  NotificationType,
+  PriorityLabel,
+  ProjectLink,
+  ProjectStatus,
+  Role,
+  SnapshotItem,
+} from '@roadmap/shared';
 
 // _id is a UUID v7 string. Every doc except TenantDoc and WebauthnChallengeDoc carries tenantId.
 // Later tasks add their fields to these types.
@@ -37,6 +47,10 @@ export interface UserDoc {
     name: string;
     createdAt: Date;
   }>;
+  /** Only the settings the person changed; the rest are `DEFAULT_PREFS`. */
+  notificationPrefs?: Partial<NotificationPrefs>;
+  /** The local date (`YYYY-MM-DD`, in `timezone`) of the last digest sent. */
+  digestSentOn?: string;
   createdAt: Date;
 }
 
@@ -47,6 +61,11 @@ export interface MembershipDoc {
   userId: string;
   role: Role;
   createdAt: Date;
+  /**
+   * Bumped each time a notification is written for this member. Removal deletes this document, so a notification
+   * written at the same instant conflicts with the removal and one of the two transactions retries.
+   */
+  notifyRevision?: number;
 }
 
 export interface RoadmapDoc {
@@ -258,4 +277,32 @@ export interface AuditEventDoc {
   before?: unknown;
   after?: unknown;
   ip: string | null;
+}
+
+export interface NotificationDoc {
+  _id: string;
+  tenantId: string;
+  roadmapId: string;
+  /** The recipient. */
+  userId: string;
+  type: NotificationType;
+  /** Null for due soon. */
+  actorId: string | null;
+  projectId: string;
+  /** The item's title when the row was written. */
+  projectTitle: string;
+  detail: NotificationDetail;
+  /** Due soon only: `due:{projectId}:{end|milestoneId}:{date}`; unique per tenant and recipient. */
+  dedupeKey?: string;
+  /** Mentioned only: the note that mentioned the recipient, so deleting or editing the note reaches this row. */
+  noteId?: string;
+  createdAt: Date;
+  readAt: Date | null;
+  email: {
+    state: 'pending' | 'sending' | 'sent' | 'skipped' | 'failed';
+    attempts: number;
+    nextAttemptAt: Date;
+    leaseUntil: Date | null;
+    sentAt: Date | null;
+  };
 }

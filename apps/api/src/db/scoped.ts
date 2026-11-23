@@ -5,6 +5,7 @@ import type {
   InviteDoc,
   MembershipDoc,
   NoteDoc,
+  NotificationDoc,
   ProjectDoc,
   ResetTokenDoc,
   RoadmapDoc,
@@ -29,7 +30,8 @@ export type CollectionName =
   | 'snapshots'
   | 'snapshotItems'
   | 'snapshotNotes'
-  | 'snapshotSessions';
+  | 'snapshotSessions'
+  | 'notifications';
 
 interface DocMap {
   users: UserDoc;
@@ -45,6 +47,7 @@ interface DocMap {
   snapshotItems: SnapshotItemDoc;
   snapshotNotes: SnapshotNoteDoc;
   snapshotSessions: SnapshotSessionDoc;
+  notifications: NotificationDoc;
 }
 export type DocFor<N extends CollectionName> = DocMap[N];
 

@@ -1,8 +1,8 @@
-import type { Project, ProjectStatus } from '@roadmap/shared';
+import { formatDates, type Project, type ProjectStatus } from '@roadmap/shared';
 import type { ReactNode, Ref } from 'react';
 import { Menu, type MenuItem } from '../ui/Menu.tsx';
 import { actionsButtonId, TitleLink, WarningIcon } from './itemParts.tsx';
-import { formatDates, levelName } from './names.ts';
+import { levelName } from './names.ts';
 import { StatusMenu } from './StatusMenu.tsx';
 
 interface BoardCardProps {

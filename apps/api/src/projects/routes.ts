@@ -15,6 +15,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { createAuditLog } from '../audit/audit.ts';
 import type { ProjectDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
+import { notifyDatesChanged } from '../notifications/outbox.ts';
 import { assignedCtx, loadProject, parentAssignedCtx, toProjectDto } from './access.ts';
 import { projectParams, roadmapParams } from '../params.ts';
 
@@ -188,6 +189,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
           { $set: { ...changes, updatedAt: deps.now() }, $inc: { version: 1 } },
         );
         if (!updated) throw new HttpError(409, 'conflict');
+        await notifyDatesChanged(s, { roadmapId, before: current, after: updated, actorId: actor.userId, now: deps.now() });
 
         const pick = (doc: Pick<ProjectDoc, EditableField>) =>
           Object.fromEntries(changed.map((k) => [k, doc[k]]));

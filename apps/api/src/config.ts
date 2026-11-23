@@ -42,6 +42,10 @@ export interface Config {
    * the client address from X-Forwarded-For only when the connected peer is inside one of them. Required there.
    */
   trustedProxyCidrs: string[];
+  /** How long the worker waits after one pass before the next. */
+  workerIntervalMs: number;
+  /** The file the worker touches after each pass; its health check reads the file's age. */
+  workerHeartbeatFile: string;
 }
 
 export class ConfigError extends Error {
@@ -116,6 +120,8 @@ const envSchema = z.object({
   PDF_URL: z.url({ protocol: /^https?$/ }).optional(),
   PDF_TIMEOUT_MS: z.coerce.number().int().min(1).default(60000),
   TRUSTED_PROXY_CIDR: cidrList.optional(),
+  WORKER_INTERVAL_MS: z.coerce.number().int().min(100).default(30000),
+  WORKER_HEARTBEAT_FILE: z.string().min(1).default('/tmp/worker-heartbeat'),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -178,5 +184,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     ...(e.PDF === 'service' && { pdfUrl: e.PDF_URL! }),
     pdfTimeoutMs: e.PDF_TIMEOUT_MS,
     trustedProxyCidrs: e.TRUSTED_PROXY_CIDR ?? [],
+    workerIntervalMs: e.WORKER_INTERVAL_MS,
+    workerHeartbeatFile: e.WORKER_HEARTBEAT_FILE,
   };
 }

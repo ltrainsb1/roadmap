@@ -98,6 +98,8 @@ export function describeAuditEvent(e: AuditEvent, nameOf: (userId: string) => st
       return 'A snapshot was opened.';
     case 'snapshot.locked':
       return 'A snapshot link was locked after too many wrong passwords.';
+    case 'user.notification_prefs':
+      return `${who} changed their email notification settings.`;
     default:
       return `${who} made a change: ${e.action}.`;
   }

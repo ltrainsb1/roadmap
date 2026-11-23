@@ -11,10 +11,12 @@ import { RequireAuth } from './auth/RequireAuth.tsx';
 import { ResetPage } from './auth/ResetPage.tsx';
 import { AuditPage } from './audit/AuditPage.tsx';
 import { MembersPage } from './members/MembersPage.tsx';
+import { NotificationsPage } from './notifications/NotificationsPage.tsx';
 import { ProjectsPage } from './projects/ProjectsPage.tsx';
 import type { ProjectView } from './projects/ViewSwitcher.tsx';
 import { PickerPage } from './roadmaps/PickerPage.tsx';
 import { RoadmapIndex, RoadmapLayout } from './roadmaps/RoadmapLayout.tsx';
+import { NotificationSettingsPage } from './settings/NotificationSettingsPage.tsx';
 import { SecurityPage } from './settings/SecurityPage.tsx';
 import { SnapshotsPage } from './snapshots/SnapshotsPage.tsx';
 import { LinkProblem, SnapshotGate, ToSnapshotGate } from './viewer/SnapshotGate.tsx';
@@ -128,6 +130,22 @@ export function App() {
             <Route path="snapshots" element={<SnapshotsPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>
+          <Route
+            path="/notifications"
+            element={
+              <RequireAuth>
+                <NotificationsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/settings/notifications"
+            element={
+              <RequireAuth>
+                <NotificationSettingsPage />
+              </RequireAuth>
+            }
+          />
           <Route
             path="/settings/security"
             element={

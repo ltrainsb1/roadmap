@@ -138,6 +138,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
         await s.collection('roadmaps').updateOne({ _id: roadmapId }, { $inc: { membershipRevision: 1 } });
         // Not an edit by a user, so no version bump and no per-item audit event; member.remove below covers it.
         await s.collection('projects').updateMany({ roadmapId, assigneeIds: userId }, { $pull: { assigneeIds: userId } });
+        // What they were told about this roadmap goes with their access to it; other roadmaps' rows stay.
+        await s.collection('notifications').deleteMany({ roadmapId, userId });
         await audit.record(s, {
           action: 'member.remove',
           actor: { type: 'user', userId: actor.userId },

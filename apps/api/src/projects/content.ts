@@ -19,7 +19,8 @@ export async function assertOpenForContent(s: ScopedDb, roadmapId: string, proje
 }
 
 /**
- * Deletes the notes and file records of the given items, or of the whole roadmap when `projectIds` is left out.
+ * Deletes the notes, notifications and file records of the given items, or of the whole roadmap when `projectIds` is
+ * left out.
  * Returns the storage keys of the files, which the caller deletes after the transaction commits.
  */
 export async function deleteContentOf(
@@ -29,6 +30,7 @@ export async function deleteContentOf(
   const { roadmapId, projectIds } = filter;
   const filterFor = { roadmapId, ...(projectIds !== undefined && { projectId: { $in: projectIds } }) };
   await s.collection('notes').deleteMany(filterFor);
+  await s.collection('notifications').deleteMany(filterFor);
   const attachments = s.collection('attachments');
   const keys = (await attachments.find(filterFor)).map((a) => a.key);
   await attachments.deleteMany(filterFor);

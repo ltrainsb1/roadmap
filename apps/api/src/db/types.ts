@@ -1,4 +1,14 @@
-import type { Milestone, PriorityLabel, ProjectLink, ProjectStatus, Role, SnapshotItem } from '@roadmap/shared';
+import type {
+  Milestone,
+  NotificationDetail,
+  NotificationPrefs,
+  NotificationType,
+  PriorityLabel,
+  ProjectLink,
+  ProjectStatus,
+  Role,
+  SnapshotItem,
+} from '@roadmap/shared';
 
 // _id is a UUID v7 string. Every doc except TenantDoc and WebauthnChallengeDoc carries tenantId.
 // Later tasks add their fields to these types.
@@ -37,6 +47,10 @@ export interface UserDoc {
     name: string;
     createdAt: Date;
   }>;
+  /** Only the settings the person changed; the rest are `DEFAULT_PREFS`. */
+  notificationPrefs?: Partial<NotificationPrefs>;
+  /** The local date (`YYYY-MM-DD`, in `timezone`) of the last digest sent. */
+  digestSentOn?: string;
   createdAt: Date;
 }
 
@@ -258,4 +272,30 @@ export interface AuditEventDoc {
   before?: unknown;
   after?: unknown;
   ip: string | null;
+}
+
+export interface NotificationDoc {
+  _id: string;
+  tenantId: string;
+  roadmapId: string;
+  /** The recipient. */
+  userId: string;
+  type: NotificationType;
+  /** Null for due soon. */
+  actorId: string | null;
+  projectId: string;
+  /** The item's title when the row was written. */
+  projectTitle: string;
+  detail: NotificationDetail;
+  /** Due soon only: `due:{projectId}:{end|milestoneId}:{date}`; unique per tenant and recipient. */
+  dedupeKey?: string;
+  createdAt: Date;
+  readAt: Date | null;
+  email: {
+    state: 'pending' | 'sending' | 'sent' | 'skipped' | 'failed';
+    attempts: number;
+    nextAttemptAt: Date;
+    leaseUntil: Date | null;
+    sentAt: Date | null;
+  };
 }

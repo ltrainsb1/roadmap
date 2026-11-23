@@ -16,6 +16,7 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { ScopedDb } from '../db/scoped.ts';
 import type { NoteDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
+import { notifyMentioned } from '../notifications/outbox.ts';
 import type { PolicyContext } from '../policy/policy.ts';
 import { loadProject } from '../projects/access.ts';
 import { assertOpenForContent } from '../projects/content.ts';
@@ -119,7 +120,7 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
       const { roadmapId, projectId } = req.params;
       const { body, mentionIds, parentId } = req.body;
       const note = await actor.db.withTransaction(async (s) => {
-        await assertOpenForContent(s, roadmapId, projectId);
+        const item = await assertOpenForContent(s, roadmapId, projectId);
         const notes = s.collection('notes');
         if (parentId !== null) {
           // A deleted top-level note is kept only while it has replies, so it can take more. The delete of its last
@@ -142,6 +143,8 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
           editedAt: null,
           deletedAt: null,
         });
+        const userIds = mentionIdsOf(doc.mentions);
+        await notifyMentioned(s, { roadmapId, item, actorId: actor.userId, noteBody: body, userIds, now: doc.createdAt });
         await audit.record(s, {
           action: 'note.create',
           actor: { type: 'user', userId: actor.userId },
@@ -167,7 +170,7 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
       const { roadmapId, projectId, noteId } = req.params;
       const { body, mentionIds } = req.body;
       return actor.db.withTransaction(async (s) => {
-        await assertOpenForContent(s, roadmapId, projectId);
+        const item = await assertOpenForContent(s, roadmapId, projectId);
         const current = await loadNote(s, roadmapId, projectId, noteId);
         const mentions = await mentionsIn(s, roadmapId, body, mentionIds);
         const authorName = await nameOf(s, current.authorId);
@@ -177,6 +180,9 @@ export function registerNoteRoutes(app: FastifyInstance, deps: NoteRouteDeps): v
           .collection('notes')
           .findOneAndUpdate({ _id: noteId, roadmapId, projectId }, { $set: { body, mentions, editedAt: deps.now() } });
         if (!updated) throw new HttpError(404, 'not_found');
+        const before = new Set(mentionIdsOf(current.mentions));
+        const added = mentionIdsOf(mentions).filter((id) => !before.has(id));
+        await notifyMentioned(s, { roadmapId, item, actorId: actor.userId, noteBody: body, userIds: added, now: deps.now() });
         await audit.record(s, {
           action: 'note.update',
           actor: { type: 'user', userId: actor.userId },

@@ -1,4 +1,4 @@
-import type { Project, ProjectStatus, ProjectWarning, TimelineZoom } from '@roadmap/shared';
+import { formatDayUtc, type Project, type ProjectStatus, type ProjectWarning, type TimelineZoom } from '@roadmap/shared';
 
 const STATUS_NAMES: Record<ProjectStatus, string> = {
   not_started: 'Not started',
@@ -37,7 +37,7 @@ const WITHOUT_YEAR = dayFormat(false);
 const parse = (date: string): Date => new Date(`${date}T00:00:00Z`);
 
 /** One calendar date (`YYYY-MM-DD`) as "3 Mar 2027". */
-export const formatDay = (date: string): string => WITH_YEAR.format(parse(date));
+export const formatDay = (date: string): string => formatDayUtc(date);
 
 /** A milestone as "Milestone: Beta, 3 Mar 2027". */
 export const formatMilestone = (m: { name: string; date: string }): string => `Milestone: ${m.name}, ${formatDay(m.date)}`;

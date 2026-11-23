@@ -154,6 +154,7 @@ export const AUDIT_ACTIONS = [
   'snapshot.revoke',
   'snapshot.access',
   'snapshot.locked',
+  'user.notification_prefs',
 ] as const;
 export type AuditActionName = (typeof AUDIT_ACTIONS)[number];
 

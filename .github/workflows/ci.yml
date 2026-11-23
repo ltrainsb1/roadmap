@@ -173,6 +173,9 @@ jobs:
           SMOKE_WRITES: 'yes'
           SMOKE_SETUP_URL: ${{ steps.bootstrap.outputs.url }}
           SMOKE_CONNECT_TO: minio:9000:127.0.0.1:9000
+          # The email checks read the API's and the worker's outbox files through Compose, and wait for the
+          # assignment email the worker sends.
+          SMOKE_COMPOSE: ${{ env.COMPOSE }}
         run: scripts/smoke.sh https://localhost
       - name: Show the stack logs on failure
         if: failure()

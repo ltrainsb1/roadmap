@@ -12,6 +12,7 @@
 #   pdf      1g         260 MiB (headless Chromium; at most 2 renders at once, so allow for more). The API refuses
 #                       a PDF of more than 700 rows (MAX_PDF_SIZE): two of that size at once peaked at 785 MiB.
 #   caddy    no limit    22 MiB
+#   worker   256m        50 MiB (after the smoke script and its assignment email; notifications plan, Task 7)
 # About 2.5 GiB at once, and up to 4.5 GiB if ClamAV and Chromium both reach their limits: size the POC server at
 # 8 GB, not 4.
 
@@ -90,8 +91,9 @@ services:
     image: roadmap-api:poc
     restart: unless-stopped
     env_file: .env
-    # Production needs both (the API refuses to start otherwise), so they are fixed here, not in .env.
-    environment:
+    # Production needs both (the API refuses to start otherwise), so they are fixed here, not in .env. The worker
+    # loads the same configuration, so it takes the same settings (the anchor below).
+    environment: &api-environment
       FILES: s3
       S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET in deploy/poc/.env}
       SCANNER: clamd
@@ -136,6 +138,49 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+
+  # Sends notification emails: instant ones, due-soon reminders and daily digests (dist/worker.js in the API image).
+  # It needs only MongoDB and outbound email (SES), so it is on the default network alone, with no published port.
+  # Nothing depends on it: with it stopped, the site and the API keep working and emails wait in MongoDB until it
+  # is back.
+  worker:
+    image: roadmap-api:poc
+    command: ["node", "dist/worker.js"]
+    restart: unless-stopped
+    env_file: .env
+    # The API's settings: the worker reads the same configuration, which refuses to load without them in
+    # production, even those (files, scanner, PDFs) the worker does not use.
+    environment: *api-environment
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - default
+    read_only: true
+    # The heartbeat file (WORKER_HEARTBEAT_FILE, default /tmp/worker-heartbeat) and the file mailer's outbox.
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    healthcheck:
+      # The worker touches its heartbeat file after each pass in which at least one step succeeded. Healthy while
+      # that file is newer than three intervals (WORKER_INTERVAL_MS, default 30 s).
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const fs = process.getBuiltinModule('node:fs');
+          const file = process.env.WORKER_HEARTBEAT_FILE || '/tmp/worker-heartbeat';
+          const limit = 3 * Number(process.env.WORKER_INTERVAL_MS || 30000);
+          try { process.exit(Date.now() - fs.statSync(file).mtimeMs < limit ? 0 : 1) } catch { process.exit(1) }
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
 
   # Prints snapshot pages to PDF with headless Chromium. Only the API calls it (pdf_api), and it only opens pages
   # from Caddy's internal listener (pdf_render). Both networks are internal: no route to MongoDB, ClamAV, S3/MinIO

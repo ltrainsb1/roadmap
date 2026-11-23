@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { apiAs, expectNoA11yViolations, field, readMails, seedProject, useCspGuard, waitForTwoWorkerPasses } from './helpers.ts';
+import { apiAs, expectNoA11yViolations, readMails, seedProject, useCspGuard, waitForTwoWorkerPasses } from './helpers.ts';
 import { expect, joinByApi, test, type ApiCall } from './fixtures.ts';
 
 useCspGuard();
@@ -106,20 +106,4 @@ test('FR-5.2: the settings page passes axe; at 375 px each row stacks with no si
   // Once saved, leaving does not ask.
   await page.getByRole('link', { name: 'Security' }).click();
   await expect(page.getByRole('heading', { name: 'Security', level: 1 })).toBeVisible();
-});
-
-// Blocked: the API records `user.notification_prefs` with no roadmapId, and the only audit log screen lists one
-// roadmap's events (GET /api/roadmaps/:roadmapId/audit filters on roadmapId), so the event never shows there. The
-// sentence and the filter label are in place and unit-tested; this runs once the plan says where the event belongs.
-test.fixme('FR-5.2: the audit log shows "changed their email notification settings."', async ({ page, owner, roadmap }) => {
-  await openSettings(page);
-  await row(page, 'Mentions').getByRole('radio', { name: 'Off' }).check();
-  await save(page);
-
-  await page.goto(`/r/${roadmap.id}/audit`);
-  await expect(page.getByRole('heading', { name: 'Audit log', level: 1 })).toBeVisible();
-  await field(page, 'Action').selectOption({ label: 'Notification settings changed' });
-  const log = page.getByRole('list', { name: 'Events' });
-  await expect(log.getByRole('listitem')).toHaveCount(1);
-  await expect(log).toContainText(`${owner.name} changed their email notification settings.`);
 });

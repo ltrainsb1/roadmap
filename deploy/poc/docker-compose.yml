@@ -164,9 +164,14 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: 256m
+    # On SIGTERM the worker finishes the pass it is in, then exits. A pass can wait on the email service (each send may
+    # take up to 30 s before it gives up), so the stop waits up to 2 minutes rather than Docker's 10 s: a kill between
+    # sending an email and marking it sent would send that email again after the lease runs out.
+    stop_grace_period: 120s
     healthcheck:
       # The worker touches its heartbeat file after each pass in which at least one step succeeded. Healthy while
-      # that file is newer than three intervals (WORKER_INTERVAL_MS, default 30 s).
+      # that file is newer than three intervals (WORKER_INTERVAL_MS, default 30 s) plus 150 s: one pass held up by a
+      # slow email service (30 s per send before it gives up) is not reported as a dead worker.
       test:
         - CMD
         - node
@@ -174,7 +179,7 @@ services:
         - >-
           const fs = process.getBuiltinModule('node:fs');
           const file = process.env.WORKER_HEARTBEAT_FILE || '/tmp/worker-heartbeat';
-          const limit = 3 * Number(process.env.WORKER_INTERVAL_MS || 30000);
+          const limit = 3 * Number(process.env.WORKER_INTERVAL_MS || 30000) + 150000;
           try { process.exit(Date.now() - fs.statSync(file).mtimeMs < limit ? 0 : 1) } catch { process.exit(1) }
       interval: 15s
       timeout: 5s

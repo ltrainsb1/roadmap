@@ -61,6 +61,12 @@ export class SesMailer implements Mailer {
   }
 }
 
+/**
+ * How long one SES call may take. Well under the worker's 5 minute claim on a row, so a hung send fails (and the row is
+ * retried) before another worker could take the row over and send it too.
+ */
+export const SES_TIMEOUTS = { connectionTimeout: 5_000, requestTimeout: 30_000 } as const;
+
 export function createMailer(config: Pick<Config, 'mailer' | 'mailFrom' | 'mailOutboxFile' | 'awsRegion'>): Mailer {
   switch (config.mailer) {
     case 'memory':
@@ -69,6 +75,6 @@ export function createMailer(config: Pick<Config, 'mailer' | 'mailFrom' | 'mailO
       if (!config.mailOutboxFile) throw new Error('MAILER=file needs MAIL_OUTBOX_FILE');
       return new FileMailer(config.mailOutboxFile);
     case 'ses':
-      return new SesMailer(new SESv2Client({ region: config.awsRegion }), config.mailFrom);
+      return new SesMailer(new SESv2Client({ region: config.awsRegion, requestHandler: SES_TIMEOUTS }), config.mailFrom);
   }
 }

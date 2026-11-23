@@ -100,4 +100,36 @@ describe('worker: due soon', () => {
     expect(await rowsFor(t, pago)).toHaveLength(1);
     expect(await rowsFor(t, kiri)).toHaveLength(1);
   });
+
+  test('FR-5.1: due soon reminds no assignee who is not a member of the roadmap', async () => {
+    const c = clock('2026-12-01T12:00:00.000Z');
+    const tenantId = (await t.seed.tenant())._id;
+    const owner = await person(t, tenantId, { name: 'Olive' });
+    const gone = await person(t, tenantId, { name: 'Nora' });
+    const roadmap = await t.seed.roadmap(tenantId, owner._id, 'Launch');
+    await t.seed.project(tenantId, roadmap._id, { title: 'Left behind', endDate: '2026-12-02', assigneeIds: [gone._id, owner._id] });
+    await writeDueSoon(workerDeps(t, c, new MemoryMailer()));
+    expect(await rowsFor(t, gone)).toHaveLength(0);
+    expect(await rowsFor(t, owner)).toHaveLength(1);
+  });
+
+  test('FR-5.1: due-soon reminders set to "instantly" are emailed with their exact subjects', async () => {
+    const c = clock('2026-12-10T12:00:00.000Z');
+    const tenantId = (await t.seed.tenant())._id;
+    const sam = await person(t, tenantId, { name: 'Sam', prefs: { due_soon: 'instant' } });
+    const roadmap = await t.seed.roadmap(tenantId, sam._id, 'Harbour');
+    const item = await t.seed.project(tenantId, roadmap._id, { title: 'Ferry plan', endDate: '2026-12-12', assigneeIds: [sam._id] });
+    await scoped(t.db, tenantId)
+      .collection('projects')
+      .updateOne({ _id: item._id }, { $set: { milestones: [{ id: 'b', name: 'Beta', date: '2026-12-11' }] } });
+    const mail = new MemoryMailer();
+    const d = workerDeps(t, c, mail);
+    await runPass(d); // writes the reminders (after this pass's instant step)
+    c.set('2026-12-10T12:00:30.000Z');
+    await runPass(d); // sends them
+    const mine = mail.sent.filter((m) => m.to === sam.email);
+    expect(mine.map((m) => m.subject).sort()).toEqual(['Ferry plan is due 12 Dec 2026', 'The milestone Beta on Ferry plan is on 11 Dec 2026']);
+    const end = mine.find((m) => m.subject.startsWith('Ferry'))!;
+    expect(end.text.split('\n').slice(0, 2)).toEqual(['Ferry plan is due 12 Dec 2026.', 'Harbour · 10 Dec 2026']);
+  });
 });

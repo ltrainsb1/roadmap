@@ -21,8 +21,7 @@ export default tseslint.config(
   },
   {
     files: ['apps/api/src/**/*.ts'],
-    // worker-db.ts is the worker's cross-tenant reader, the one module beside db/unscoped.ts that may query freely.
-    ignores: ['apps/api/src/db/**', 'apps/api/src/worker/worker-db.ts'],
+    ignores: ['apps/api/src/db/**'],
     rules: {
       'no-restricted-imports': [
         'error',

@@ -1,5 +1,5 @@
 import type { Db, Filter } from 'mongodb';
-import type { NotificationDoc, ProjectDoc } from '../db/types.ts';
+import type { NotificationDoc, ProjectDoc } from './types.ts';
 
 // The worker's only reads across tenants: each finds which tenants (and rows or people in them) have work, and
 // everything done about that work goes through `scoped()` for that tenant. Collections are looked up per call, so

@@ -6,11 +6,13 @@ import { loadConfig } from '../../src/config.ts';
 import {
   createMailer,
   FileMailer,
+  SES_TIMEOUTS,
   MemoryMailer,
   SesMailer,
   type SesLikeClient,
 } from '../../src/mail/mailer.ts';
 import { inviteEmail, resetEmail } from '../../src/mail/templates.ts';
+import { LEASE_MS } from '../../src/worker/claims.ts';
 
 const msg = (n: number) => ({ to: `u${n}@example.com`, subject: `Subject ${n}`, text: `text ${n}`, html: `<p>${n}</p>` });
 
@@ -113,4 +115,9 @@ describe('email templates (FR-1)', () => {
     expect(m.html).toContain('60 minutes');
     expect(m.subject).toBeTruthy();
   });
+});
+
+test('FR-5.1: an SES request gives up well inside the worker\'s 5 minute lease, so a hung send cannot outlast its claim', () => {
+  expect(SES_TIMEOUTS.connectionTimeout + SES_TIMEOUTS.requestTimeout).toBeLessThanOrEqual(LEASE_MS / 4);
+  expect(SES_TIMEOUTS.requestTimeout).toBeGreaterThan(0);
 });

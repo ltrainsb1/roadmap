@@ -138,12 +138,33 @@ describe('worker: digests', () => {
     expect(to(mail, w.me)).toHaveLength(0);
     expect((await rowsFor(t, w.me)).map((r) => r.email.state)).toEqual(['skipped', 'skipped']);
 
-    // Nothing was sent, so the day is still free: a change on a roadmap they're still on goes out the same day.
+    // Nothing was sent, so the day is given back; a change made after 8 am waits for tomorrow's digest.
+    expect((await scoped(t.db, w.tenantId).collection('users').findOne({ _id: w.me._id }))!.digestSentOn).toBeUndefined();
     await w.change('alpha', '2026-11-06T09:30:00Z');
     c.set('2026-11-06T10:00:00Z');
     await runPass(d);
+    expect(to(mail, w.me)).toHaveLength(0);
+    c.set('2026-11-07T08:00:00Z');
+    await runPass(d);
     expect(to(mail, w.me)).toHaveLength(1);
     expect(to(mail, w.me)[0]!.text).not.toContain('Beta');
+  });
+
+  test('FR-5.2: on a day with nothing waiting at 8 am, a change made later waits for the next morning', async () => {
+    const w = await world('UTC');
+    const c = clock('2026-11-08T08:00:00Z');
+    const mail = new MemoryMailer();
+    const d = workerDeps(t, c, mail);
+    await runPass(d);
+    await w.change('alpha', '2026-11-08T10:00:00Z');
+    c.set('2026-11-08T10:01:00Z');
+    await runPass(d);
+    c.set('2026-11-08T23:59:00Z');
+    await runPass(d);
+    expect(to(mail, w.me)).toHaveLength(0);
+    c.set('2026-11-09T08:00:00Z');
+    await runPass(d);
+    expect(to(mail, w.me).map((m) => m.subject)).toEqual(['Your roadmap updates for 9 Nov 2026']);
   });
 
   test('FR-5.2: a failed digest is retried with its rows kept pending, and two passes at once send it once', async () => {

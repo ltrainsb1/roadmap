@@ -3,10 +3,10 @@ import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { NotificationDoc, UserDoc } from '../db/types.ts';
 import { effectivePrefs, toNotifications } from '../notifications/dto.ts';
 import { digestEmail } from './emails.ts';
-import { claim, errorText, markFailed, markSent, skip } from './instant.ts';
+import { claim, errorText, markFailed, markSent, skip } from './claims.ts';
 import { localDate, localHour } from './local-time.ts';
 import type { WorkerDeps } from './run.ts';
-import { emailDue, workerDb } from './worker-db.ts';
+import { emailDue, workerDb } from '../db/worker-db.ts';
 
 /** Gives the day back, so the digest goes out on a later pass today. */
 async function releaseDay(s: ScopedDb, user: UserDoc, today: string): Promise<void> {
@@ -26,10 +26,19 @@ async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Dat
   const today = localDate(now, user.timezone);
   if (user.digestSentOn === today) return null;
   const notifications = s.collection('notifications');
-  const waiting = await notifications.find({ $and: [{ userId, type: { $in: types } }, emailDue(now)] }, { sort: { createdAt: 1, _id: 1 } });
+  // Plan decision: the digest arrives at 8 am. A day's digest takes only rows written before 8:00 local time that day;
+  // later ones wait for tomorrow's, so a quiet morning never turns the first change after 8 into its own email. A
+  // worker that was down at 8 still sends on its next pass, with the same rows.
+  const beforeEight = (at: Date) =>
+    localDate(at, user.timezone) < today || localHour(at, user.timezone) < NOTIFICATION_LIMITS.digestHour;
+  const waiting = (
+    await notifications.find({ $and: [{ userId, type: { $in: types } }, emailDue(now)] }, { sort: { createdAt: 1, _id: 1 } })
+  ).filter((r) => beforeEight(r.createdAt));
   if (waiting.length === 0) return null;
 
-  // The day is claimed once, from the value just read: of two passes, only one gets it.
+  // The day is claimed once, from the value just read: of two passes, only one gets it. A crash between this claim and
+  // the send leaves the day taken and the rows pending (or leased, then due again), so that digest moves to the next
+  // day: late, not lost, not doubled.
   const claimedDay = await s
     .collection('users')
     .updateOne(
@@ -47,7 +56,7 @@ async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Dat
       continue;
     }
     // Claimed like an instant email, so a switch to "instantly" meanwhile can't send a row twice.
-    const claimed = await claim(s, r._id, now);
+    const claimed = await claim(s, r._id, deps.now());
     if (claimed) rows.push(claimed);
   }
   if (rows.length === 0) {
@@ -60,11 +69,11 @@ async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Dat
     await deps.mailer.send({ to: user.email, ...content });
   } catch (err) {
     await releaseDay(s, user, today);
-    for (const r of rows) await markFailed(s, r, now);
+    for (const r of rows) await markFailed(s, r, deps.now());
     deps.log.error({ step: 'digest', tenantId: s.tenantId, userId, rows: rows.length, err: errorText(err) }, 'digest failed');
     return 'failed';
   }
-  for (const r of rows) await markSent(s, r, now);
+  for (const r of rows) await markSent(s, r, deps.now());
   return 'sent';
 }
 

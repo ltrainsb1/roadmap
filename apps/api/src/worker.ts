@@ -3,8 +3,7 @@ import { loadConfig } from './config.ts';
 import { connectDb } from './db/client.ts';
 import { ensureIndexes } from './db/indexes.ts';
 import { createMailer } from './mail/mailer.ts';
-import { errorText } from './worker/instant.ts';
-import { runPass, type WorkerDeps } from './worker/run.ts';
+import { passAndBeat, type WorkerDeps } from './worker/run.ts';
 
 // The worker process: one pass, then a wait of WORKER_INTERVAL_MS, then the next, so two passes never overlap. Logs
 // are JSON lines of counts and ids only (no email addresses, no note text).
@@ -30,14 +29,7 @@ process.on('SIGINT', () => stop('SIGINT'));
 
 log.info({ intervalMs: config.workerIntervalMs }, 'worker started');
 while (!stopping) {
-  const started = Date.now();
-  const counts = await runPass(deps);
-  log.info({ ...counts, ms: Date.now() - started }, 'pass done');
-  try {
-    await writeFile(config.workerHeartbeatFile, new Date().toISOString());
-  } catch (err) {
-    log.error({ err: errorText(err) }, 'heartbeat not written');
-  }
+  await passAndBeat(deps, () => writeFile(config.workerHeartbeatFile, new Date().toISOString()));
   if (stopping) break;
   await new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, config.workerIntervalMs);

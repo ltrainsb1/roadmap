@@ -3,10 +3,10 @@ import { isDuplicateKey } from '../db/errors.ts';
 import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { ProjectDoc } from '../db/types.ts';
 import { notificationRow } from '../notifications/outbox.ts';
-import { errorText } from './instant.ts';
+import { errorText } from './claims.ts';
 import { addDays, localDate } from './local-time.ts';
 import type { WorkerDeps } from './run.ts';
-import { openItemsWithDates, workerDb } from './worker-db.ts';
+import { openItemsWithDates, workerDb } from '../db/worker-db.ts';
 
 interface DueDate {
   /** `end`, or the milestone's id. */

@@ -229,4 +229,32 @@ describe('worker: instant emails', () => {
     expect(flaky.sent).toHaveLength(1);
     expect((await rowsFor(t, w.sam)).find((x) => x._id === crashed._id)!.email.state).toBe('sent');
   });
+
+  test('FR-5.1: a lease runs 5 minutes from its claim, so a second worker never takes a row claimed late in a long pass', async () => {
+    const c = clock(T0);
+    const w = await world();
+    const base = { roadmapId: w.roadmap._id, userId: w.sam._id, actorId: w.priya._id, now: c.now() };
+    await row(t, w.tenantId, { ...base, item: { _id: w.item._id, title: 'First' } });
+    await row(t, w.tenantId, { ...base, item: { _id: w.item._id, title: 'Second' } });
+    const other = new MemoryMailer();
+    const leases: Array<Date | null> = [];
+    // The first send takes 6 minutes; during the second, another worker runs a pass.
+    const slow = {
+      sent: [] as string[],
+      async send(m: { subject: string }) {
+        const r = (await rowsFor(t, w.sam)).find((x) => m.subject.endsWith(x.projectTitle))!;
+        leases.push(r.email.leaseUntil);
+        if (this.sent.length === 0) c.set('2026-11-22T12:06:00.000Z');
+        else await runPass(workerDeps(t, c, other));
+        this.sent.push(m.subject);
+      },
+    };
+    const d = workerDeps(t, c, slow);
+    expect((await runPass(d)).sent).toBe(2);
+    expect(leases).toEqual([new Date('2026-11-22T12:05:00.000Z'), new Date('2026-11-22T12:11:00.000Z')]);
+    expect(other.sent.filter((m) => m.to === w.sam.email)).toHaveLength(0);
+    // Sent and retry times are when they happened, too.
+    const second = (await rowsFor(t, w.sam)).find((x) => x.projectTitle === 'Second')!;
+    expect(second.email.sentAt).toEqual(new Date('2026-11-22T12:06:00.000Z'));
+  });
 });

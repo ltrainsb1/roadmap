@@ -1,7 +1,7 @@
 import { noteExcerpt } from '@roadmap/shared';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { MemoryMailer } from '../../src/mail/mailer.ts';
-import { runPass } from '../../src/worker/run.ts';
+import { passAndBeat, runPass } from '../../src/worker/run.ts';
 import { makeTestApp, type TestApp } from '../helpers.ts';
 import { clock, dates, person, row, workerDeps } from './fixtures.ts';
 
@@ -28,16 +28,18 @@ async function world(o: { roadmapName?: string; title?: string; actorName?: stri
 describe('worker: one pass', () => {
   test('FR-5.1: email HTML escapes titles, names and excerpts; the subject is one line', async () => {
     const c = clock('2026-11-10T09:00:00Z');
+    const early = new Date('2026-11-10T07:00:00Z');
     const title = '<script>alert("x")</script>\nSecond line\r\nThird';
     const w = await world({ title, actorName: 'Bob "The Builder" O\'Neil', roadmapName: 'R&D <team>' });
     const note = `<img src=x onerror="alert(1)"> ${'long words '.repeat(500)}`.slice(0, 5000);
     expect(note).toHaveLength(5000);
-    const mention = { kind: 'mentioned', excerpt: noteExcerpt(note) } as const;
-    await row(t, w.tenantId, { ...w.base, item: w.item, type: 'mentioned', detail: mention, now: c.now() });
+    // Stored raw, as if a row held more than an excerpt should: the worker cuts it again.
+    const mention = { kind: 'mentioned', excerpt: note } as const;
+    await row(t, w.tenantId, { ...w.base, item: w.item, type: 'mentioned', detail: mention, now: early });
     // The same row in a digest: Olive gets her mentions in one.
     const olive = await person(t, w.tenantId, { name: 'Olive', prefs: { mentioned: 'digest' } });
     await t.seed.member(w.tenantId, w.roadmap._id, olive._id, 'contributor');
-    await row(t, w.tenantId, { ...w.base, userId: olive._id, type: 'mentioned', detail: mention, now: c.now() });
+    await row(t, w.tenantId, { ...w.base, userId: olive._id, type: 'mentioned', detail: mention, now: early });
 
     const mail = new MemoryMailer();
     await runPass(workerDeps(t, c, mail));
@@ -53,15 +55,19 @@ describe('worker: one pass', () => {
     expect(instant.subject).toBe('Bob "The Builder" O\'Neil mentioned you on <script>alert("x")</script> Second line Third');
     expect(instant.html).toContain('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;');
     expect(instant.html).toContain('R&amp;D &lt;team&gt;');
+    const quoted = instant.text.split('\n')[1]!;
+    expect(quoted).toBe(`“${noteExcerpt(note)}”`);
+    expect(quoted.length).toBeLessThanOrEqual(202);
     const digest = mail.sent.find((m) => m.to === olive.email)!;
     expect(digest.html).toContain('<h2>R&amp;D &lt;team&gt;</h2>');
   });
 
   test("FR-5.1: one failing step doesn't stop the others in the same pass", async () => {
     const c = clock('2026-11-11T09:00:00Z');
+    const early = new Date('2026-11-11T07:00:00Z');
     const w = await world();
-    await row(t, w.tenantId, { ...w.base, now: c.now() });
-    await row(t, w.tenantId, { ...w.base, type: 'dates_changed', detail: dates, now: c.now() });
+    await row(t, w.tenantId, { ...w.base, now: early });
+    await row(t, w.tenantId, { ...w.base, type: 'dates_changed', detail: dates, now: early });
     // The due-soon step is the one that reads items; make every read of them fail.
     const broken = new Proxy(t.db, {
       get(target, prop) {
@@ -88,11 +94,12 @@ describe('worker: one pass', () => {
 
   test("Tenant isolation: a pass across two tenants sends each person only their own tenant's notifications, and the digest links point at their own roadmaps", async () => {
     const c = clock('2026-11-12T09:00:00Z');
+    const early = new Date('2026-11-12T07:00:00Z');
     const one = await world({ roadmapName: 'One' });
     const two = await world({ roadmapName: 'Two' });
     for (const w of [one, two]) {
-      await row(t, w.tenantId, { ...w.base, now: c.now() });
-      await row(t, w.tenantId, { ...w.base, type: 'dates_changed', detail: dates, now: c.now() });
+      await row(t, w.tenantId, { ...w.base, now: early });
+      await row(t, w.tenantId, { ...w.base, type: 'dates_changed', detail: dates, now: early });
     }
     const mail = new MemoryMailer();
     expect(await runPass(workerDeps(t, c, mail))).toMatchObject({ sent: 2, digests: 2 });
@@ -109,5 +116,41 @@ describe('worker: one pass', () => {
       expect(digest.text).not.toContain(theirs.roadmap.name);
     }
     expect(mail.sent).toHaveLength(4);
+  });
+
+  test('FR-5.1: the heartbeat is written after a pass, but not after one in which every step failed', async () => {
+    const c = clock('2026-11-13T09:00:00Z');
+    let beats = 0;
+    const beat = () => {
+      beats += 1;
+      return Promise.resolve();
+    };
+    const d = workerDeps(t, c);
+    await passAndBeat(d, beat);
+    expect(beats).toBe(1);
+    expect(d.lines.at(-1)).toMatchObject({ level: 'info', msg: 'pass done', o: { sent: 0, reminders: 0, digests: 0, failed: 0 } });
+
+    // MongoDB unreachable: all three steps throw, and the health check must see a stale heartbeat.
+    const down = new Proxy(t.db, {
+      get(target, prop) {
+        if (prop === 'collection') {
+          return () => {
+            throw new Error('connection refused');
+          };
+        }
+        const value: unknown = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    const broken = { ...workerDeps(t, c), db: down };
+    await passAndBeat(broken, beat);
+    expect(beats).toBe(1);
+    expect(broken.lines.filter((l) => l.msg === 'worker step failed').map((l) => (l.o as { step: string }).step)).toEqual(['instant', 'due_soon', 'digest']);
+    expect(broken.lines.at(-1)).toMatchObject({ level: 'error', msg: 'every step failed; no heartbeat' });
+
+    // A heartbeat that can't be written is logged, and the pass still counts.
+    const failing = workerDeps(t, c);
+    await passAndBeat(failing, () => Promise.reject(new Error('read-only file system')));
+    expect(failing.lines.at(-1)).toMatchObject({ level: 'error', msg: 'heartbeat not written' });
   });
 });

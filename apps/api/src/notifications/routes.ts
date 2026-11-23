@@ -1,5 +1,4 @@
 import {
-  DEFAULT_PREFS,
   NOTIFICATION_LIMITS,
   notificationPageSchema,
   notificationPrefsSchema,
@@ -14,8 +13,9 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { createAuditLog } from '../audit/audit.ts';
 import type { ScopedCollection, ScopedDb } from '../db/scoped.ts';
-import type { NotificationDoc, UserDoc } from '../db/types.ts';
+import type { NotificationDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
+import { effectivePrefs, toNotifications } from './dto.ts';
 
 type NotificationFilter = Parameters<ScopedCollection<NotificationDoc>['find']>[0];
 
@@ -49,8 +49,6 @@ async function visible(db: ScopedDb, userId: string): Promise<{ filter: Notifica
   return { filter: { userId, roadmapId: { $in: memberships.map((m) => m.roadmapId) } } };
 }
 
-const effectivePrefs = (user: UserDoc): NotificationPrefs => ({ ...DEFAULT_PREFS, ...user.notificationPrefs });
-
 export function registerNotificationRoutes(app: FastifyInstance, deps: { now: () => Date }): void {
   const r = app.withTypeProvider<ZodTypeProvider>();
   const audit = createAuditLog();
@@ -82,29 +80,8 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: { now: ()
       ]);
       const items = rows.slice(0, limit);
 
-      const actorIds = [...new Set(items.flatMap((n) => (n.actorId === null ? [] : [n.actorId])))];
-      const pageRoadmaps = [...new Set(items.map((n) => n.roadmapId))];
-      const [users, roadmaps] = await Promise.all([
-        actorIds.length > 0 ? actor.db.collection('users').find({ _id: { $in: actorIds } }) : [],
-        pageRoadmaps.length > 0 ? actor.db.collection('roadmaps').find({ _id: { $in: pageRoadmaps } }) : [],
-      ]);
-      const userNames = new Map(users.map((u) => [u._id, u.name]));
-      const roadmapNames = new Map(roadmaps.map((m) => [m._id, m.name]));
-
       return {
-        items: items.map((n) => ({
-          id: n._id,
-          type: n.type,
-          roadmapId: n.roadmapId,
-          roadmapName: roadmapNames.get(n.roadmapId) ?? '',
-          projectId: n.projectId,
-          projectTitle: n.projectTitle,
-          actorName: n.actorId === null ? null : (userNames.get(n.actorId) ?? null),
-          hasActor: n.actorId !== null,
-          detail: n.detail,
-          createdAt: n.createdAt.toISOString(),
-          read: n.readAt !== null,
-        })),
+        items: await toNotifications(actor.db, items),
         nextCursor: rows.length > limit ? encodeCursor(items[items.length - 1]!) : null,
         unread,
       };

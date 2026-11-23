@@ -13,6 +13,33 @@ interface Event {
   now: Date;
 }
 
+/** A new unread row whose email is due now. */
+export function notificationRow(p: {
+  roadmapId: string;
+  userId: string;
+  type: NotificationType;
+  actorId: string | null;
+  item: Pick<ProjectDoc, '_id' | 'title'>;
+  detail: NotificationDetail;
+  now: Date;
+  dedupeKey?: string;
+}): Omit<NotificationDoc, 'tenantId'> {
+  return {
+    _id: uuidv7(),
+    roadmapId: p.roadmapId,
+    userId: p.userId,
+    type: p.type,
+    actorId: p.actorId,
+    projectId: p.item._id,
+    projectTitle: p.item.title,
+    detail: p.detail,
+    ...(p.dedupeKey === undefined ? {} : { dedupeKey: p.dedupeKey }),
+    createdAt: p.now,
+    readAt: null,
+    email: { state: 'pending', attempts: 0, nextAttemptAt: p.now, leaseUntil: null, sentAt: null },
+  };
+}
+
 /** One row per recipient and detail; drops the actor and anyone not a member of the roadmap. */
 async function write(
   s: ScopedDb,
@@ -32,20 +59,10 @@ async function write(
   await s
     .collection('memberships')
     .updateMany({ _id: { $in: members.map((m) => m._id) } }, { $inc: { notifyRevision: 1 } });
-  const rows: Array<Omit<NotificationDoc, 'tenantId'>> = recipients.flatMap((userId) =>
-    details.map((detail) => ({
-      _id: uuidv7(),
-      roadmapId: e.roadmapId,
-      userId,
-      type,
-      actorId: e.actorId,
-      projectId: e.item._id,
-      projectTitle: e.item.title,
-      detail,
-      createdAt: e.now,
-      readAt: null,
-      email: { state: 'pending', attempts: 0, nextAttemptAt: e.now, leaseUntil: null, sentAt: null },
-    })),
+  const rows = recipients.flatMap((userId) =>
+    details.map((detail) =>
+      notificationRow({ roadmapId: e.roadmapId, userId, type, actorId: e.actorId, item: e.item, detail, now: e.now }),
+    ),
   );
   await s.collection('notifications').insertMany(rows);
 }

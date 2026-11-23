@@ -67,6 +67,8 @@ describe('loadConfig', () => {
       pdf: 'fake',
       pdfTimeoutMs: 60000,
       trustedProxyCidrs: [],
+      workerIntervalMs: 30000,
+      workerHeartbeatFile: '/tmp/worker-heartbeat',
     });
   });
 
@@ -282,4 +284,15 @@ describe('loadConfig: the trusted proxy (FR-3.6)', () => {
     ]);
     expect(loadConfig({ ...valid, TRUSTED_PROXY_CIDR: '10.254.254.0/24' }).trustedProxyCidrs).toEqual(['10.254.254.0/24']);
   });
+});
+
+test('FR-5.1: WORKER_INTERVAL_MS defaults to 30000 and is at least 100; WORKER_HEARTBEAT_FILE defaults to /tmp/worker-heartbeat', () => {
+  expect(loadConfig(valid)).toMatchObject({ workerIntervalMs: 30000, workerHeartbeatFile: '/tmp/worker-heartbeat' });
+  expect(loadConfig({ ...valid, WORKER_INTERVAL_MS: '500', WORKER_HEARTBEAT_FILE: '/tmp/e2e-heartbeat' })).toMatchObject({
+    workerIntervalMs: 500,
+    workerHeartbeatFile: '/tmp/e2e-heartbeat',
+  });
+  expect(loadConfig({ ...valid, WORKER_INTERVAL_MS: '100' }).workerIntervalMs).toBe(100);
+  expect(() => loadConfig({ ...valid, WORKER_INTERVAL_MS: '99' })).toThrow(/WORKER_INTERVAL_MS/);
+  expect(() => loadConfig({ ...valid, WORKER_INTERVAL_MS: 'soon' })).toThrow(/WORKER_INTERVAL_MS/);
 });

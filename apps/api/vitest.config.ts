@@ -17,8 +17,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**'],
-      // server.ts only wires process env and a listening socket; it is exercised by running the app.
-      exclude: ['src/server.ts'],
+      // server.ts and worker.ts only wire process env, a socket or a loop, and signals; they are exercised by running them.
+      exclude: ['src/server.ts', 'src/worker.ts'],
       thresholds: { lines: 80, functions: 80, branches: 80 },
     },
   },

@@ -174,11 +174,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     children.push(pdf);
     // The notifications worker, from source as the API package's `worker` script runs it, but with node directly for
     // the same reason as vite. It shares the API's database and outbox file, and wakes every half second.
+    const heartbeat = path.join(dir, 'worker-heartbeat');
+    // helpers.ts reads it back, so a test can wait for the worker to finish whole passes.
+    process.env.E2E_WORKER_HEARTBEAT = heartbeat;
     const worker = start(
       'worker',
       'node',
       ['--experimental-strip-types', 'src/worker.ts'],
-      { ...env, WORKER_INTERVAL_MS: '500', WORKER_HEARTBEAT_FILE: path.join(dir, 'worker-heartbeat') },
+      { ...env, WORKER_INTERVAL_MS: '500', WORKER_HEARTBEAT_FILE: heartbeat },
       path.join(repoRoot, 'apps/api'),
       (line) => !line.includes('"level":"info"'),
     );
@@ -187,7 +190,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     // Through the preview server, so the /api proxy is checked too.
     await waitFor(`http://localhost:${WEB_PORT}/api/health`, web, 'web');
     await waitFor(`http://127.0.0.1:${PDF_PORT}/health`, pdf, 'pdf');
-    await waitForFile(path.join(dir, 'worker-heartbeat'), worker, 'worker');
+    await waitForFile(heartbeat, worker, 'worker');
   } catch (err) {
     await stopAll().catch(() => undefined);
     throw err;

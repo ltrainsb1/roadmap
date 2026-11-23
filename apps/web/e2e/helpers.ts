@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { authenticator } from 'otplib';
@@ -22,6 +22,30 @@ export async function readLastMail(to: string): Promise<{ subject: string; text:
     if (last) return { subject: last.subject, text: last.text };
     if (Date.now() > deadline) throw new Error(`no mail to ${to} within 10 s`);
     await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+/** Every email sent to `to` so far, oldest first. Unlike `readLastMail` it does not wait. */
+export async function readMails(to: string): Promise<{ subject: string; text: string }[]> {
+  const file = process.env.E2E_MAIL_OUTBOX;
+  if (!file) throw new Error('E2E_MAIL_OUTBOX is not set; global setup did not run');
+  const lines = (await readFile(file, 'utf8').catch(() => '')).split('\n').filter(Boolean);
+  return lines.map((l) => JSON.parse(l) as { to: string; subject: string; text: string }).filter((m) => m.to === to);
+}
+
+/** When the notifications worker last finished a pass (the heartbeat file's modification time, in ms). */
+export async function workerBeat(): Promise<number> {
+  const file = process.env.E2E_WORKER_HEARTBEAT;
+  if (!file) throw new Error('E2E_WORKER_HEARTBEAT is not set; global setup did not run');
+  return (await stat(file)).mtimeMs;
+}
+
+/** Waits until the worker has finished two whole passes after now, so anything waiting to be sent has had its turn. */
+export async function waitForTwoWorkerPasses(): Promise<void> {
+  let last = await workerBeat();
+  for (let pass = 0; pass < 2; pass += 1) {
+    const before = last;
+    await expect.poll(async () => (last = await workerBeat()), { timeout: 15_000 }).toBeGreaterThan(before);
   }
 }
 

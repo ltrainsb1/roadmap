@@ -559,6 +559,82 @@ select {
   border-radius: 50%;
 }
 
+/* Email settings: a table from 600 px, a fieldset per kind below it (the page picks one; see NotificationSettingsPage). */
+.prefs-table {
+  width: 100%;
+  margin: 0 0 16px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.prefs-table th,
+.prefs-table td {
+  padding: 12px 8px 12px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #d5d9e0;
+}
+.prefs-table thead th {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+/* The three choice columns are equal, so the one cell that spans them lines its choices up under the headings. */
+.prefs-table .pref-column {
+  width: 7.5rem;
+  padding-right: 0;
+  text-align: center;
+}
+.prefs-table tbody th {
+  font-weight: normal;
+  overflow-wrap: anywhere;
+}
+.prefs-table td {
+  padding-right: 0;
+  vertical-align: middle;
+}
+.pref-name {
+  display: block;
+  font-weight: 600;
+}
+.pref-description {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+}
+.pref-choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.pref-choice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  cursor: pointer;
+}
+.pref-choice input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+.pref-fieldset {
+  min-width: 0;
+  margin: 0 0 16px;
+  padding: 0 0 12px;
+  border: none;
+  border-bottom: 1px solid #d5d9e0;
+  overflow-wrap: anywhere;
+}
+.pref-fieldset legend {
+  padding: 0;
+}
+.pref-fieldset .pref-description {
+  margin-bottom: 4px;
+}
+.digest-line {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
 .projects-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

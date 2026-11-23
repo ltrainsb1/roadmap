@@ -39,6 +39,7 @@ const ACTION_FILTERS: ReadonlyArray<[AuditActionName, string]> = [
   ['snapshot.revoke', 'Snapshot revoked'],
   ['snapshot.access', 'Snapshot opened'],
   ['snapshot.locked', 'Snapshot link locked'],
+  ['user.notification_prefs', 'Notification settings changed'],
 ];
 
 export function AuditPage() {

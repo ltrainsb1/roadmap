@@ -1,6 +1,6 @@
 import type { Project } from '@roadmap/shared';
 import { describe, expect, test } from 'vitest';
-import { addChildLabel, formatDates, formatMilestone, itemCount, levelName, levelPlural, statusName, warningText } from './names.ts';
+import { addChildLabel, formatDates, formatDay, formatMilestone, itemCount, levelName, levelPlural, statusName, warningText } from './names.ts';
 
 describe('FR-1.7 project names', () => {
   test.each([
@@ -40,6 +40,12 @@ describe('FR-1.7 date phrases', () => {
   });
   test('an end alone', () => {
     expect(formatDates(null, '2027-04-28')).toBe('Until 28 Apr 2027');
+  });
+  test('September is "Sep" on any ICU', () => {
+    expect(formatDay('2027-09-03')).toBe('3 Sep 2027');
+    expect(formatDates('2027-09-01', '2027-09-30')).toBe('1 Sep to 30 Sep 2027');
+    expect(formatDates('2027-09-01', null)).toBe('From 1 Sep 2027');
+    expect(formatDates(null, '2027-09-30')).toBe('Until 30 Sep 2027');
   });
   test('no dates', () => {
     expect(formatDates(null, null)).toBe('No dates');

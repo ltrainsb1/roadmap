@@ -68,10 +68,16 @@ export type PrefsResponse = z.infer<typeof prefsResponseSchema>;
 /** Fixed names, not Intl: short month names differ between ICU versions ("Sep" or "Sept"). */
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
-/** One calendar date (`YYYY-MM-DD`) as "3 Mar 2027". */
-export function formatDayUtc(date: string): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]!} ${d.getUTCFullYear()}`;
+/**
+ * One calendar date (`YYYY-MM-DD`) as "3 Mar 2027", or "3 Mar" with `year: false`.
+ * Throws a RangeError when `date` is not a real calendar date.
+ */
+export function formatDayUtc(date: string, opts?: { year?: boolean }): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const d = m ? new Date(`${date}T00:00:00Z`) : new Date(NaN);
+  if (!m || Number.isNaN(d.getTime()) || d.getUTCDate() !== Number(m[3])) throw new RangeError(`Invalid date: ${date}`);
+  const day = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]!}`;
+  return opts?.year === false ? day : `${day} ${d.getUTCFullYear()}`;
 }
 
 /** The row and email sentence, with no trailing full stop when `forSubject`. */
@@ -109,10 +115,12 @@ export function notificationSentence(
   return opts?.forSubject ? text : `${text}.`;
 }
 
-/** Plain text, line breaks as spaces, trimmed, at most 200 characters without splitting a surrogate pair. */
+/** Plain text, line breaks as spaces, trimmed, at most 200 UTF-16 units without splitting a surrogate pair. */
 export function noteExcerpt(body: string): string {
   const flat = body.replace(/\s+/g, ' ').trim();
-  const chars = Array.from(flat);
-  if (chars.length <= NOTIFICATION_LIMITS.excerpt) return flat;
-  return chars.slice(0, NOTIFICATION_LIMITS.excerpt).join('').trimEnd();
+  if (flat.length <= NOTIFICATION_LIMITS.excerpt) return flat;
+  let end: number = NOTIFICATION_LIMITS.excerpt;
+  const last = flat.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return flat.slice(0, end).trimEnd();
 }

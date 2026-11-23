@@ -65,6 +65,9 @@ describe('notifications', () => {
     expect(formatDayUtc('2027-03-03')).toBe('3 Mar 2027');
     expect(formatDayUtc('2027-09-30')).toBe('30 Sep 2027');
     expect(formatDayUtc('2027-12-01')).toBe('1 Dec 2027');
+    expect(formatDayUtc('2027-09-03', { year: false })).toBe('3 Sep');
+    expect(() => formatDayUtc('2027-02-30')).toThrow(RangeError);
+    expect(() => formatDayUtc('soon')).toThrow(RangeError);
   });
 
   it('FR-5.1: a note excerpt is plain text, one line, at most 200 characters, and never splits an emoji', () => {
@@ -76,8 +79,13 @@ describe('notifications', () => {
     expect(out.startsWith('# Heading **bold**')).toBe(true);
 
     const emoji = noteExcerpt('a'.repeat(199) + '😀' + 'b'.repeat(50));
-    expect(Array.from(emoji)).toHaveLength(200);
-    expect(emoji.endsWith('😀')).toBe(true);
+    expect(emoji.length).toBeLessThanOrEqual(200);
+    expect(emoji).toBe('a'.repeat(199));
+    expect(noteExcerpt('a'.repeat(198) + '😀' + 'b').endsWith('😀')).toBe(true);
+    expect(noteExcerpt('😀'.repeat(200)).length).toBeLessThanOrEqual(200);
+    expect(noteExcerpt('a'.repeat(200))).toBe('a'.repeat(200));
+    expect(noteExcerpt('a'.repeat(201))).toBe('a'.repeat(200));
+    expect(noteExcerpt(' \n\t \r\n ')).toBe('');
     expect(emoji).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
     expect(noteExcerpt('  \n short \n ')).toBe('short');
   });

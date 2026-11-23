@@ -29,13 +29,6 @@ export const addChildLabel = (depth: number): string | null => {
   return child ? `Add ${child.toLowerCase()}` : null;
 };
 
-const dayFormat = (withYear: boolean) =>
-  new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', ...(withYear && { year: 'numeric' as const }), timeZone: 'UTC' });
-const WITH_YEAR = dayFormat(true);
-const WITHOUT_YEAR = dayFormat(false);
-
-const parse = (date: string): Date => new Date(`${date}T00:00:00Z`);
-
 /** One calendar date (`YYYY-MM-DD`) as "3 Mar 2027". */
 export const formatDay = (date: string): string => formatDayUtc(date);
 
@@ -44,12 +37,9 @@ export const formatMilestone = (m: { name: string; date: string }): string => `M
 
 /** Start and end dates (`YYYY-MM-DD` or null) as one phrase: "3 Mar to 28 Apr 2027", "From 3 Mar 2027", "Until 28 Apr 2027", "No dates". */
 export function formatDates(start: string | null, end: string | null): string {
-  if (start && end) {
-    const first = start.slice(0, 4) === end.slice(0, 4) ? WITHOUT_YEAR : WITH_YEAR;
-    return `${first.format(parse(start))} to ${WITH_YEAR.format(parse(end))}`;
-  }
-  if (start) return `From ${WITH_YEAR.format(parse(start))}`;
-  if (end) return `Until ${WITH_YEAR.format(parse(end))}`;
+  if (start && end) return `${formatDayUtc(start, { year: start.slice(0, 4) !== end.slice(0, 4) })} to ${formatDay(end)}`;
+  if (start) return `From ${formatDay(start)}`;
+  if (end) return `Until ${formatDay(end)}`;
   return 'No dates';
 }
 

@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -80,9 +80,34 @@ async function waitFor(url: string, child: ChildProcess, name: string): Promise<
   throw new Error(`${name} did not become ready at ${url}`);
 }
 
-function start(name: string, cmd: string, args: string[], env: Record<string, string>, cwd = repoRoot): ChildProcess {
+/** Waits for the worker's first heartbeat, written after its first pass. */
+async function waitForFile(file: string, child: ChildProcess, name: string): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`${name} exited with code ${child.exitCode}`);
+    if (existsSync(file)) return;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`${name} wrote no heartbeat to ${file}`);
+}
+
+/**
+ * Starts a child process and prefixes its output with `name`. With `keep`, only the stdout lines it accepts are shown
+ * (the worker logs a line after every pass, twice a second).
+ */
+function start(
+  name: string,
+  cmd: string,
+  args: string[],
+  env: Record<string, string>,
+  cwd = repoRoot,
+  keep?: (line: string) => boolean,
+): ChildProcess {
   const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout?.on('data', (d: Buffer) => process.stdout.write(`[${name}] ${d.toString()}`));
+  child.stdout?.on('data', (d: Buffer) => {
+    const text = keep ? d.toString().split('\n').filter((l) => l && keep(l)).map((l) => `${l}\n`).join('') : d.toString();
+    if (text) process.stdout.write(`[${name}] ${text}`);
+  });
   child.stderr?.on('data', (d: Buffer) => process.stderr.write(`[${name}] ${d.toString()}`));
   return child;
 }
@@ -147,10 +172,22 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       path.join(repoRoot, 'apps/pdf'),
     );
     children.push(pdf);
+    // The notifications worker, from source as the API package's `worker` script runs it, but with node directly for
+    // the same reason as vite. It shares the API's database and outbox file, and wakes every half second.
+    const worker = start(
+      'worker',
+      'node',
+      ['--experimental-strip-types', 'src/worker.ts'],
+      { ...env, WORKER_INTERVAL_MS: '500', WORKER_HEARTBEAT_FILE: path.join(dir, 'worker-heartbeat') },
+      path.join(repoRoot, 'apps/api'),
+      (line) => !line.includes('"level":"info"'),
+    );
+    children.push(worker);
     await waitFor(`http://127.0.0.1:${API_PORT}/api/health`, api, 'api');
     // Through the preview server, so the /api proxy is checked too.
     await waitFor(`http://localhost:${WEB_PORT}/api/health`, web, 'web');
     await waitFor(`http://127.0.0.1:${PDF_PORT}/health`, pdf, 'pdf');
+    await waitForFile(path.join(dir, 'worker-heartbeat'), worker, 'worker');
   } catch (err) {
     await stopAll().catch(() => undefined);
     throw err;

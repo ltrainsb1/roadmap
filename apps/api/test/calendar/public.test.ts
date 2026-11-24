@@ -226,7 +226,7 @@ describe('the calendar feed', () => {
     expect((await w.fetchFeed(url, { 'if-none-match': '"other"' })).statusCode).toBe(200);
   });
 
-  test('FR-4.1: 2,000 items with 5,000 milestones stop at 5,000 events and the calendar name says so', async () => {
+  test('FR-4.1: 2,000 items with 5,000 milestones stop at 5,000 events, the calendar name says so, and a re-fetch with the ETag is 304', async () => {
     const w = await calendarWorld(t);
     const url = await w.create();
     const day = (n: number) => new Date(Date.UTC(2026, 0, 1) + n * 86_400_000).toISOString().slice(0, 10);
@@ -269,6 +269,13 @@ describe('the calendar feed', () => {
       .slice(0, CALENDAR_LIMITS.events)
       .map((e) => e.uid);
     expect(feed.events.map((e) => e.uid)).toEqual(expected);
+
+    // A calendar app checking again with the ETag gets 304 and nothing to download.
+    const etag = res.headers.etag as string;
+    const again = await w.fetchFeed(url, { 'if-none-match': etag });
+    expect(again.statusCode).toBe(304);
+    expect(again.body).toBe('');
+    expect(again.headers.etag).toBe(etag);
   });
 
   test('FR-4.1: lastFetchedAt is written on the first fetch and at most every 10 minutes', async () => {

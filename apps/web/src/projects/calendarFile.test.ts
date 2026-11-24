@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { downloadItemCalendar, hasCalendarDates } from './calendarFile.ts';
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -29,7 +30,8 @@ describe('hasCalendarDates', () => {
 });
 
 describe('downloadItemCalendar', () => {
-  test('FR-4.5: fetches the item\'s file with the session cookie and saves it as "{title}.ics" through a Blob URL it then revokes', async () => {
+  test('FR-4.5: fetches the item\'s file with the session cookie and saves it as "{title}.ics" through a Blob URL it revokes a second later', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const fetchMock = vi.fn().mockResolvedValue(new Response('BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const createObjectURL = vi.fn().mockReturnValue('blob:http://localhost/abc');
@@ -48,6 +50,11 @@ describe('downloadItemCalendar', () => {
     expect(clicked[0]?.href).toBe('blob:http://localhost/abc');
     // The server's name for it: cleanFileName drops the folder part.
     expect(clicked[0]?.download).toBe('site.ics');
+    // Not straight after the click: some browsers are still reading the Blob then.
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(999);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:http://localhost/abc');
   });
 

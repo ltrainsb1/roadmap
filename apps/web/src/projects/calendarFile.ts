@@ -10,8 +10,8 @@ export const hasCalendarDates = (item: Pick<Project, 'startDate' | 'endDate' | '
 
 /**
  * Downloads one item's dates as `{title}.ics` (the server's name for it). It is fetched rather than linked, so a
- * refusal throws for the screen to report and the page stays put; the answer is saved through a Blob URL, revoked
- * once the browser has it.
+ * refusal throws for the screen to report and the page stays put; the answer is saved through a Blob URL, revoked a
+ * second later, since some browsers are still reading it straight after the click.
  */
 export async function downloadItemCalendar(roadmapId: string, item: Pick<Project, 'id' | 'title'>): Promise<void> {
   const res = await fetch(`/api/roadmaps/${encodeURIComponent(roadmapId)}/projects/${encodeURIComponent(item.id)}/calendar.ics`, {
@@ -25,6 +25,6 @@ export async function downloadItemCalendar(roadmapId: string, item: Pick<Project
     a.download = `${cleanFileName(item.title)}.ics`;
     a.click();
   } finally {
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 }

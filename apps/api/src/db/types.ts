@@ -214,6 +214,8 @@ export interface CalendarFeedDoc {
   tokenHash: string;
   choices: FeedChoices;
   createdAt: Date;
+  /** When the current link was made (FR-4.4). Feeds stored before it was kept don't have it: read it as createdAt. */
+  linkCreatedAt?: Date;
   lastFetchedAt: Date | null;
 }
 

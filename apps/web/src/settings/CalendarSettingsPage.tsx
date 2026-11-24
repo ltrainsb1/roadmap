@@ -234,7 +234,8 @@ function JustMade({ url }: { url: string }) {
 
 /** A later visit: the link can't be shown, so the page says what it knows about it. */
 function Active({ feed, timeZone }: { feed: Feed; timeZone: string }) {
-  const made = formatDayUtc(todayIn(timeZone, new Date(feed.createdAt)));
+  // The current link's date: a new link has its own, while the feed's createdAt stays (it keys the choices form).
+  const made = formatDayUtc(todayIn(timeZone, new Date(feed.linkCreatedAt)));
   return (
     <>
       <p>{`Your calendar link is active. It was made on ${made}.`}</p>

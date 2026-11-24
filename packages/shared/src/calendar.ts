@@ -21,7 +21,15 @@ const keptChoicesSchema = z
   .refine((c) => c.itemDates || c.milestones, { message: 'nothing_to_show', path: ['itemDates'] });
 
 export const feedStateSchema = z.object({
-  feed: z.object({ choices: keptChoicesSchema, createdAt: z.string(), lastFetchedAt: z.string().nullable() }).nullable(),
+  feed: z
+    .object({
+      choices: keptChoicesSchema,
+      createdAt: z.string(),
+      /** When the current link was made: the feed's createdAt until "Get a new link" makes another (FR-4.4). */
+      linkCreatedAt: z.string(),
+      lastFetchedAt: z.string().nullable(),
+    })
+    .nullable(),
 });
 export type FeedState = z.infer<typeof feedStateSchema>;
 

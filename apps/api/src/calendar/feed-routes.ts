@@ -28,6 +28,7 @@ const toState = (feed: CalendarFeedDoc | null): FeedState => ({
   feed: feed && {
     choices: feed.choices,
     createdAt: feed.createdAt.toISOString(),
+    linkCreatedAt: (feed.linkCreatedAt ?? feed.createdAt).toISOString(),
     lastFetchedAt: feed.lastFetchedAt?.toISOString() ?? null,
   },
 });
@@ -69,12 +70,14 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, deps: { now: ()
     try {
       const link = await actor.db.withTransaction(async (s): Promise<FeedLink> => {
         if (await mine(s, actor.userId)) throw new HttpError(409, 'feed_exists');
+        const now = deps.now();
         const feed = await s.collection('calendarFeeds').insertOne({
           _id: uuidv7(),
           userId: actor.userId,
           tokenHash: hash,
           choices: DEFAULT_FEED_CHOICES,
-          createdAt: deps.now(),
+          createdAt: now,
+          linkCreatedAt: now,
           lastFetchedAt: null,
         });
         await record(s, req, 'created', null, feed.choices);
@@ -114,8 +117,11 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, deps: { now: ()
     const { token, hash } = newToken();
     return actor.db.withTransaction(async (s): Promise<FeedLink> => {
       const feed = await existing(s, actor.userId);
-      // One update: the old hash stops matching the moment the new one is written.
-      const updated = await s.collection('calendarFeeds').findOneAndUpdate({ _id: feed._id }, { $set: { tokenHash: hash } });
+      // One update: the old hash stops matching the moment the new one is written. The new link has its own date and
+      // no calendar app has checked it yet; createdAt stays, since the feed itself is the same one.
+      const updated = await s
+        .collection('calendarFeeds')
+        .findOneAndUpdate({ _id: feed._id }, { $set: { tokenHash: hash, linkCreatedAt: deps.now(), lastFetchedAt: null } });
       await record(s, req, 'new_link', feed.choices, feed.choices);
       return { ...toState(updated), url: feedUrl(deps.origin, token) };
     });

@@ -45,7 +45,7 @@ const DEFAULTS: FeedChoices = { roadmaps: 'all', itemDates: true, milestones: tr
 /** The choices as stored, where a chosen list can be empty. */
 type Kept = NonNullable<FeedState['feed']>['choices'];
 const feedOf = (choices: Kept = DEFAULTS, lastFetchedAt: string | null = null): FeedState => ({
-  feed: { choices, createdAt: '2026-09-03T10:00:00.000Z', lastFetchedAt },
+  feed: { choices, createdAt: '2026-09-03T10:00:00.000Z', linkCreatedAt: '2026-09-03T10:00:00.000Z', lastFetchedAt },
 });
 const URL_1 = 'http://localhost:5173/api/calendar/first-token.ics';
 const URL_2 = 'http://localhost:5173/api/calendar/second-token.ics';
@@ -186,6 +186,15 @@ test('FR-4.1: on a later visit the link is not shown, and the page says when it 
   await client.invalidateQueries({ queryKey: CALENDAR_FEED_KEY });
   expect(await screen.findByText('No calendar app has checked it yet.')).toBeTruthy();
   expect(screen.queryByText(/^A calendar app last checked it/)).toBeNull();
+});
+
+test('FR-4.4: a later visit after a new link says when the new link was made and that no calendar app has checked it yet', async () => {
+  const before = feedOf(DEFAULTS, '2026-11-20T13:05:00.000Z');
+  serve({ get: () => ({ feed: { ...before.feed!, linkCreatedAt: '2026-11-22T08:00:00.000Z', lastFetchedAt: null } }) });
+  renderPage();
+  expect(await screen.findByText('Your calendar link is active. It was made on 22 Nov 2026.')).toBeTruthy();
+  expect(screen.getByText('No calendar app has checked it yet.')).toBeTruthy();
+  expect(screen.queryByText(/It was made on 3 Sep 2026/)).toBeNull();
 });
 
 test('FR-4.2: the choices load, "Only these" enables the roadmap checkboxes, and "Save changes" sends exactly what is ticked; an empty list and nothing to show are refused with their messages', async () => {

@@ -5,9 +5,11 @@ import type { AuditEventDoc } from '../../src/db/types.ts';
 import { makeTestApp, type TestApp } from '../helpers.ts';
 import { calendarWorld, tokenOf } from './world.ts';
 
+/** The app's clock: the real time unless a test sets it. */
+let clock: Date | null = null;
 let t: TestApp;
 beforeAll(async () => {
-  t = await makeTestApp();
+  t = await makeTestApp({ now: () => clock ?? new Date() });
 }, 120_000);
 afterAll(async () => {
   await t?.close();
@@ -100,6 +102,38 @@ describe('calendar feed settings', () => {
     }
     expect((await w.state()).feed!.choices).toEqual(DEFAULT_FEED_CHOICES);
     expect(await auditOf(w.pat._id)).toHaveLength(1);
+  });
+
+  test('FR-4.4: a new link starts afresh: no calendar app has checked it, and it was made now; the feed\'s own createdAt stays', async () => {
+    const w = await calendarWorld(t);
+    const made = new Date('2026-09-03T10:00:00.000Z');
+    clock = made;
+    try {
+      const first = await w.call('pat', 'POST', '/api/me/calendar-feed');
+      expect(first.json<FeedLink>().feed).toMatchObject({ createdAt: made.toISOString(), linkCreatedAt: made.toISOString() });
+      clock = new Date('2026-11-20T13:05:00.000Z');
+      await w.fetchFeed(first.json<FeedLink>().url);
+      expect((await w.state()).feed!.lastFetchedAt).toBe('2026-11-20T13:05:00.000Z');
+
+      const renewed = new Date('2026-11-22T08:00:00.000Z');
+      clock = renewed;
+      const res = await w.call('pat', 'POST', '/api/me/calendar-feed/new-link');
+      expect(res.statusCode).toBe(200);
+      const expected = { createdAt: made.toISOString(), linkCreatedAt: renewed.toISOString(), lastFetchedAt: null };
+      expect(res.json<FeedLink>().feed).toMatchObject(expected);
+      expect((await w.state()).feed).toMatchObject(expected);
+    } finally {
+      clock = null;
+    }
+  });
+
+  test('FR-4.4: a feed stored before links had their own date reads its link date as createdAt', async () => {
+    const w = await calendarWorld(t);
+    await w.create();
+    const stored = (await feeds().findOne({ userId: w.pat._id }))!;
+    await feeds().updateOne({ _id: stored._id }, { $unset: { linkCreatedAt: '' } });
+    const { feed } = await w.state();
+    expect(feed!.linkCreatedAt).toBe(feed!.createdAt);
   });
 
   test('FR-4.4: "new link" replaces the hash and returns a new URL; "turn off" deletes the feed; both are recorded', async () => {

@@ -172,4 +172,11 @@ describe('describeAuditEvent', () => {
       'Maria changed their email notification settings.',
     );
   });
+
+  test('FR-4.2: user.calendar_feed says the person changed their calendar feed, without the choices', () => {
+    const after = { change: 'choices', choices: { roadmaps: 'all', itemDates: true, milestones: false, onlyMine: true } };
+    expect(describeAuditEvent(event({ action: 'user.calendar_feed', target: { type: 'user', id: 'u1' }, after }), nameOf)).toBe(
+      'Maria changed their calendar feed.',
+    );
+  });
 });

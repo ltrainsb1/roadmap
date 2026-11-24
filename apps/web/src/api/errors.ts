@@ -117,3 +117,9 @@ export const NOTIFICATIONS_MARK_FAILED = "Couldn't mark notifications as read. T
 
 /** The email settings could not be fetched; a "Try again" button follows it. */
 export const SETTINGS_LOAD_FAILED = "Couldn't load your settings. Try again.";
+
+/** The calendar feed page could not load the feed; a "Try again" button follows it. */
+export const CALENDAR_FEED_LOAD_FAILED = "Couldn't load your calendar feed. Try again.";
+
+/** Saving the calendar feed's choices failed. */
+export const CALENDAR_SAVE_FAILED = "Couldn't save your choices. Try again.";

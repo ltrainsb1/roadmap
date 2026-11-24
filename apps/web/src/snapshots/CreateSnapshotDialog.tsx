@@ -6,6 +6,7 @@ import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Field } from '../ui/Field.tsx';
+import { COPY_FAILED, LINK_COPIED, useCopyLink } from '../ui/useCopyLink.ts';
 import { useFocusFirstError } from '../ui/useFocusFirstError.ts';
 import { endOfLocalDay, snapshotUrl, useCreateSnapshot } from './useSnapshots.ts';
 
@@ -25,21 +26,6 @@ const nextDay = (date: string) => {
 
 /** The server's refusals that belong under one field. */
 const FIELD_CODES: Record<string, FieldName> = { as_of_in_future: 'asOf', expiry_in_past: 'expiry', expiry_too_far: 'expiry' };
-
-/** "Copy link" with its two outcomes: a polite "Link copied." or, when the clipboard refuses, a line saying what to do. */
-export function useCopyLink() {
-  const [result, setResult] = useState<'copied' | 'failed' | null>(null);
-  const copy = async (url: string) => {
-    setResult(null);
-    try {
-      await navigator.clipboard.writeText(url);
-      setResult('copied');
-    } catch {
-      setResult('failed');
-    }
-  };
-  return { result, copy, reset: () => setResult(null) };
-}
 
 export function CreateSnapshotDialog({ roadmapId, open, onClose }: { roadmapId: string; open: boolean; onClose: () => void }) {
   const create = useCreateSnapshot(roadmapId);
@@ -148,9 +134,9 @@ export function CreateSnapshotDialog({ roadmapId, open, onClose }: { roadmapId: 
       >
         <p>Send this link to the people who should see it. Send the password separately.</p>
         <Field id="snapshot-link" label="Link" value={url} readOnly onFocus={(e) => e.currentTarget.select()} />
-        {copyLink.result === 'failed' && <Alert>Couldn't copy the link. Select it and copy it yourself.</Alert>}
+        {copyLink.result === 'failed' && <Alert>{COPY_FAILED}</Alert>}
         <p role="status" className="notice">
-          {copyLink.result === 'copied' ? 'Link copied.' : ''}
+          {copyLink.result === 'copied' ? LINK_COPIED : ''}
         </p>
         <div className="dialog-extra">
           <Button onClick={() => void copyLink.copy(url)}>Copy link</Button>

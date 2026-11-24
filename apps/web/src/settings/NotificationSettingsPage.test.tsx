@@ -67,6 +67,8 @@ function renderPage(): QueryClient {
 
 const group = (name: string) => screen.getByRole('radiogroup', { name });
 const checkedIn = (name: string) => within(group(name)).getAllByRole<HTMLInputElement>('radio').find((r) => r.checked)?.value;
+/** The header's link, not the settings tab of the same name. */
+const securityLink = () => within(screen.getByRole('navigation', { name: 'Account' })).getByRole('link', { name: 'Security' });
 const choose = (row: string, label: string) => fireEvent.click(within(group(row)).getByRole('radio', { name: label }));
 
 test('FR-5.2: the page shows the four rows with their descriptions, checked at the saved values, and the person\'s time zone in the digest line', async () => {
@@ -217,7 +219,7 @@ test('FR-5.2: leaving with unsaved changes asks first, as the item form does', a
 
   choose('Mentions', 'Daily digest');
   expect(unload()).toBe(true);
-  fireEvent.click(screen.getByRole('link', { name: 'Security' }));
+  fireEvent.click(securityLink());
   const dialog = await screen.findByRole('dialog', { name: 'Discard your unsaved changes?' });
   expect(screen.getByRole('heading', { name: 'Email notifications', level: 1 })).toBeTruthy();
 
@@ -226,10 +228,10 @@ test('FR-5.2: leaving with unsaved changes asks first, as the item form does', a
   expect(checkedIn('Mentions')).toBe('digest');
 
   // A click with a modifier key opens a new tab and is left alone.
-  fireEvent.click(screen.getByRole('link', { name: 'Security' }), { metaKey: true });
+  fireEvent.click(securityLink(), { metaKey: true });
   expect(screen.queryByRole('dialog')).toBeNull();
 
-  fireEvent.click(screen.getByRole('link', { name: 'Security' }));
+  fireEvent.click(securityLink());
   fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard your unsaved changes?' })).getByRole('button', { name: 'Discard' }));
   expect(await screen.findByText('Security screen')).toBeTruthy();
   expect(putCalls()).toHaveLength(0);
@@ -242,7 +244,7 @@ test('FR-5.2: once saved, leaving does not ask', async () => {
   choose('Mentions', 'Daily digest');
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
   await screen.findByText('Saved.');
-  fireEvent.click(screen.getByRole('link', { name: 'Security' }));
+  fireEvent.click(securityLink());
   expect(await screen.findByText('Security screen')).toBeTruthy();
 });
 

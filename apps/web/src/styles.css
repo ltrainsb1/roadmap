@@ -635,6 +635,40 @@ select {
   color: var(--muted);
 }
 
+/* The calendar feed page (FR-4.1, FR-4.2, FR-4.4). */
+.feed-link {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #d5d9e0;
+}
+.feed-warning {
+  padding: 12px 16px;
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-radius: 6px;
+}
+.feed-instructions {
+  margin: 0 0 16px;
+  padding-left: 20px;
+}
+.feed-instructions li {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+/* The roadmaps sit under "Only these", the group they belong to. */
+.feed-roadmaps {
+  margin-left: 32px;
+  overflow-wrap: anywhere;
+}
+.feed-form {
+  margin-bottom: 24px;
+}
+.feed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
 .projects-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

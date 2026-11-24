@@ -14,6 +14,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Field } from '../ui/Field.tsx';
 import { formText } from '../ui/formText.ts';
 import { Layout } from '../ui/Layout.tsx';
+import { SettingsTabs } from './SettingsTabs.tsx';
 
 type Passkey = { id: string; name: string; createdAt: string };
 
@@ -122,6 +123,7 @@ export function SecurityPage() {
 
   return (
     <Layout width="wide" signedIn>
+      <SettingsTabs current="security" />
       <h1>Security</h1>
 
       <section aria-labelledby="passkeys-heading">

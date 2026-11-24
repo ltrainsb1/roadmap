@@ -25,7 +25,7 @@ describe('calendar feed choices', () => {
   });
 
   test('FR-4.2: a feed\'s kept choices may hold an empty list, left by deleted roadmaps, but never one past 100', () => {
-    const feed = (roadmaps: unknown) => ({ feed: { choices: { ...DEFAULT_FEED_CHOICES, roadmaps }, createdAt: 'x', lastFetchedAt: null } });
+    const feed = (roadmaps: unknown) => ({ feed: { choices: { ...DEFAULT_FEED_CHOICES, roadmaps }, createdAt: 'x', linkCreatedAt: 'x', lastFetchedAt: null } });
     expect(feedStateSchema.safeParse(feed([])).success).toBe(true);
     expect(feedStateSchema.safeParse(feed('all')).success).toBe(true);
     expect(feedStateSchema.safeParse(feed(Array.from({ length: 101 }, (_, i) => `r${i}`))).success).toBe(false);

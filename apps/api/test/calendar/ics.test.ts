@@ -218,7 +218,7 @@ describe("eventsFor and icsCalendar", () => {
       titles.map((t) =>
         t
           .replace(/\r\n|\r|[\v\f\u2028]/g, "\n")
-          .replace(/\u0000/g, ""),
+          .replaceAll("\u0000", ""),
       ),
     );
     expect(cal.getFirstPropertyValue("x-wr-calname")).toBe(

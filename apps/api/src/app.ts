@@ -24,6 +24,7 @@ import { registerInviteRoutes } from './invites/routes.ts';
 import { registerAttachmentRoutes } from './attachments/routes.ts';
 import { registerAuditRoutes } from './audit/routes.ts';
 import { registerCalendarFeedRoutes } from './calendar/feed-routes.ts';
+import { registerCalendarItemRoutes } from './calendar/item-routes.ts';
 import { registerCalendarPublicRoutes } from './calendar/public-routes.ts';
 import { registerMemberRoutes } from './members/routes.ts';
 import { registerNoteRoutes } from './notes/routes.ts';
@@ -176,6 +177,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerRoadmapRoutes(app, { now });
   registerNotificationRoutes(app, { now });
   registerCalendarFeedRoutes(app, { now, origin: deps.config.appOrigin });
+  registerCalendarItemRoutes(app, { origin: deps.config.appOrigin });
   registerCalendarPublicRoutes(app, { db: deps.db, now, origin: deps.config.appOrigin });
 
   registerInviteRoutes(app, {

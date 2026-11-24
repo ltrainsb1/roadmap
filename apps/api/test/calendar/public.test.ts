@@ -5,7 +5,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { CALENDAR_LIMITS, DEFAULT_FEED_CHOICES, type FeedState } from '@roadmap/shared';
 import { eventsFor } from '../../src/calendar/ics.ts';
 import { scoped } from '../../src/db/scoped.ts';
-import type { ProjectDoc } from '../../src/db/types.ts';
+import type { ProjectDoc, RoadmapDoc } from '../../src/db/types.ts';
 import { redactUrl, serializeRequest } from '../../src/logging.ts';
 import { makeTestApp, signInAs, type TestApp } from '../helpers.ts';
 import { calendarWorld, parseFeed, pathOf, tokenOf } from './world.ts';
@@ -174,6 +174,22 @@ describe('the calendar feed', () => {
     const empty = await w.fetchFeed(url);
     expect(empty.statusCode).toBe(200);
     expect(parseFeed(empty.body)).toEqual({ name: 'Roadmap dates', events: [] });
+  });
+
+  test('FR-4.2: an archived roadmap\'s items drop out of an "all" feed and of a feed that lists it by id', async () => {
+    const w = await calendarWorld(t);
+    const url = await w.create();
+    const kept = await w.item(w.launch._id, { title: 'Launch', endDate: '2026-02-01' });
+    const archived = await w.item(w.growth._id, { title: 'Growth', endDate: '2026-02-02' });
+    expect(uidsOf((await w.fetchFeed(url)).body)).toEqual([itemUid(kept._id), itemUid(archived._id)].sort());
+    await setChoices(w, { roadmaps: [w.growth._id] });
+    expect(uidsOf((await w.fetchFeed(url)).body)).toEqual([itemUid(archived._id)]);
+
+    // No route archives a roadmap yet; the flag is what the rest of the app reads.
+    await t.db.collection<RoadmapDoc>('roadmaps').updateOne({ _id: w.growth._id }, { $set: { archived: true } });
+    expect(parseFeed((await w.fetchFeed(url)).body).events).toEqual([]);
+    await setChoices(w, { roadmaps: 'all' });
+    expect(uidsOf((await w.fetchFeed(url)).body)).toEqual([itemUid(kept._id)]);
   });
 
   test('FR-4.3: after an item\'s dates change, the next fetch has the same UID with a higher SEQUENCE and a new ETag', async () => {

@@ -28,13 +28,18 @@ const byEndThenUid = (a: IcsEvent, b: IcsEvent) =>
 /** Every unknown, replaced or malformed token gets the same answer: 404 with nothing in it. */
 const nothing = (reply: FastifyReply) => reply.status(404).send();
 
-/** The roadmaps the feed may show right now: those chosen that the person still belongs to (FR-4.2). */
+/**
+ * The roadmaps the feed may show right now: those chosen that the person still belongs to and that are not archived
+ * (FR-4.2). Two queries, whatever the number of roadmaps.
+ */
 async function roadmapsOf(s: ScopedDb, feed: CalendarFeedDoc): Promise<string[]> {
   const chosen = feed.choices.roadmaps;
   const memberships = await s
     .collection('memberships')
     .find({ userId: feed.userId, ...(chosen !== 'all' && { roadmapId: { $in: chosen } }) });
-  return memberships.map((m) => m.roadmapId);
+  if (memberships.length === 0) return [];
+  const live = await s.collection('roadmaps').find({ _id: { $in: memberships.map((m) => m.roadmapId) }, archived: false });
+  return live.map((r) => r._id);
 }
 
 /** The calendar a feed shows, built from what is stored now (FR-4.1, FR-4.2). */

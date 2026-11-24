@@ -55,6 +55,11 @@ describe("icsEscape and foldLine", () => {
     expect(icsEscape("a\\b;c,d\r\ne\nf\rg")).toBe("a\\\\b\\;c\\,d\\ne\\nf\\ng");
   });
 
+  test("FR-4.1: other line breaks become \\n, and every other control character but tab is dropped", () => {
+    expect(icsEscape("a\vb\fc\u0085d\u2028e\u2029f")).toBe("a\\nb\\nc\\nd\\ne\\nf");
+    expect(icsEscape("a\u0000b\u0007c\u001bd\u007fe\u009bf\tg")).toBe("abcdef\tg");
+  });
+
   test("FR-4.1: a line of 75 octets or fewer is left alone; longer ones fold with CRLF and a space", () => {
     expect(foldLine("x".repeat(75))).toBe("x".repeat(75));
     const folded = foldLine("x".repeat(200));
@@ -196,6 +201,7 @@ describe("eventsFor and icsCalendar", () => {
       "Plan; then, ship \\ fast\r\nsecond line\nthird",
       "x".repeat(63) + "😀👩‍👩‍👧‍👦🎉".repeat(6),
       "路线图".repeat(66) + "路线",
+      "Tab\vvertical\fform\u0000nul\u2028line",
     ];
     const events = titles.map(
       (title, i) => eventsFor(item({ _id: `p${i}`, title }), on)[0]!,
@@ -204,11 +210,16 @@ describe("eventsFor and icsCalendar", () => {
     const lines = ics.split("\r\n");
     for (const line of lines) {
       expect(Buffer.byteLength(line)).toBeLessThanOrEqual(75);
-      expect(line).not.toMatch(/[\r\n]/);
+      // No raw control character, nor a Unicode line break, gets past the CRLF line ends.
+      expect(line).not.toMatch(/[\p{Cc}\u2028\u2029]/u);
     }
     const { cal, events: parsed } = parse(ics);
     expect(parsed.map((e) => e.getFirstPropertyValue("summary"))).toEqual(
-      titles.map((t) => t.replace(/\r\n|\r/g, "\n")),
+      titles.map((t) =>
+        t
+          .replace(/\r\n|\r|[\v\f\u2028]/g, "\n")
+          .replace(/\u0000/g, ""),
+      ),
     );
     expect(cal.getFirstPropertyValue("x-wr-calname")).toBe(
       "Roadmap dates, mine; \\ yes",

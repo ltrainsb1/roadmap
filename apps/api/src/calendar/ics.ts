@@ -1,8 +1,14 @@
 import type { ProjectDoc } from "../db/types.ts";
 
-/** Escapes untrusted text as iCalendar TEXT (RFC 5545 3.3.11): backslash, semicolon, comma, and line breaks as \n. */
+/**
+ * Escapes untrusted text as iCalendar TEXT (RFC 5545 3.3.11): backslash, semicolon, comma, and every kind of line
+ * break as \n. TEXT allows no other control character, so the rest are dropped; tab is allowed and kept.
+ */
 export function icsEscape(text: string): string {
-  return text.replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\r\n|\r|\n/g, "\\n");
+  return text
+    .replace(/[\\;,]/g, (c) => `\\${c}`)
+    .replace(/\r\n|[\r\n\v\f\u0085\u2028\u2029]/g, "\\n")
+    .replace(/(?!\t)\p{Cc}/gu, "");
 }
 
 const MAX_OCTETS = 75;

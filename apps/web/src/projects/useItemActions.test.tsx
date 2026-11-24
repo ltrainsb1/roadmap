@@ -80,6 +80,10 @@ describe('useItemActions Add to calendar', () => {
     expect(menuLabels('owner', item({ startDate: '2027-03-03', archived: true }))).toEqual(['Open', 'Unarchive', 'Delete']);
   });
 
+  test('FR-4.5: a cancelled item is not offered "Add to calendar"', () => {
+    expect(menuLabels('contributor', item({ startDate: '2027-03-03', status: 'cancelled' }))).toEqual(['Open']);
+  });
+
   test('FR-4.5: a failed download shows its message', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":"no_dates"}', { status: 422 })));
     const target = item({ startDate: '2027-03-03' });

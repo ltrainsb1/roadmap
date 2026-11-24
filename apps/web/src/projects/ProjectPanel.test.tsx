@@ -80,4 +80,10 @@ describe('ProjectPanel Add to calendar', () => {
     fireEvent.click(button);
     expect(onAddToCalendar).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1' }));
   });
+
+  test('FR-4.5: a cancelled item\'s panel has no "Add to calendar"', () => {
+    renderPanel(item({ status: 'cancelled', startDate: '2027-03-03', endDate: '2027-04-28' }));
+    expect(screen.getByLabelText('End date')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add to calendar' })).toBeNull();
+  });
 });

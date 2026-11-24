@@ -67,6 +67,21 @@ describe("one item's calendar file", () => {
     expect((await w.call('pat', 'GET', urlFor(w.launch._id, 'nope'))).statusCode).toBe(404);
   });
 
+  test('FR-4.5: a cancelled item is 422 no_dates, as the feed leaves it out; a done one still downloads', async () => {
+    const w = await calendarWorld(t);
+    const cancelled = await w.item(w.launch._id, {
+      title: 'Dropped',
+      status: 'cancelled',
+      endDate: '2026-03-10',
+      milestones: [{ name: 'M', date: '2026-03-05' }],
+    });
+    const res = await w.call('pat', 'GET', urlFor(w.launch._id, cancelled._id));
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ error: 'no_dates' });
+    const done = await w.item(w.launch._id, { title: 'Shipped', status: 'done', endDate: '2026-03-10' });
+    expect((await w.call('pat', 'GET', urlFor(w.launch._id, done._id))).statusCode).toBe(200);
+  });
+
   test("Tenant isolation: another roadmap's member and another tenant get 404", async () => {
     const w = await calendarWorld(t);
     const secretItem = await w.item(w.secret._id, { title: 'Hidden', endDate: '2026-03-10' });

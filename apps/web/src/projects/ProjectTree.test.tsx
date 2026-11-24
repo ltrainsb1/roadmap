@@ -70,6 +70,12 @@ describe('row menu', () => {
     expect(handlers.onAddToCalendar).toHaveBeenCalledWith(expect.objectContaining({ id: '2' }));
   });
 
+  test('FR-4.5: a cancelled row is not offered "Add to calendar"', () => {
+    renderTree([item('1', { status: 'cancelled', endDate: '2027-04-28' })], 'contributor');
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Item 1' }));
+    expect(menuNames()).toEqual(['Open']);
+  });
+
   test('FR-1.3: an archived row offers Unarchive in place of Archive, and no move or add items', () => {
     const handlers = renderTree([item('1', { archived: true }), item('2')]);
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Item 1' }));

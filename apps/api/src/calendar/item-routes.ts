@@ -19,7 +19,8 @@ export function registerCalendarItemRoutes(app: FastifyInstance, deps: { origin:
       const item = await loadProject(req.actor!.db, roadmapId, projectId);
       // Archiving an item archives everything under it, so this also covers items under an archived ancestor.
       if (item.archived) throw new HttpError(404, 'not_found');
-      const events = eventsFor(item, { origin: deps.origin, itemDates: true, milestones: true });
+      // The feed leaves cancelled items out, so the download does too: the two always agree.
+      const events = item.status === 'cancelled' ? [] : eventsFor(item, { origin: deps.origin, itemDates: true, milestones: true });
       if (events.length === 0) throw new HttpError(422, 'no_dates');
       return reply
         .type('text/calendar; charset=utf-8')

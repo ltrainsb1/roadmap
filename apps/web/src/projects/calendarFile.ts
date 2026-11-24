@@ -3,10 +3,11 @@ import { ApiError } from '../api/client.ts';
 
 /**
  * Whether "Add to calendar" is offered for an item: it has a date or a milestone (FR-4.5). Not for an archived
- * item, which the server answers with a 404.
+ * item, which the server answers with a 404, nor a cancelled one, which the feed leaves out and the server answers
+ * with a 422.
  */
-export const hasCalendarDates = (item: Pick<Project, 'startDate' | 'endDate' | 'milestones' | 'archived'>): boolean =>
-  !item.archived && (item.startDate !== null || item.endDate !== null || item.milestones.length > 0);
+export const hasCalendarDates = (item: Pick<Project, 'status' | 'startDate' | 'endDate' | 'milestones' | 'archived'>): boolean =>
+  !item.archived && item.status !== 'cancelled' && (item.startDate !== null || item.endDate !== null || item.milestones.length > 0);
 
 /**
  * Downloads one item's dates as `{title}.ics` (the server's name for it). It is fetched rather than linked, so a

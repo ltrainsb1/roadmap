@@ -8,9 +8,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const item = (over: Partial<Project> = {}): Pick<Project, 'id' | 'title' | 'startDate' | 'endDate' | 'milestones' | 'archived'> => ({
+const item = (over: Partial<Project> = {}): Pick<Project, 'id' | 'title' | 'status' | 'startDate' | 'endDate' | 'milestones' | 'archived'> => ({
   id: 'p1',
   title: 'Launch site',
+  status: 'not_started',
   startDate: null,
   endDate: null,
   milestones: [],
@@ -19,13 +20,16 @@ const item = (over: Partial<Project> = {}): Pick<Project, 'id' | 'title' | 'star
 });
 
 describe('hasCalendarDates', () => {
-  test('FR-4.5: an item has something for a calendar with a start date, an end date or a milestone, and not when archived', () => {
+  test('FR-4.5: an item has something for a calendar with a start date, an end date or a milestone, and not when archived or cancelled', () => {
     expect(hasCalendarDates(item())).toBe(false);
     expect(hasCalendarDates(item({ startDate: '2027-03-03' }))).toBe(true);
     expect(hasCalendarDates(item({ endDate: '2027-04-28' }))).toBe(true);
     expect(hasCalendarDates(item({ milestones: [{ id: 'm1', name: 'Beta', date: '2027-03-20' }] }))).toBe(true);
     // The server answers 404 for an archived item, so it is not offered.
     expect(hasCalendarDates(item({ startDate: '2027-03-03', archived: true }))).toBe(false);
+    // The feed leaves cancelled items out and the server answers 422, so they are not offered either; done ones are.
+    expect(hasCalendarDates(item({ startDate: '2027-03-03', status: 'cancelled' }))).toBe(false);
+    expect(hasCalendarDates(item({ startDate: '2027-03-03', status: 'done' }))).toBe(true);
   });
 });
 

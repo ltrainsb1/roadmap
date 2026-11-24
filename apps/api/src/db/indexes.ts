@@ -65,6 +65,14 @@ const INDEXES: Record<string, IndexDescription[]> = {
     { key: { tenantId: 1, noteId: 1 }, partialFilterExpression: { noteId: { $exists: true } } },
     { key: { createdAt: 1 }, expireAfterSeconds: NOTIFICATION_TTL_SECONDS },
   ],
+  calendarFeeds: [
+    // Pre-auth lookup by the token's hash (not tenant-first by design).
+    { key: { tokenHash: 1 }, unique: true },
+    // One feed per person.
+    { key: { tenantId: 1, userId: 1 }, unique: true },
+    // Roadmap delete takes the roadmap out of every chosen list.
+    { key: { tenantId: 1, 'choices.roadmaps': 1 } },
+  ],
   webauthnChallenges: [{ key: { expiresAt: 1 }, expireAfterSeconds: 0 }],
 };
 

@@ -2,6 +2,7 @@ import type { ClientSession, Db, Filter, Sort, UpdateFilter } from 'mongodb';
 import type {
   AttachmentDoc,
   AuditEventDoc,
+  CalendarFeedDoc,
   InviteDoc,
   MembershipDoc,
   NoteDoc,
@@ -31,7 +32,8 @@ export type CollectionName =
   | 'snapshotItems'
   | 'snapshotNotes'
   | 'snapshotSessions'
-  | 'notifications';
+  | 'notifications'
+  | 'calendarFeeds';
 
 interface DocMap {
   users: UserDoc;
@@ -48,6 +50,7 @@ interface DocMap {
   snapshotNotes: SnapshotNoteDoc;
   snapshotSessions: SnapshotSessionDoc;
   notifications: NotificationDoc;
+  calendarFeeds: CalendarFeedDoc;
 }
 export type DocFor<N extends CollectionName> = DocMap[N];
 

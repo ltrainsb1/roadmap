@@ -2,10 +2,11 @@ import { can, type PriorityLabel, type Project, type ProjectList, type ProjectSt
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { errorCode, itemActionMessage } from '../api/errors.ts';
+import { CALENDAR_DOWNLOAD_FAILED, errorCode, itemActionMessage } from '../api/errors.ts';
 import type { useMembers } from '../members/useMembers.ts';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import type { MenuItem } from '../ui/Menu.tsx';
+import { downloadItemCalendar, hasCalendarDates } from './calendarFile.ts';
 import type { OwnChange } from './ProjectPanel.tsx';
 import { titleLinkId } from './itemParts.tsx';
 import {
@@ -34,13 +35,18 @@ export interface ItemActions {
   archiveItem: (item: Project) => void;
   unarchiveItem: (item: Project) => void;
   askDelete: (item: Project) => void;
+  /** Downloads the item's dates as a calendar file; a failure shows in `actionError` (FR-4.5). */
+  addToCalendar: (item: Project) => void;
   openItem: (itemId: string) => void;
   closePanel: () => void;
   /** Runs `action` now, or after the person agrees to discard unsaved panel edits. */
   unlessDirty: (action: () => void) => void;
   onDirtyChange: (dirty: boolean) => void;
   reloadItem: () => Promise<Project | undefined>;
-  /** "Open", then "Archive" or "Unarchive" and "Delete" when the person may delete the item. */
+  /**
+   * "Open", "Add to calendar" for an item with a date or a milestone, then "Archive" or "Unarchive" and "Delete" when
+   * the person may delete the item.
+   */
   menuFor: (item: Project) => MenuItem[];
   /** The Delete and Discard dialogs. The page renders this once. */
   dialogs: ReactNode;
@@ -232,6 +238,11 @@ export function useItemActions(opts: {
   };
   const underDeleting = deleting ? projects.items.filter((i) => i.path.includes(deleting.id)).length : 0;
 
+  const addToCalendar = (item: Project) => {
+    setActionError(undefined);
+    downloadItemCalendar(roadmapId, item).catch(() => setActionError(CALENDAR_DOWNLOAD_FAILED));
+  };
+
   const reloadItem = async (): Promise<Project | undefined> => {
     const fresh = await projects.refetch({ throwOnError: true });
     return fresh.data?.items.find((i) => i.id === projectId);
@@ -239,6 +250,7 @@ export function useItemActions(opts: {
 
   const menuFor = (item: Project): MenuItem[] => {
     const entries: MenuItem[] = [{ label: 'Open', onSelect: () => openItem(item.id) }];
+    if (hasCalendarDates(item)) entries.push({ label: 'Add to calendar', onSelect: () => addToCalendar(item) });
     if (can({ role, action: 'project.delete', ctx: { isAssigned: isAssigned(item, myId, projects.byId) } })) {
       entries.push(
         item.archived ? { label: 'Unarchive', onSelect: () => unarchiveItem(item) } : { label: 'Archive', onSelect: () => archiveItem(item) },
@@ -289,6 +301,7 @@ export function useItemActions(opts: {
     archiveItem,
     unarchiveItem,
     askDelete,
+    addToCalendar,
     openItem,
     closePanel,
     unlessDirty,

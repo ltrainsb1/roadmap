@@ -21,6 +21,7 @@ import { actionsButtonId, dragHandleIcon, NameCell } from './itemParts.tsx';
 import { StatusMenu } from './StatusMenu.tsx';
 import { isAssigned } from './useProjects.ts';
 import { addChildLabel, warningText } from './names.ts';
+import { hasCalendarDates } from './calendarFile.ts';
 
 /** Where the add row is open: under `parentId`, or at the top level when null. */
 export interface AddTarget {
@@ -162,10 +163,12 @@ interface TreeProps {
   onArchive: (item: Project) => void;
   onUnarchive: (item: Project) => void;
   onDelete: (item: Project) => void;
+  /** Downloads the item's dates as a calendar file; the page shows any error. */
+  onAddToCalendar: (item: Project) => void;
 }
 
 export function ProjectTree(props: TreeProps) {
-  const { roadmapId, role, myId, items, contextIds, expandAll = false, reorderable = true, search = '', byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus, onOpen, onReorder, onArchive, onUnarchive, onDelete } = props;
+  const { roadmapId, role, myId, items, contextIds, expandAll = false, reorderable = true, search = '', byId, memberNames, selectedId, collapsed, onToggle, adding, onStartAdd, onAdd, onCancelAdd, onChangeStatus, onOpen, onReorder, onArchive, onUnarchive, onDelete, onAddToCalendar } = props;
   const tree = buildTree(items);
   const canReorder = reorderable && can({ role, action: 'project.setPriority' });
   // The row being dragged shows without its children, so it moves as one line.
@@ -211,6 +214,7 @@ export function ProjectTree(props: TreeProps) {
 
   const menuItems = (item: Project, group: TreeNode[]): MenuItem[] => {
     const entries: MenuItem[] = [{ label: 'Open', onSelect: () => onOpen(item.id) }];
+    if (hasCalendarDates(item)) entries.push({ label: 'Add to calendar', onSelect: () => onAddToCalendar(item) });
     const add = addChildLabel(item.depth);
     if (!item.archived && !contextIds?.has(item.id) && add && can({ role, action: 'project.create', ctx: { isAssigned: isAssigned(item, myId, byId) } })) {
       entries.push({ label: add, onSelect: () => onStartAdd(item.id) });

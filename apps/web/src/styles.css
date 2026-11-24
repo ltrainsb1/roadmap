@@ -936,6 +936,10 @@ select {
   margin-top: 12px;
   color: var(--success-text);
 }
+/* "Add to calendar" sits under the dates, as close to them as a field to the next (FR-4.5). */
+.panel-calendar {
+  margin: -8px 0 16px;
+}
 .panel-back {
   display: none;
   margin-bottom: 12px;

@@ -298,6 +298,7 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
                 onReorder={actions.reorderItems}
                 onArchive={actions.archiveItem}
                 onUnarchive={actions.unarchiveItem}
+                onAddToCalendar={actions.addToCalendar}
                 onDelete={actions.askDelete}
                 selectedId={selected?.id}
                 collapsed={collapsed}
@@ -325,6 +326,7 @@ export function ProjectsPage({ view }: { view: ProjectView }) {
               onToggleAssignee={actions.toggleAssignee}
               onSetPriorityLabel={actions.changePriorityLabel}
               onDirtyChange={actions.onDirtyChange}
+              onAddToCalendar={actions.addToCalendar}
               timeZone={me.data?.user.timezone ?? 'UTC'}
             />
           )}

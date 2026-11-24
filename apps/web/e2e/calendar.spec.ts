@@ -1,4 +1,6 @@
-import type { APIRequestContext, Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import type { APIRequestContext, Download, Page } from '@playwright/test';
+import type { Project } from '@roadmap/shared';
 import ICAL from 'ical.js';
 import { expectNoA11yViolations, useCspGuard } from './helpers.ts';
 import { expect, test, type ApiCall } from './fixtures.ts';
@@ -20,10 +22,10 @@ async function fetchFeed(request: APIRequestContext, url: string) {
   }));
 }
 
-/** An item with both dates and a milestone, through the API. */
-async function seedDatedItem(call: ApiCall, roadmapId: string) {
+/** An item with both dates and a milestone, through the API; gives back the saved item. */
+async function seedDatedItem(call: ApiCall, roadmapId: string): Promise<Project> {
   const { id } = await call<{ id: string }>('POST', `/api/roadmaps/${roadmapId}/projects`, { parentId: null, title: 'Launch' });
-  await call('PATCH', `/api/roadmaps/${roadmapId}/projects/${id}`, {
+  return call<Project>('PATCH', `/api/roadmaps/${roadmapId}/projects/${id}`, {
     version: 1,
     startDate: '2027-03-03',
     endDate: '2027-04-28',
@@ -149,4 +151,74 @@ test('FR-4.1: the page passes axe with no feed, just after creating, and on a la
   await expect(page.getByLabel('Calendar link', { exact: true })).toBeVisible();
   expect(await noSidewaysScroll(page)).toBe(true);
   await expectNoA11yViolations(page);
+});
+
+/** The events in a downloaded calendar file, with their UIDs. */
+async function eventsIn(download: Download) {
+  const path = await download.path();
+  const cal = new ICAL.Component(ICAL.parse(await readFile(path, 'utf8')) as unknown[]);
+  return cal.getAllSubcomponents('vevent').map((e) => ({
+    uid: String(e.getFirstPropertyValue('uid')),
+    summary: String(e.getFirstPropertyValue('summary')),
+    start: String(e.getFirstPropertyValue('dtstart')),
+    end: String(e.getFirstPropertyValue('dtend')),
+  }));
+}
+
+test('FR-4.5: "Add to calendar" on an item downloads "{title}.ics", which parses to the item\'s event and its milestones with the feed\'s UIDs', async ({ page, call, roadmap, request }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const launch = await seedDatedItem(call, roadmap.id);
+  await call('POST', `/api/roadmaps/${roadmap.id}/projects`, { parentId: null, title: 'Undated' });
+  const beta = launch.milestones[0]!;
+  const expected = [
+    { uid: `item-${launch.id}@localhost:5173`, summary: 'Launch', start: '2027-03-03', end: '2027-04-29' },
+    { uid: `milestone-${beta.id}@localhost:5173`, summary: 'Beta · Launch', start: '2027-03-20', end: '2027-03-21' },
+  ];
+
+  // The feed's UIDs for the same item, to compare with.
+  await openCalendarSettings(page);
+  const feedUrl = await createAndCopy(page);
+  const feed = await request.get(feedUrl);
+  const feedCal = new ICAL.Component(ICAL.parse(await feed.text()) as unknown[]);
+  const feedUids = feedCal.getAllSubcomponents('vevent').map((e) => String(e.getFirstPropertyValue('uid')));
+  expect(feedUids.sort()).toEqual(expected.map((e) => e.uid).sort());
+
+  // The Actions menu on the List; an item with no dates doesn't offer it.
+  await page.goto(`/r/${roadmap.id}/projects`);
+  await page.getByRole('button', { name: 'Actions for Undated', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'Open' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Add to calendar' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Actions for Launch', exact: true }).click();
+  const fromMenu = page.waitForEvent('download');
+  await page.getByRole('menuitem', { name: 'Add to calendar' }).click();
+  const download = await fromMenu;
+  expect(download.suggestedFilename()).toBe('Launch.ics');
+  expect(await eventsIn(download)).toEqual(expect.arrayContaining(expected));
+  expect(await eventsIn(download)).toHaveLength(2);
+  await expect(page).toHaveURL(`/r/${roadmap.id}/projects`);
+
+  // The button in the item panel, under the dates, on the Board.
+  await page.goto(`/r/${roadmap.id}/board/${launch.id}`);
+  const panel = page.getByRole('region', { name: 'Launch', exact: true });
+  const fromPanel = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Add to calendar' }).click();
+  const again = await fromPanel;
+  expect(again.suggestedFilename()).toBe('Launch.ics');
+  expect((await eventsIn(again)).map((e) => e.uid).sort()).toEqual(expected.map((e) => e.uid).sort());
+  await expect(page).toHaveURL(`/r/${roadmap.id}/board/${launch.id}`);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expectNoA11yViolations(page);
+});
+
+test('FR-4.5: when the download is refused the page stays put and says so', async ({ page, call, roadmap }) => {
+  await seedDatedItem(call, roadmap.id);
+  // The connection drops on the way to the file.
+  await page.route('**/calendar.ics', (route) => route.abort());
+  await page.goto(`/r/${roadmap.id}/board`);
+  await page.getByRole('button', { name: 'Actions for Launch', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Add to calendar' }).click();
+  await expect(page.getByRole('alert')).toHaveText("Couldn't download the calendar file. Try again.");
+  await expect(page).toHaveURL(`/r/${roadmap.id}/board`);
 });

@@ -30,7 +30,7 @@ const item = (id: string, over: Partial<Project> = {}): Project => ({
 });
 
 function renderTree(items: Project[], role: 'owner' | 'contributor' = 'owner') {
-  const handlers = { onReorder: vi.fn(), onArchive: vi.fn(), onUnarchive: vi.fn(), onDelete: vi.fn() };
+  const handlers = { onReorder: vi.fn(), onArchive: vi.fn(), onUnarchive: vi.fn(), onDelete: vi.fn(), onAddToCalendar: vi.fn() };
   render(
     <MemoryRouter>
       <ProjectTree
@@ -59,6 +59,17 @@ function renderTree(items: Project[], role: 'owner' | 'contributor' = 'owner') {
 const menuNames = () => screen.getAllByRole('menuitem').map((m) => m.textContent);
 
 describe('row menu', () => {
+  test('FR-4.5: the Actions menu and the panel offer "Add to calendar" only for items with a date or a milestone', () => {
+    const handlers = renderTree([item('1'), item('2', { milestones: [{ id: 'm1', name: 'Beta', date: '2027-03-20' }] })], 'contributor');
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Item 1' }));
+    expect(menuNames()).toEqual(['Open']);
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Item 2' }));
+    expect(menuNames()).toEqual(['Open', 'Add to calendar']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add to calendar' }));
+    expect(handlers.onAddToCalendar).toHaveBeenCalledWith(expect.objectContaining({ id: '2' }));
+  });
+
   test('FR-1.3: an archived row offers Unarchive in place of Archive, and no move or add items', () => {
     const handlers = renderTree([item('1', { archived: true }), item('2')]);
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Item 1' }));

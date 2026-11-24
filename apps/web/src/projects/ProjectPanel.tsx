@@ -20,6 +20,7 @@ import { Button } from '../ui/Button.tsx';
 import { Field } from '../ui/Field.tsx';
 import { SelectField } from '../ui/SelectField.tsx';
 import { useFocusFirstError } from '../ui/useFocusFirstError.ts';
+import { hasCalendarDates } from './calendarFile.ts';
 import { isAssigned, useUpdateProject } from './useProjects.ts';
 import { levelName, statusName, warningText } from './names.ts';
 import { PanelLists, type ListValues, type MemberName } from './PanelLists.tsx';
@@ -78,6 +79,8 @@ interface PanelProps {
   onSetPriorityLabel: (itemId: string, label: PriorityLabel | null) => void;
   /** Tells the page whether the form, or a note box, has changes that are not saved. */
   onDirtyChange: (dirty: boolean) => void;
+  /** Downloads the item's saved dates as a calendar file; the page shows any error (FR-4.5). */
+  onAddToCalendar: (item: Project) => void;
   /** The signed-in person's time zone, for the times on notes and files. */
   timeZone: string;
 }
@@ -87,7 +90,7 @@ interface PanelProps {
  * opens (the page keys it by item id) and is not touched by later refetches, so nothing typed is lost. Save
  * sends the version the form was started from, so a change made by someone else is a conflict, never overwritten.
  */
-export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onClose, onReload, members, ownChange, onToggleAssignee, onSetPriorityLabel, onDirtyChange, timeZone }: PanelProps) {
+export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onClose, onReload, members, ownChange, onToggleAssignee, onSetPriorityLabel, onDirtyChange, onAddToCalendar, timeZone }: PanelProps) {
   const update = useUpdateProject(roadmapId);
   const [values, setValues] = useState(() => valuesOf(item));
   // What the form was last started or saved from, to tell whether anything is unsaved.
@@ -314,6 +317,14 @@ export function ProjectPanel({ roadmapId, role, myId, item, byId, listPath, onCl
           error={fieldErrors.endDate}
           onChange={(e) => change({ endDate: e.target.value })}
         />
+        {/* From the saved item, which is what the server's file holds. */}
+        {hasCalendarDates(item) && (
+          <p className="panel-calendar">
+            <Button variant="link" onClick={() => onAddToCalendar(item)}>
+              Add to calendar
+            </Button>
+          </p>
+        )}
         <SelectField
           id={id('label')}
           label="Priority label"

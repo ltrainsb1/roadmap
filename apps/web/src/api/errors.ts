@@ -123,3 +123,6 @@ export const CALENDAR_FEED_LOAD_FAILED = "Couldn't load your calendar feed. Try 
 
 /** Saving the calendar feed's choices failed. */
 export const CALENDAR_SAVE_FAILED = "Couldn't save your choices. Try again.";
+
+/** "Add to calendar" on an item could not fetch or save the file. */
+export const CALENDAR_DOWNLOAD_FAILED = "Couldn't download the calendar file. Try again.";

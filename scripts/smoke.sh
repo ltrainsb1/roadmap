@@ -5,7 +5,8 @@
 #   bootstrap command) they set its person's password and authenticator, and create a roadmap, an item and two files
 #   (a third, the test virus, is refused). Then they share the roadmap as a snapshot, open it with its password,
 #   have the PDF service print it, check port 8080 (the PDF service's internal listener) does not answer, and revoke
-#   the snapshot. Run them only against a throwaway stack, never one with real data.
+#   the snapshot. Then they turn on a calendar feed, give the item dates, fetch the feed with no session (and again
+#   with its ETag), and turn the feed off. Run them only against a throwaway stack, never one with real data.
 # SMOKE_COMPOSE is the stack's Compose command (for example "docker compose -f deploy/poc/docker-compose.yml -f
 #   deploy/poc/docker-compose.smoke.yml"). With it, and SMOKE_WRITES=yes, the email checks run too: they invite a
 #   second person, read the invite link from the API container's outbox file (MAILER=file), accept it, assign that
@@ -53,6 +54,8 @@ body_contains_in() { printf '%s' "$1" | grep -F "$2" > /dev/null; }
 not() { ! "$@" 2> /dev/null; }
 # The string value of a top-level JSON field (no escapes in the values these checks read).
 json_field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\\([^\"]*\\)\".*/\\1/p"; }
+# The number value of a top-level JSON field.
+json_number() { printf '%s' "$1" | sed -n "s/.*\"$2\":\\([0-9][0-9]*\\).*/\\1/p"; }
 
 # The stack may still be starting (or restarting): wait, bounded, until the API answers through the proxy.
 wait_seconds="${SMOKE_WAIT_SECONDS:-60}"
@@ -254,6 +257,46 @@ res=$(api DELETE "/api/roadmaps/$roadmap_id/snapshots/$snapshot_id")
 check "revoke the snapshot (got $(status_of "$res"))" equals "$(status_of "$res")" 204
 res=$(viewer GET "$snap")
 check "the revoked snapshot's link is not found (got $(status_of "$res"))" equals "$(status_of "$res")" 404
+
+# ---- Calendar feed (SMOKE_WRITES=yes): a private feed shows the item's dates to a calendar app with no session,
+# answers 304 to a matching ETag, and is gone once turned off.
+
+res=$(api_json POST /api/me/calendar-feed '{}')
+feed_url=$(json_field "$(body_of "$res")" url)
+[[ "$(status_of "$res")" == 201 && -n "$feed_url" ]] || fatal "turn on the calendar feed (got $(status_of "$res"))"
+# The link names APP_ORIGIN, which may not be where this script reaches the stack: keep only its path.
+feed_path="/${feed_url#*://*/}"
+check "the feed link is a calendar path (got ${feed_path%/*}/…)" equals "${feed_path%/*}" /api/calendar
+# The roadmap has the one item, so its list carries one version.
+res=$(api GET "/api/roadmaps/$roadmap_id/projects")
+item_version=$(json_number "$(body_of "$res")" version)
+[[ "$(status_of "$res")" == 200 && -n "$item_version" ]] || fatal "read the item's version (got $(status_of "$res"))"
+res=$(api_json PATCH "/api/roadmaps/$roadmap_id/projects/$item_id" \
+  "{\"version\":$item_version,\"startDate\":\"$(date -u +%F)\",\"endDate\":\"$(date -u +%F)\"}")
+check "give the item dates (got $(status_of "$res"))" equals "$(status_of "$res")" 200
+
+# No cookie: a calendar app has only the link.
+feed_body="$work/feed.ics"
+headers=$(curl "${curl_args[@]}" -D - -o "$feed_body" "$base$feed_path")
+status=$(printf '%s' "$headers" | head -n1 | awk '{print $2}')
+check "the feed answers with no session (got $status)" equals "$status" 200
+check "the feed is text/calendar" header_starts 'content-type: text/calendar'
+check "the feed is a calendar" equals "$(head -n1 "$feed_body" | tr -d '\r')" BEGIN:VCALENDAR
+check "the feed has the item" body_contains_in "$(cat "$feed_body")" 'SUMMARY:Smoke item'
+check "the feed says noindex, nofollow" header_starts 'x-robots-tag: noindex, nofollow'
+robots=$(printf '%s' "$headers" | grep -ic '^x-robots-tag:')
+check "the feed sends x-robots-tag once (got $robots)" equals "$robots" 1
+etag=$(printf '%s' "$headers" | grep -i '^etag:' | sed 's/^[^:]*: *//' | tr -d '\r')
+status=$(curl "${curl_args[@]}" -o /dev/null -w '%{http_code}' -H "if-none-match: $etag" "$base$feed_path")
+check "the feed answers 304 to its ETag (got $status)" equals "$status" 304
+
+res=$(api DELETE /api/me/calendar-feed)
+check "turn off the calendar feed (got $(status_of "$res"))" equals "$(status_of "$res")" 204
+headers=$(curl "${curl_args[@]}" -D - -o /dev/null "$base$feed_path")
+status=$(printf '%s' "$headers" | head -n1 | awk '{print $2}')
+check "the turned-off feed is not found (got $status)" equals "$status" 404
+# The API sends the header only with a calendar; the proxy sends it on every feed path, the 404 too.
+check "the turned-off feed's 404 says noindex, nofollow" header_starts 'x-robots-tag: noindex, nofollow'
 
 # ---- Notifications (SMOKE_WRITES=yes and SMOKE_COMPOSE): an assignment reaches the assigned person by email.
 

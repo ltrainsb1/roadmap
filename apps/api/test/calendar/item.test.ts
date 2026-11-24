@@ -39,11 +39,14 @@ describe("one item's calendar file", () => {
     for (const e of file.events) expect(uids.has(e.uid)).toBe(true);
   });
 
-  test('FR-4.5: the file name is the item\'s title, cleaned, and works with a title in another script', async () => {
+  test('FR-4.5: the file name is the item\'s title, cleaned, a slash becoming "-", and works with a title in another script', async () => {
     const w = await calendarWorld(t);
     const plain = await w.item(w.launch._id, { title: 'Beta/launch "plan"', endDate: '2026-03-10' });
     const h1 = (await w.call('pat', 'GET', urlFor(w.launch._id, plain._id))).headers['content-disposition'] as string;
-    expect(h1).toBe(`attachment; filename="launch plan.ics"; filename*=UTF-8''launch%20%22plan%22.ics`);
+    expect(h1).toBe(`attachment; filename="Beta-launch plan.ics"; filename*=UTF-8''Beta-launch%20%22plan%22.ics`);
+    const slashed = await w.item(w.launch._id, { title: 'iOS/Android launch', endDate: '2026-03-10' });
+    const h3 = (await w.call('pat', 'GET', urlFor(w.launch._id, slashed._id))).headers['content-disposition'] as string;
+    expect(decodeURIComponent(h3.split("filename*=UTF-8''")[1]!)).toBe('iOS-Android launch.ics');
     const title = 'Запуск «Бета»';
     const other = await w.item(w.launch._id, { title, endDate: '2026-03-10' });
     const h2 = (await w.call('pat', 'GET', urlFor(w.launch._id, other._id))).headers['content-disposition'] as string;

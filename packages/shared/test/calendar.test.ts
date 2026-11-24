@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { CALENDAR_LIMITS, DEFAULT_FEED_CHOICES, feedChoicesSchema, feedStateSchema } from '../src/calendar.ts';
+import { CALENDAR_LIMITS, calendarFileName, DEFAULT_FEED_CHOICES, feedChoicesSchema, feedStateSchema } from '../src/calendar.ts';
 
 describe('calendar feed choices', () => {
   test('FR-4.2: the default choices are all roadmaps, item dates and milestones, not only mine', () => {
@@ -30,5 +30,14 @@ describe('calendar feed choices', () => {
     expect(feedStateSchema.safeParse(feed('all')).success).toBe(true);
     expect(feedStateSchema.safeParse(feed(Array.from({ length: 101 }, (_, i) => `r${i}`))).success).toBe(false);
     expect(feedStateSchema.safeParse({ feed: null }).success).toBe(true);
+  });
+});
+
+describe('calendarFileName', () => {
+  test('FR-4.5: an item\'s calendar file is named after its title, a slash or backslash becoming "-" rather than cutting it', () => {
+    expect(calendarFileName('iOS/Android launch')).toBe('iOS-Android launch.ics');
+    expect(calendarFileName('a\\b/c')).toBe('a-b-c.ics');
+    expect(calendarFileName('Launch\nsite')).toBe('Launchsite.ics');
+    expect(calendarFileName('  ')).toBe('file.ics');
   });
 });

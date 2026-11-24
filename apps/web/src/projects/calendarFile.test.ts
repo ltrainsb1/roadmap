@@ -42,14 +42,14 @@ describe('downloadItemCalendar', () => {
       clicked.push(this);
     });
 
-    await downloadItemCalendar('r 1', item({ id: 'p/1', title: 'Q3: launch/site' }));
+    await downloadItemCalendar('r 1', item({ id: 'p/1', title: 'iOS/Android launch' }));
 
     expect(fetchMock).toHaveBeenCalledWith('/api/roadmaps/r%201/projects/p%2F1/calendar.ics', { credentials: 'same-origin' });
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(clicked).toHaveLength(1);
     expect(clicked[0]?.href).toBe('blob:http://localhost/abc');
-    // The server's name for it: cleanFileName drops the folder part.
-    expect(clicked[0]?.download).toBe('site.ics');
+    // The server's name for it: a slash becomes "-" rather than cutting the title.
+    expect(clicked[0]?.download).toBe('iOS-Android launch.ics');
     // Not straight after the click: some browsers are still reading the Blob then.
     expect(revokeObjectURL).not.toHaveBeenCalled();
     vi.advanceTimersByTime(999);

@@ -1,4 +1,4 @@
-import { cleanFileName } from '@roadmap/shared';
+import { calendarFileName } from '@roadmap/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { HttpError } from '../errors.ts';
@@ -23,7 +23,7 @@ export function registerCalendarItemRoutes(app: FastifyInstance, deps: { origin:
       if (events.length === 0) throw new HttpError(422, 'no_dates');
       return reply
         .type('text/calendar; charset=utf-8')
-        .header('content-disposition', contentDisposition(`${cleanFileName(item.title)}.ics`))
+        .header('content-disposition', contentDisposition(calendarFileName(item.title)))
         .header('cache-control', 'no-store')
         .send(icsCalendar({ name: 'Roadmap dates', events }));
     },

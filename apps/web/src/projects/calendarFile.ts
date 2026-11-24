@@ -1,4 +1,4 @@
-import { cleanFileName, type Project } from '@roadmap/shared';
+import { calendarFileName, type Project } from '@roadmap/shared';
 import { ApiError } from '../api/client.ts';
 
 /**
@@ -22,7 +22,7 @@ export async function downloadItemCalendar(roadmapId: string, item: Pick<Project
   try {
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${cleanFileName(item.title)}.ics`;
+    a.download = calendarFileName(item.title);
     a.click();
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 1000);

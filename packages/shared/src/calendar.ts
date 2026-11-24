@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cleanFileName } from './notes.ts';
 
 export const CALENDAR_LIMITS = { events: 5000, roadmaps: 100, fetchesPerMinute: 60, maxAgeSeconds: 300 } as const;
 
@@ -36,3 +37,9 @@ export type FeedState = z.infer<typeof feedStateSchema>;
 /** Only from create and new-link: the one time the URL is ever returned. */
 export const feedLinkSchema = feedStateSchema.extend({ url: z.string() });
 export type FeedLink = z.infer<typeof feedLinkSchema>;
+
+/**
+ * The name of one item's calendar file, the same on the server and in the browser (FR-4.5). cleanFileName keeps only
+ * what follows the last slash, so a slash or backslash in the title becomes "-" first.
+ */
+export const calendarFileName = (title: string): string => `${cleanFileName(title.replace(/[/\\]/g, '-'))}.ics`;

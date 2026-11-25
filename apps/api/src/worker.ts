@@ -1,5 +1,5 @@
 import { writeFile } from 'node:fs/promises';
-import { loadConfig } from './config.ts';
+import { loadWorkerConfig } from './config.ts';
 import { connectDb } from './db/client.ts';
 import { ensureIndexes } from './db/indexes.ts';
 import { createMailer } from './mail/mailer.ts';
@@ -12,7 +12,7 @@ const write = (level: 'info' | 'error', o: object, msg: string) =>
   void process.stdout.write(`${JSON.stringify({ level, time: new Date().toISOString(), msg, ...o })}\n`);
 const log: WorkerDeps['log'] = { info: (o, msg) => write('info', o, msg), error: (o, msg) => write('error', o, msg) };
 
-const config = loadConfig(process.env);
+const config = loadWorkerConfig(process.env);
 const { client, db } = await connectDb(config.mongoUri, config.mongoDb);
 await ensureIndexes(db);
 const deps: WorkerDeps = { db, mailer: createMailer(config), now: () => new Date(), appOrigin: config.appOrigin, log };

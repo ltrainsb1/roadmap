@@ -105,15 +105,25 @@ jobs:
       COMPOSE: docker compose -f deploy/poc/docker-compose.yml -f deploy/poc/docker-compose.smoke.yml
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Write a throwaway .env
+      - name: Write the throwaway settings files
+        # Three files, as on a server: .env (Compose's own variables), api.env and worker.env.
         run: |
           mongo_password=$(openssl rand -hex 16)
+          app_password=$(openssl rand -hex 16)
+          app_uri="mongodb://roadmap_app:${app_password}@mongo:27017/roadmap?replicaSet=rs0&authSource=roadmap"
           {
             echo "DOMAIN=localhost"
-            echo "APP_ORIGIN=https://localhost"
+            echo "S3_BUCKET=roadmap-files"
             echo "MONGO_INITDB_ROOT_USERNAME=root"
             echo "MONGO_INITDB_ROOT_PASSWORD=${mongo_password}"
-            echo "MONGO_URI=mongodb://root:${mongo_password}@mongo:27017/?replicaSet=rs0&authSource=admin"
+            echo "MONGO_APP_PASSWORD=${app_password}"
+            echo "MINIO_ROOT_USER=smoke-$(openssl rand -hex 8)"
+            echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)"
+            echo "MINIO_KMS_SECRET_KEY=smoke-key:$(openssl rand -base64 32)"
+          } > deploy/poc/.env
+          {
+            echo "APP_ORIGIN=https://localhost"
+            echo "MONGO_URI=${app_uri}"
             echo "MONGO_DB=roadmap"
             echo "NODE_ENV=production"
             echo "PORT=3000"
@@ -123,11 +133,16 @@ jobs:
             echo "MAIL_FROM=no-reply@localhost"
             echo "HIBP_ENABLED=false"
             echo "AUTH_RATE_LIMIT_PER_MIN=10"
-            echo "S3_BUCKET=roadmap-files"
-            echo "MINIO_ROOT_USER=smoke-$(openssl rand -hex 8)"
-            echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)"
-            echo "MINIO_KMS_SECRET_KEY=smoke-key:$(openssl rand -base64 32)"
-          } > deploy/poc/.env
+          } > deploy/poc/api.env
+          {
+            echo "NODE_ENV=production"
+            echo "MONGO_URI=${app_uri}"
+            echo "MONGO_DB=roadmap"
+            echo "APP_ORIGIN=https://localhost"
+            echo "MAILER=file"
+            echo "MAIL_OUTBOX_FILE=/tmp/outbox.jsonl"
+            echo "MAIL_FROM=no-reply@localhost"
+          } > deploy/poc/worker.env
       - name: Build the three images
         run: $COMPOSE build
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -159,6 +174,29 @@ jobs:
       - name: Start the stack
         # ClamAV loads its signatures before it is healthy, and the API waits for it.
         run: $COMPOSE up -d --wait --wait-timeout 420
+      - name: The app's MongoDB user cannot list every database
+        # The API connects as roadmap_app: readWrite on its own database only. A plain listDatabases then shows that
+        # one database; asking for all of them needs a privilege the user lacks, so MongoDB must refuse.
+        run: |
+          $COMPOSE exec -T api node -e "
+            const { MongoClient } = require('mongodb');
+            const client = new MongoClient(process.env.MONGO_URI);
+            (async () => {
+              await client.connect();
+              const admin = client.db().admin();
+              const own = (await admin.command({ listDatabases: 1, nameOnly: true })).databases.map((d) => d.name);
+              console.log('visible databases:', own.join(','));
+              if (own.join(',') !== 'roadmap') { console.log('expected only roadmap'); process.exit(1); }
+              try {
+                await admin.command({ listDatabases: 1, authorizedDatabases: false });
+                console.log('listing every database was allowed');
+                process.exit(1);
+              } catch (e) {
+                console.log('refused:', e.codeName);
+                process.exit(e.codeName === 'Unauthorized' ? 0 : 2);
+              }
+            })().catch((e) => { console.log(e.message); process.exit(3); });
+          "
       - name: Bootstrap prints a setup link
         id: bootstrap
         run: |

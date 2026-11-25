@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { ConfigError, loadConfig } from '../src/config.ts';
+import { ConfigError, loadConfig, loadWorkerConfig } from '../src/config.ts';
 import { RENDER_TOKEN_MS } from '../src/snapshots/access.ts';
 
 const key = Buffer.alloc(32, 7).toString('base64');
@@ -295,4 +295,54 @@ test('FR-5.1: WORKER_INTERVAL_MS defaults to 30000 and is at least 100; WORKER_H
   expect(loadConfig({ ...valid, WORKER_INTERVAL_MS: '100' }).workerIntervalMs).toBe(100);
   expect(() => loadConfig({ ...valid, WORKER_INTERVAL_MS: '99' })).toThrow(/WORKER_INTERVAL_MS/);
   expect(() => loadConfig({ ...valid, WORKER_INTERVAL_MS: 'soon' })).toThrow(/WORKER_INTERVAL_MS/);
+});
+
+describe('loadWorkerConfig', () => {
+  const workerEnv = {
+    NODE_ENV: 'production',
+    MONGO_URI: 'mongodb://roadmap_app:pw@mongo:27017/roadmap?replicaSet=rs0&authSource=roadmap',
+    MONGO_DB: 'roadmap',
+    APP_ORIGIN: 'https://roadmap.example.com',
+    MAILER: 'ses',
+    MAIL_FROM: 'no-reply@roadmap.example.com',
+    AWS_REGION: 'eu-west-1',
+  };
+
+  test('loads in production with only the worker settings', () => {
+    const cfg = loadWorkerConfig(workerEnv);
+    expect(cfg).toMatchObject({
+      nodeEnv: 'production',
+      mongoDb: 'roadmap',
+      appOrigin: 'https://roadmap.example.com',
+      mailer: 'ses',
+      mailFrom: 'no-reply@roadmap.example.com',
+      awsRegion: 'eu-west-1',
+      workerIntervalMs: 30000,
+      workerHeartbeatFile: '/tmp/worker-heartbeat',
+    });
+  });
+
+  test('rejects a missing MONGO_URI and a missing APP_ORIGIN', () => {
+    const noMongo: Record<string, string> = { ...workerEnv };
+    delete noMongo.MONGO_URI;
+    expect(() => loadWorkerConfig(noMongo)).toThrow(ConfigError);
+    expect(() => loadWorkerConfig(noMongo)).toThrow(/MONGO_URI/);
+    const noOrigin: Record<string, string> = { ...workerEnv };
+    delete noOrigin.APP_ORIGIN;
+    expect(() => loadWorkerConfig(noOrigin)).toThrow(ConfigError);
+    expect(() => loadWorkerConfig(noOrigin)).toThrow(/APP_ORIGIN/);
+  });
+
+  test('carries no API secrets or file, scanner or proxy settings', () => {
+    const keys = Object.keys(loadWorkerConfig({ ...workerEnv, TOTP_ENC_KEY: key, S3_BUCKET: 'b' }));
+    for (const name of ['totpEncKey', 's3Bucket', 'trustedProxyCidrs', 'files', 'scanner', 'pdf']) {
+      expect(keys).not.toContain(name);
+    }
+  });
+
+  test('sends from the app host when MAIL_FROM is not set', () => {
+    const rest: Record<string, string> = { ...workerEnv };
+    delete rest.MAIL_FROM;
+    expect(loadWorkerConfig(rest).mailFrom).toBe('no-reply@roadmap.example.com');
+  });
 });

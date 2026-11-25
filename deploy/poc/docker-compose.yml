@@ -1,6 +1,7 @@
 # Run from the repository root:
 #   docker compose -f deploy/poc/docker-compose.yml up -d --build
-# Needs deploy/poc/.env (copy .env.example and replace the placeholders).
+# Needs three files in deploy/poc: .env (Compose's own variables, listed in api.env.example's header), api.env and
+# worker.env (copy api.env.example and worker.env.example and replace the placeholders).
 # Files go to S3 (S3_BUCKET) with the instance role's credentials; there is no MinIO here. The smoke run layers
 # docker-compose.smoke.yml on top to add one.
 #
@@ -25,6 +26,9 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      # Read by mongo-init/create-app-user.js, which makes the roadmap_app user the API and the worker connect as.
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD}
+      MONGO_DB: ${MONGO_DB:-roadmap}
     # Auth plus a replica set needs a key file. One node has no peers to share it with, so a fresh
     # random key on every start is enough (it lives on tmpfs).
     entrypoint:
@@ -41,6 +45,8 @@ services:
       - /keys
     volumes:
       - ${MONGO_DATA:-/srv/mongo}:/data/db
+      # Runs once, on a fresh data folder only.
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # Runs rs.initiate once (the first time it finds no primary); healthy once this node is primary.
       test:
@@ -90,10 +96,9 @@ services:
       dockerfile: apps/api/Dockerfile
     image: roadmap-api:poc
     restart: unless-stopped
-    env_file: .env
-    # Production needs both (the API refuses to start otherwise), so they are fixed here, not in .env. The worker
-    # loads the same configuration, so it takes the same settings (the anchor below).
-    environment: &api-environment
+    env_file: ${API_ENV_FILE:-api.env}
+    # Production needs these (the API refuses to start otherwise), so they are fixed here, not in api.env.
+    environment:
       FILES: s3
       S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET in deploy/poc/.env}
       SCANNER: clamd
@@ -141,16 +146,14 @@ services:
 
   # Sends notification emails: instant ones, due-soon reminders and daily digests (dist/worker.js in the API image).
   # It needs only MongoDB and outbound email (SES), so it is on the default network alone, with no published port.
+  # It loads its own, smaller settings (worker.env): none of the API's keys, files, scanner or PDF settings.
   # Nothing depends on it: with it stopped, the site and the API keep working and emails wait in MongoDB until it
   # is back.
   worker:
     image: roadmap-api:poc
     command: ["node", "dist/worker.js"]
     restart: unless-stopped
-    env_file: .env
-    # The API's settings: the worker reads the same configuration, which refuses to load without them in
-    # production, even those (files, scanner, PDFs) the worker does not use.
-    environment: *api-environment
+    env_file: ${WORKER_ENV_FILE:-worker.env}
     depends_on:
       mongo:
         condition: service_healthy

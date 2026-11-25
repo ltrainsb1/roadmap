@@ -8,3 +8,5 @@ coverage/
 .DS_Store
 playwright-report/
 test-results/
+deploy/poc/api.env
+deploy/poc/worker.env

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Fake aws for the bats tests. Logs every call to $STUB_LOG.
+echo "aws $*" >> "$STUB_LOG"
+case "$1 $2" in
+  "ssm get-parameters-by-path")
+    [[ "$*" == *"--path /roadmap/poc/"* && "$*" == *"--with-decryption"* && "$*" == *"--recursive"* ]] || { echo "bad ssm args" >&2; exit 2; }
+    cat "$STUB_SSM_FILE" ;;
+  "ecr get-login-password")
+    [[ -z "${STUB_ECR_FAIL:-}" ]] || { echo "ecr denied" >&2; exit 1; }
+    echo "ecr-token" ;;
+  "s3 cp")
+    src="$3"; dst="$4"
+    if [[ "$src" == s3://* ]]; then
+      [[ -f "$STUB_S3_DIR/${src#s3://}" ]] || { echo "NoSuchKey" >&2; exit 1; }
+      cp "$STUB_S3_DIR/${src#s3://}" "$dst"
+    else
+      mkdir -p "$(dirname "$STUB_S3_DIR/${dst#s3://}")"
+      cp "$src" "$STUB_S3_DIR/${dst#s3://}"
+    fi ;;
+  *) echo "unexpected aws call: $*" >&2; exit 2 ;;
+esac

@@ -98,6 +98,34 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
+  host-scripts:
+    runs-on: ubuntu-latest # shellcheck is installed here
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install bats-core
+        # Pinned to a tag, and the commit it must point at, so a moved tag fails the job.
+        run: |
+          git clone --quiet --depth 1 --branch v1.13.0 https://github.com/bats-core/bats-core.git "$RUNNER_TEMP/bats-core"
+          test "$(git -C "$RUNNER_TEMP/bats-core" rev-parse HEAD)" = 3bca150ec86275d6d9d5a4fd7d48ab8b6c6f3d87
+          sudo "$RUNNER_TEMP/bats-core/install.sh" /usr/local
+      - run: bats deploy/poc/host/test
+      - run: shellcheck deploy/poc/host/render-env deploy/poc/host/deploy deploy/poc/host/backup-mongo deploy/poc/host/restore-mongo
+      - name: The AWS Compose override still resolves
+        # Placeholder values only: this checks the two files merge and every variable is accounted for.
+        env:
+          REGISTRY: 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+          RELEASE: placeholder
+          DOMAIN: roadmap.example.com
+          S3_BUCKET: placeholder-bucket
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: placeholder
+          MONGO_APP_PASSWORD: placeholder
+        run: |
+          : > "$RUNNER_TEMP/api.env"
+          : > "$RUNNER_TEMP/worker.env"
+          API_ENV_FILE="$RUNNER_TEMP/api.env" WORKER_ENV_FILE="$RUNNER_TEMP/worker.env" \
+            docker compose -f deploy/poc/docker-compose.yml -f deploy/poc/docker-compose.aws.yml config --quiet
+
   deploy-smoke:
     runs-on: ubuntu-latest # Docker is available here; ports 80 and 443 are free
     env:
@@ -217,6 +245,40 @@ jobs:
           # assignment email the worker sends.
           SMOKE_COMPOSE: ${{ env.COMPOSE }}
         run: scripts/smoke.sh https://localhost
+      - name: Back up MongoDB, restore the backup into a second database, and compare
+        # The host scripts against the real stack: backup-mongo dumps from the running mongo container and uploads to
+        # the smoke MinIO; restore-mongo puts that backup into another database; users and projects must match.
+        env:
+          ROADMAP_ENV_DIR: ${{ runner.temp }}/roadmap-env
+          ROADMAP_BACKUP_DIR: ${{ runner.temp }}/roadmap-backup
+          COMPOSE_PROJECT_NAME: roadmap-poc
+          COMPOSE_FILES: deploy/poc/docker-compose.yml deploy/poc/docker-compose.smoke.yml
+          COMPOSE_ENV_FILE: deploy/poc/.env
+          AWS_ENDPOINT_URL: http://127.0.0.1:9000
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          set -euo pipefail
+          AWS_ACCESS_KEY_ID=$(sed -n 's/^MINIO_ROOT_USER=//p' deploy/poc/.env)
+          AWS_SECRET_ACCESS_KEY=$(sed -n 's/^MINIO_ROOT_PASSWORD=//p' deploy/poc/.env)
+          export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+          aws s3 mb s3://roadmap-backups-smoke
+          mkdir -p "$ROADMAP_ENV_DIR"
+          echo "BACKUP_BUCKET='roadmap-backups-smoke'" > "$ROADMAP_ENV_DIR/compose.env"
+          count() {
+            $COMPOSE exec -T mongo bash -c 'mongosh --quiet -u root -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "const d = db.getSiblingDB(\"$1\"); print(d.users.countDocuments({}), d.projects.countDocuments({}))"' _ "$1"
+          }
+          deploy/poc/host/backup-mongo
+          date=$(date -u +%F)
+          aws s3 ls "s3://roadmap-backups-smoke/mongo/$date.archive.gz"
+          deploy/poc/host/restore-mongo "$date" --to roadmap_restore_check
+          live=$(count roadmap)
+          restored=$(count roadmap_restore_check)
+          echo "live (users projects): $live; restored: $restored"
+          test -n "$live"
+          test "$live" = "$restored"
+          test "${live%% *}" -gt 0
       - name: Show the stack logs on failure
         if: failure()
         run: $COMPOSE logs --no-color --tail 100

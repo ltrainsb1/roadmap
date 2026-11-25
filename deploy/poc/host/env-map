@@ -1,0 +1,51 @@
+# What render-env writes into /run/roadmap/{compose,api,worker}.env, one line per variable:
+#   <file> <VARIABLE> <source>
+# <file> is compose, api or worker. <source> is one of:
+#   an SSM parameter name under /roadmap/poc/   (the value is read from it)
+#   literal:<value>                             (a fixed value)
+#   built:<name>                                (render-env builds it: mongo-uri, release, api-env-file, worker-env-file)
+# A parameter that is missing stops render-env before it changes any file. The bats test in test/env-map.bats checks
+# that every setting in api.env.example and worker.env.example (commented optional ones named here too) has a line.
+
+# Compose's own variables (deploy/poc/docker-compose.yml and docker-compose.aws.yml).
+compose DOMAIN domain
+compose S3_BUCKET s3-bucket
+compose MONGO_INITDB_ROOT_USERNAME literal:root
+compose MONGO_INITDB_ROOT_PASSWORD mongo-root-password
+compose MONGO_APP_PASSWORD mongo-app-password
+compose MONGO_DB literal:roadmap
+compose MONGO_DATA literal:/srv/mongo
+compose REGISTRY registry
+compose RELEASE built:release
+compose API_ENV_FILE built:api-env-file
+compose WORKER_ENV_FILE built:worker-env-file
+compose BACKUP_BUCKET backup-bucket
+
+# The API (api.env.example).
+api APP_ORIGIN app-origin
+api MONGO_URI built:mongo-uri
+api MONGO_DB literal:roadmap
+api NODE_ENV literal:production
+api PORT literal:3000
+api TOTP_ENC_KEY totp-enc-key
+api UNSUBSCRIBE_KEY unsubscribe-key
+api MAILER literal:ses
+api MAIL_OUTBOX_FILE literal:/tmp/outbox.jsonl
+api MAIL_FROM mail-from
+api HIBP_ENABLED literal:true
+api AUTH_RATE_LIMIT_PER_MIN literal:10
+api AWS_REGION aws-region
+api SES_CONFIGURATION_SET ses-configuration-set
+
+# The worker (worker.env.example). It gets no TOTP_ENC_KEY.
+worker NODE_ENV literal:production
+worker MONGO_URI built:mongo-uri
+worker MONGO_DB literal:roadmap
+worker APP_ORIGIN app-origin
+worker UNSUBSCRIBE_KEY unsubscribe-key
+worker MAILER literal:ses
+worker MAIL_OUTBOX_FILE literal:/tmp/outbox.jsonl
+worker MAIL_FROM mail-from
+worker AWS_REGION aws-region
+worker SES_CONFIGURATION_SET ses-configuration-set
+worker SES_EVENTS_QUEUE_URL ses-events-queue-url

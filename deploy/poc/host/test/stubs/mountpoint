@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "mountpoint $*" >> "$STUB_LOG"
+[[ -z "${STUB_NOT_MOUNTED:-}" ]]

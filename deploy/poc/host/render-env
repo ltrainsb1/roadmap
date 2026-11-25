@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Writes /run/roadmap/{compose,api,worker}.env from the SSM parameters under /roadmap/poc/ and the map in env-map.
+#   render-env <release>
+# Nothing is changed unless every file can be written in full: the three files are made in a temporary folder and
+# moved into place at the end. A missing parameter stops it, and the message names each one.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+env_dir=${ROADMAP_ENV_DIR:-/run/roadmap}
+ssm_path=/roadmap/poc/
+
+release=${1:-}
+if [[ -z "$release" ]]; then
+  echo "usage: render-env <release>" >&2
+  exit 2
+fi
+
+umask 077
+mkdir -p "$env_dir"
+tmp=$(mktemp -d "$env_dir/.render.XXXXXX")
+trap 'rm -rf -- "$tmp"' EXIT
+
+aws ssm get-parameters-by-path --path "$ssm_path" --with-decryption --recursive \
+  --query 'Parameters[*].[Name,Value]' --output text > "$tmp/params.tsv"
+
+# The value of a parameter (a later line wins); fails when there is none.
+param() {
+  awk -F'\t' -v name="$ssm_path$1" '
+    $1 == name { value = substr($0, length($1) + 2); found = 1 }
+    END { if (!found) exit 1; print value }' "$tmp/params.tsv"
+}
+
+# Percent-encodes everything but letters, digits and - . _ ~ (what a password needs in a MongoDB URI).
+urlencode() {
+  local LC_ALL=C s=$1 out='' c i
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case $c in
+      [A-Za-z0-9._~-]) out+=$c ;;
+      *) out+=$(printf '%%%02X' "'$c") ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+missing=''
+unsafe=''
+: > "$tmp/compose.env"
+: > "$tmp/api.env"
+: > "$tmp/worker.env"
+
+while read -r file var source || [[ -n "${file:-}" ]]; do
+  case $file in '' | '#'*) continue ;; esac
+  case $file in compose | api | worker) ;; *) echo "render-env: env-map names an unknown file: $file" >&2; exit 1 ;; esac
+  name=''
+  value=''
+  found=yes
+  case $source in
+    literal:*) value=${source#literal:} ;;
+    built:release) value=$release ;;
+    built:api-env-file) value=$env_dir/api.env ;;
+    built:worker-env-file) value=$env_dir/worker.env ;;
+    built:mongo-uri)
+      name=mongo-app-password
+      if password=$(param "$name"); then
+        value="mongodb://roadmap_app:$(urlencode "$password")@mongo:27017/roadmap?replicaSet=rs0&authSource=roadmap"
+      else
+        found=no
+      fi ;;
+    built:*)
+      echo "render-env: env-map names an unknown built value: $source" >&2
+      exit 1 ;;
+    *)
+      name=$source
+      value=$(param "$name") || found=no ;;
+  esac
+  if [[ "$found" == no ]]; then
+    missing="$missing$ssm_path$name"$'\n'
+    continue
+  fi
+  # A .env file value is written in single quotes, which take everything literally except a single quote itself.
+  case $value in
+    *"'"* | *$'\r'*)
+      unsafe="$unsafe$var (${name:-$source})"$'\n'
+      continue ;;
+  esac
+  printf "%s='%s'\n" "$var" "$value" >> "$tmp/$file.env"
+done < "$here/env-map"
+
+if [[ -n "$missing" ]]; then
+  echo "render-env: missing SSM parameters: $(printf '%s' "$missing" | sort -u | paste -sd ' ' -)" >&2
+  exit 1
+fi
+if [[ -n "$unsafe" ]]; then
+  printf 'render-env: a value holds a single quote or a carriage return, which a .env file cannot carry: %s' "$unsafe" >&2
+  exit 1
+fi
+
+for f in compose api worker; do mv -f -- "$tmp/$f.env" "$env_dir/$f.env"; done

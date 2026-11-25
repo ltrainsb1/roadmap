@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# Starts a release on this server:   deploy <release>
+# Run as root from the unpacked bundle: /opt/roadmap/releases/<release>/deploy/poc/host/deploy
+#
+# Exit codes:
+#   0  the release is up and healthy
+#   1  it did not come up and the previous release was started again (or there was none, and the failed stack is
+#      left running so it can be looked at)
+#   2  the running stack was never touched (no data volume, settings or registry sign-in failed, images not pulled)
+#
+# The MongoDB init script (mongo-init/create-app-user.js) makes the roadmap_app user on a fresh data folder only. This
+# server starts fresh, so nothing is needed here; a data folder that already exists needs that user made by hand.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+poc=$(cd "$here/.." && pwd)
+env_dir=${ROADMAP_ENV_DIR:-/run/roadmap}
+root=${ROADMAP_ROOT:-/opt/roadmap}
+data_dir=${ROADMAP_DATA_DIR:-/srv/mongo}
+systemd_dir=${SYSTEMD_DIR:-/etc/systemd/system}
+keep=5
+
+release=${1:-}
+if [[ $# -ne 1 || ! "$release" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "usage: deploy <release>" >&2
+  exit 2
+fi
+
+# One value out of a file render-env wrote (KEY='value').
+env_get() { sed -n "s/^$2='\\(.*\\)'\$/\\1/p" "$env_dir/$1" | head -n 1; }
+
+# compose <bundle folder> <release> <arguments...>
+compose() {
+  local dir=$1 rel=$2
+  shift 2
+  RELEASE=$rel docker compose -p roadmap-poc -f "$dir/docker-compose.yml" -f "$dir/docker-compose.aws.yml" \
+    --env-file "$env_dir/compose.env" "$@"
+}
+
+untouched() {
+  echo "deploy: $1. The running stack was not touched." >&2
+  exit 2
+}
+
+# 1. The data volume must be there, or MongoDB would start empty on the root disk.
+mountpoint -q "$data_dir" || untouched "$data_dir is not a mount point"
+
+# 2. Settings from SSM, then the registry sign-in and the images.
+"$here/render-env" "$release" || untouched "could not render the settings files from SSM"
+registry=$(env_get compose.env REGISTRY)
+region=$(env_get api.env AWS_REGION)
+if ! aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "$registry"; then
+  untouched "could not sign in to $registry"
+fi
+compose "$poc" "$release" pull || untouched "could not pull the images for $release"
+
+# 3. Start it. ClamAV's first signature load can take 6 minutes, so wait up to 10.
+previous=''
+if [[ -f "$root/current" ]]; then previous=$(cat "$root/current"); fi
+if [[ "$previous" == "$release" ]]; then previous=''; fi
+
+if ! compose "$poc" "$release" up -d --no-build --wait --wait-timeout 600 --remove-orphans; then
+  echo "deploy: release $release did not come up healthy." >&2
+  if [[ -z "$previous" ]]; then
+    echo "deploy: there is no previous release to go back to; the failed stack is left running for inspection." >&2
+    exit 1
+  fi
+  previous_dir=$root/releases/$previous/deploy/poc
+  # The settings are read again: they may have changed since that release was started.
+  if [[ -f "$previous_dir/docker-compose.yml" ]] && "$here/render-env" "$previous" \
+    && compose "$previous_dir" "$previous" up -d --no-build --wait --wait-timeout 600 --remove-orphans; then
+    echo "deploy: rolled back to $previous." >&2
+  else
+    echo "deploy: rollback failed. $previous did not start either; look at the stack with docker compose -p roadmap-poc ps." >&2
+  fi
+  exit 1
+fi
+
+# 4. Up and healthy: record it, install the units and the backup scripts, keep the newest releases.
+printf '%s\n' "$release" > "$root/current.tmp"
+mv -f -- "$root/current.tmp" "$root/current"
+
+mkdir -p "$systemd_dir/docker.service.d" "$root/bin"
+for unit in roadmap-backup.service roadmap-backup.timer roadmap-patch.service roadmap-patch.timer; do
+  install -m 0644 "$here/systemd/$unit" "$systemd_dir/$unit"
+done
+install -m 0644 "$here/systemd/docker-wait-for-data.conf" "$systemd_dir/docker.service.d/wait-for-data.conf"
+install -m 0755 "$here/backup-mongo" "$here/restore-mongo" "$root/bin/"
+systemctl daemon-reload
+systemctl enable --now roadmap-backup.timer
+systemctl enable --now roadmap-patch.timer
+
+# Everything past the newest 5 (by modification time) goes, except the release just started and the one before it.
+# shellcheck disable=SC2012 # release names are plain (checked above), and the order is by modification time
+ls -1t "$root/releases" | tail -n "+$((keep + 1))" | while read -r dir; do
+  if [[ "$dir" == "$release" || "$dir" == "$previous" ]]; then continue; fi
+  rm -rf -- "${root:?}/releases/$dir"
+done
+
+echo "deploy: $release is up." >&2

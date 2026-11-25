@@ -30,7 +30,7 @@ Write down the bucket name. If you use a region other than `us-east-1`, add `-va
 
 ### 2. Build the AWS side
 
-Put your settings in a file, so later commands do not need them. The file is ignored by git. Keep a copy somewhere safe: step 10 explains why.
+Put your settings in a file, so later commands do not need them. The file is ignored by git. The secret version numbers are not in it. They are in `secret-versions.auto.tfvars`, which is committed (step 12).
 
 ```bash
 cat > deploy/poc/terraform/terraform.tfvars <<'EOF'
@@ -220,10 +220,11 @@ Use this when the data volume is damaged or lost. It goes back to the snapshot's
      --query 'sort_by(Snapshots,&StartTime)[-5:].[SnapshotId,StartTime]' --output table
    ```
 
-2. In a session on the server (step 6), stop the stack and unmount the volume:
+2. In a session on the server (step 6), stop the stack, stop Docker and unmount the volume. Docker must be stopped first: its unit (`docker.service`, through the drop-in `wait-for-data.conf`) has `RequiresMountsFor=/srv/mongo`, so systemd would otherwise stop it for you at the unmount, and you would start it by hand later. Stopping `docker.socket` as well keeps a Docker command from starting it again in between.
 
    ```bash
    dc down
+   systemctl stop docker docker.socket
    umount /srv/mongo
    ```
 
@@ -244,11 +245,13 @@ Use this when the data volume is damaged or lost. It goes back to the snapshot's
    aws ec2 wait volume-in-use --volume-ids "$new"
    ```
 
-4. Back in the session, mount it and start the stack. The file system keeps the same ID as the snapshot, so the `fstab` line still works.
+4. Back in the session, mount it, start Docker, and run the deploy script for the release that was running. The file system keeps the same ID as the snapshot, so the `fstab` line still works. Do not use a bare `docker compose up` here. The images are always pulled, and the registry sign-in lasts only 12 hours, so the pull would fail on a server that has not deployed lately. After a reboot, `/run/roadmap/compose.env` is gone too. The deploy script checks the mount, makes the settings files again, signs in to the registry, starts the stack and waits until it is healthy.
 
    ```bash
    mount /srv/mongo
-   dc up -d --wait --wait-timeout 600
+   systemctl start docker
+   release=$(cat /opt/roadmap/current)
+   /opt/roadmap/releases/$release/deploy/poc/host/deploy "$release"
    ```
 
 5. Tell Terraform about the new volume, so the next `apply` does not try to put the old one back.
@@ -281,34 +284,36 @@ Then reboot the instance. If it is attached and the server still stops, use the 
 
 ### 12. Rotate secrets
 
-Three secrets can be rotated. They live in SSM Parameter Store and Terraform generates them. In `terraform.tfvars` each has a version number. Raising a number writes a new random value for that secret only. A deploy then reads it.
+Three secrets can be rotated. They live in SSM Parameter Store and Terraform generates them. Each has a version number in `deploy/poc/terraform/secret-versions.auto.tfvars`. Terraform loads that file by itself, and it is committed to git. Raising a number writes a new random value for that secret only. A deploy then reads it.
 
-Keep all three numbers in `terraform.tfvars` and never lower one. If the file is lost, Terraform goes back to version 1 for all of them and writes new passwords that no longer match MongoDB.
+A version only ever goes up. The file is in git, so a fresh clone has the right numbers. Raise a number in that file and commit it. A lower number counts as a change too, and Terraform would write a new password that no longer matches MongoDB (or, for the unsubscribe key, break every link already sent).
 
 **Never rotate `totp-enc-key`.** It encrypts every person's authenticator secret. A new key makes every enrolled authenticator unreadable, and everyone is locked out of two-step sign-in. It is not in the version map for that reason.
 
 **The unsubscribe key.** Raise it, apply, deploy. Every unsubscribe link in an email already sent stops working.
 
+Change `"unsubscribe-key" = 1` to `2` in `deploy/poc/terraform/secret-versions.auto.tfvars`, then:
+
 ```bash
-cat >> deploy/poc/terraform/terraform.tfvars <<'EOF'
-secret_versions = {
-  "mongo-root-password" = 1
-  "mongo-app-password"  = 1
-  "unsubscribe-key"     = 2
-}
-EOF
 terraform -chdir=deploy/poc/terraform apply
+git add deploy/poc/terraform/secret-versions.auto.tfvars
+git commit -m "chore(infra): rotate the unsubscribe key"
 gh workflow run deploy-poc.yml --ref <branch>
 ```
 
-If the file already has a `secret_versions` block, edit that one instead of adding a second.
+**A MongoDB password.** Changing the value in SSM does not change the password inside MongoDB, so you change both. The new value is only known once Terraform has written it, so the steps are below. Plan for a short break, from the moment MongoDB's password changes until the deploy in step 3 finishes, a few minutes. In that time:
 
-**A MongoDB password.** Changing the value in SSM does not change the password inside MongoDB. You change both, in this order, and you deploy straight after. The new value is only known once Terraform has written it, so the steps are:
+- After the app user's password changes, every new database connection from the API and the worker fails to sign in. People may see errors.
+- After the root user's password changes, the MongoDB health check (which still uses the old root password) turns unhealthy, and a backup that starts then fails.
 
-1. Raise the number for `mongo-app-password` (or `mongo-root-password`) in `terraform.tfvars`, then apply.
+That is why step 3 runs the deploy script on the server in the same session, and not the workflow, which can wait for a reviewer.
+
+1. Raise the number for `mongo-app-password` (or `mongo-root-password`) in `secret-versions.auto.tfvars`, then apply and commit. Nothing breaks yet, because the running containers keep their old values.
 
    ```bash
    terraform -chdir=deploy/poc/terraform apply
+   git add deploy/poc/terraform/secret-versions.auto.tfvars
+   git commit -m "chore(infra): rotate a MongoDB password"
    ```
 
 2. Open a session as in step 6. Read the new value and set it as that user's password in MongoDB. The command signs in with the old root password that is still inside the running container. For the app user:
@@ -325,10 +330,11 @@ If the file already has a `secret_versions` block, edit that one instead of addi
    dc exec -T -e NEW="$new" mongo bash -c 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.getSiblingDB(\"admin\").changeUserPassword(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.NEW)"'
    ```
 
-3. Deploy right away. The containers are recreated with the new value. Until then, a container that restarts on its own would still hold the old password and fail to sign in.
+3. In the same session, right after the last command, run the deploy script for the release that is running. It makes the settings files again from SSM, signs in to the registry, recreates the containers whose settings changed, and waits until they are healthy. This ends the break.
 
    ```bash
-   gh workflow run deploy-poc.yml --ref <branch>
+   release=$(cat /opt/roadmap/current)
+   /opt/roadmap/releases/$release/deploy/poc/host/deploy "$release"
    ```
 
 ### 13. Upgrade Docker Compose on the live server

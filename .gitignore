@@ -16,3 +16,4 @@ deploy/poc/terraform/**/.terraform/
 deploy/poc/terraform/bootstrap/terraform.tfstate*
 deploy/poc/terraform/.terraform.tfstate*
 deploy/poc/terraform/*.tfvars
+!deploy/poc/terraform/secret-versions.auto.tfvars

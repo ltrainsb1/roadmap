@@ -319,6 +319,7 @@ jobs:
           mkdir -p "$ROADMAP_ENV_DIR"
           echo "BACKUP_BUCKET='roadmap-backups-smoke'" > "$ROADMAP_ENV_DIR/compose.env"
           count() {
+            # shellcheck disable=SC2016 # the single quotes are on purpose: $1 and the password are read inside the container
             $COMPOSE exec -T mongo bash -c 'mongosh --quiet -u root -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "const d = db.getSiblingDB(\"$1\"); print(d.users.countDocuments({}), d.projects.countDocuments({}))"' _ "$1"
           }
           deploy/poc/host/backup-mongo

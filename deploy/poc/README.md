@@ -8,7 +8,7 @@ Run every command from the repository root unless a step says otherwise. Replace
 
 ## What you need
 
-- An AWS account.
+- An AWS account used for this POC and nothing else. The server's role has AWS's `AmazonSSMManagedInstanceCore` policy (for Session Manager and Run Command), which lets it read every SSM parameter in the account, not only the POC's own. In an account of its own, those are the only parameters there are.
 - A Route 53 hosted zone that holds the domain you want to use.
 - The AWS CLI, signed in as an administrator.
 - Terraform 1.11 or newer.
@@ -47,6 +47,8 @@ Then start Terraform and build everything. Read the plan before you type `yes`.
 terraform -chdir=deploy/poc/terraform init -backend-config=bucket=<state bucket> -backend-config=region=us-east-1
 terraform -chdir=deploy/poc/terraform apply
 ```
+
+Terraform points the domain at the server with an A record only. The POC is reached over IPv4 only, on purpose: Docker passes IPv6 connections to Caddy through its own proxy, so every IPv6 visitor would look like one address to Caddy and to the API's rate limits.
 
 The server needs about five minutes after this to install Docker. Wait until AWS can reach it. This prints `Online` when it is ready:
 
@@ -396,7 +398,7 @@ Only do this when you are sure. It deletes the data.
 3. Delete the images. The repositories are not set to delete with images in them:
 
    ```bash
-   for name in api pdf caddy clamav; do aws ecr delete-repository --repository-name "roadmap-$name" --force; done
+   for name in api pdf caddy clamav; do aws ecr delete-repository --repository-name "roadmap-poc-$name" --force; done
    ```
 
 4. In `deploy/poc/terraform/ec2.tf`, delete the `prevent_destroy = true` line in `aws_ebs_volume.data`, and change `disable_api_termination` to `false`. Then apply that change, and destroy.

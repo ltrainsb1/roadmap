@@ -4,6 +4,7 @@ locals {
   compose_sha256  = "15861535d14e26555736b49376c95e14bfd94285366c8446bfac7156a972e76f"
 
   # Exactly these four rules: web traffic only, over IPv4 and IPv6. There is no port 22. Admin access is SSM.
+  # The domain has an A record only (dns.tf), so visitors come over IPv4.
   ingress_rules = {
     http_ipv4  = { port = 80, cidr_ipv4 = "0.0.0.0/0", cidr_ipv6 = null }
     http_ipv6  = { port = 80, cidr_ipv4 = null, cidr_ipv6 = "::/0" }

@@ -1,7 +1,7 @@
 resource "aws_ecr_repository" "app" {
   for_each = toset(["api", "pdf", "caddy", "clamav"])
 
-  name                 = "roadmap-${each.key}"
+  name                 = "roadmap-poc-${each.key}"
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {

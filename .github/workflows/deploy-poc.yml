@@ -39,7 +39,7 @@ jobs:
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       REGISTRY: ${{ vars.POC_REGISTRY }}
-      IMAGE: roadmap-${{ matrix.name }}
+      IMAGE: roadmap-poc-${{ matrix.name }}
       DOCKERFILE: ${{ matrix.file }}
       CONTEXT: ${{ matrix.context }}
     steps:

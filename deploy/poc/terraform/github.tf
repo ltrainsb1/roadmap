@@ -48,7 +48,7 @@ resource "aws_iam_role_policy" "deploy" {
           "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
         ]
         Resource = [
-          for k in sort(keys(aws_ecr_repository.app)) : "arn:aws:ecr:${var.region}:${local.account_id}:repository/roadmap-${k}"
+          for k in sort(keys(aws_ecr_repository.app)) : "arn:aws:ecr:${var.region}:${local.account_id}:repository/roadmap-poc-${k}"
         ]
       },
       {

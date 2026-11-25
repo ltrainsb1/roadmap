@@ -9,22 +9,22 @@
 # the first, not replace it). SES_CONFIGURATION_SET and SES_EVENTS_QUEUE_URL live in those two files too.
 services:
   api:
-    image: ${REGISTRY:?set REGISTRY}/roadmap-api:${RELEASE:?set RELEASE}
+    image: ${REGISTRY:?set REGISTRY}/roadmap-poc-api:${RELEASE:?set RELEASE}
     pull_policy: always
 
   # The worker runs the API's image (node dist/worker.js).
   worker:
-    image: ${REGISTRY}/roadmap-api:${RELEASE}
+    image: ${REGISTRY}/roadmap-poc-api:${RELEASE}
     pull_policy: always
 
   pdf:
-    image: ${REGISTRY}/roadmap-pdf:${RELEASE}
+    image: ${REGISTRY}/roadmap-poc-pdf:${RELEASE}
     pull_policy: always
 
   caddy:
-    image: ${REGISTRY}/roadmap-caddy:${RELEASE}
+    image: ${REGISTRY}/roadmap-poc-caddy:${RELEASE}
     pull_policy: always
 
   clamav:
-    image: ${REGISTRY}/roadmap-clamav:${RELEASE}
+    image: ${REGISTRY}/roadmap-poc-clamav:${RELEASE}
     pull_policy: always

@@ -171,10 +171,10 @@ run "NFR_OIDC_the_deploy_role_has_no_ssm_GetParameter_StartSession_or_iam_action
     condition = (
       flatten([for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s.Resource if contains(s.Action, "ecr:PutImage")])
       == [
-        "arn:aws:ecr:us-east-1:111122223333:repository/roadmap-api",
-        "arn:aws:ecr:us-east-1:111122223333:repository/roadmap-caddy",
-        "arn:aws:ecr:us-east-1:111122223333:repository/roadmap-clamav",
-        "arn:aws:ecr:us-east-1:111122223333:repository/roadmap-pdf",
+        "arn:aws:ecr:us-east-1:111122223333:repository/roadmap-poc-api",
+        "arn:aws:ecr:us-east-1:111122223333:repository/roadmap-poc-caddy",
+        "arn:aws:ecr:us-east-1:111122223333:repository/roadmap-poc-clamav",
+        "arn:aws:ecr:us-east-1:111122223333:repository/roadmap-poc-pdf",
       ]
       && flatten([for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s.Resource if contains(s.Action, "ecr:GetAuthorizationToken")]) == ["*"]
     )

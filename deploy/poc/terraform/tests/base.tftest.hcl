@@ -223,7 +223,7 @@ run "NFR_ECR_tags_are_immutable_and_scanned_on_push" {
   assert {
     condition = alltrue([
       for k, r in aws_ecr_repository.app :
-      r.name == "roadmap-${k}"
+      r.name == "roadmap-poc-${k}"
       && r.image_tag_mutability == "IMMUTABLE"
       && one(r.image_scanning_configuration).scan_on_push
       && one(r.encryption_configuration).encryption_type == "KMS"

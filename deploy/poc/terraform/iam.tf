@@ -16,6 +16,9 @@ resource "aws_iam_instance_profile" "server" {
   role = aws_iam_role.server.name
 }
 
+# Session Manager and Run Command. This AWS-managed policy also allows ssm:GetParameter and ssm:GetParameters on
+# every parameter ("*"), so the server can read any parameter in the account, not only /roadmap/poc. That is why the
+# runbook asks for an AWS account used for this POC alone.
 resource "aws_iam_role_policy_attachment" "server_ssm" {
   role       = aws_iam_role.server.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -41,14 +44,18 @@ resource "aws_iam_role_policy" "server" {
         Effect = "Allow"
         Action = ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
         Resource = [
-          for k in sort(keys(aws_ecr_repository.app)) : "arn:aws:ecr:${var.region}:${local.account_id}:repository/roadmap-${k}"
+          for k in sort(keys(aws_ecr_repository.app)) : "arn:aws:ecr:${var.region}:${local.account_id}:repository/roadmap-poc-${k}"
         ]
       },
       {
-        Sid      = "ReadSettings"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParametersByPath"]
-        Resource = ["arn:aws:ssm:${var.region}:${local.account_id}:parameter/roadmap/poc/*"]
+        Sid    = "ReadSettings"
+        Effect = "Allow"
+        Action = ["ssm:GetParametersByPath"]
+        # The path itself, which is what GetParametersByPath is checked against, and the parameters under it.
+        Resource = [
+          "arn:aws:ssm:${var.region}:${local.account_id}:parameter/roadmap/poc",
+          "arn:aws:ssm:${var.region}:${local.account_id}:parameter/roadmap/poc/*",
+        ]
       },
       {
         Sid      = "FilesBucketObjects"
@@ -75,9 +82,10 @@ resource "aws_iam_role_policy" "server" {
         Resource = ["arn:aws:s3:::${local.bucket_names.releases}/*"]
       },
       {
+        # Decrypt reads SecureStrings, S3 objects and the queue; GenerateDataKey writes SSE-KMS objects.
         Sid      = "TheKey"
         Effect   = "Allow"
-        Action   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:Encrypt"]
+        Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
         Resource = [aws_kms_key.main.arn]
       },
     ]

@@ -166,15 +166,28 @@ run "NFR_backups_14_days_DLM_keeps_14_daily_snapshots_of_the_data_volume" {
   }
 }
 
-run "NFR_the_server_role_cannot_read_other_parameters" {
+# The inline policy's by-path grant only. AmazonSSMManagedInstanceCore, also on the role, allows
+# ssm:GetParameter(s) on every parameter; the runbook asks for an account used for this POC alone.
+run "NFR_the_server_role_by_path_grant_is_limited_to_roadmap_poc" {
   command = plan
 
   assert {
     condition = (
       flatten([for s in jsondecode(aws_iam_role_policy.server.policy).Statement : s.Resource if contains(s.Action, "ssm:GetParametersByPath")])
-      == ["arn:aws:ssm:us-east-1:111122223333:parameter/roadmap/poc/*"]
+      == [
+        "arn:aws:ssm:us-east-1:111122223333:parameter/roadmap/poc",
+        "arn:aws:ssm:us-east-1:111122223333:parameter/roadmap/poc/*",
+      ]
     )
-    error_message = "ssm:GetParametersByPath must be allowed on exactly /roadmap/poc/*."
+    error_message = "ssm:GetParametersByPath must be allowed on exactly /roadmap/poc and /roadmap/poc/*."
+  }
+
+  assert {
+    condition = (
+      flatten([for s in jsondecode(aws_iam_role_policy.server.policy).Statement : s.Action if s.Sid == "TheKey"])
+      == ["kms:Decrypt", "kms:GenerateDataKey"]
+    )
+    error_message = "The server may use the key for Decrypt and GenerateDataKey only (no kms:Encrypt)."
   }
 
   assert {
@@ -212,17 +225,20 @@ run "NFR_user_data_holds_no_settings" {
   }
 }
 
-run "NFR_POC_the_domain_points_at_the_server_over_IPv4_and_IPv6" {
+run "NFR_POC_the_domain_points_at_the_server_over_IPv4_only" {
   command = plan
 
   assert {
     condition = (
       aws_route53_record.a.name == "roadmap.example.com"
       && aws_route53_record.a.type == "A"
-      && aws_route53_record.aaaa.type == "AAAA"
       && aws_route53_record.a.zone_id == "Z0123456789ABCDEFGHIJ"
-      && aws_route53_record.aaaa.zone_id == "Z0123456789ABCDEFGHIJ"
     )
-    error_message = "A and AAAA records for the domain must be in the hosted zone."
+    error_message = "An A record for the domain must be in the hosted zone."
+  }
+
+  assert {
+    condition     = !strcontains(file("${path.module}/dns.tf"), "\"AAAA\"")
+    error_message = "There must be no AAAA record: Docker's IPv6 port proxy would make every IPv6 visitor one address to Caddy and the API."
   }
 }

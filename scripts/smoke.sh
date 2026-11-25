@@ -11,6 +11,8 @@
 #   deploy/poc/docker-compose.smoke.yml"). With it, and SMOKE_WRITES=yes, the email checks run too: they invite a
 #   second person, read the invite link from the API container's outbox file (MAILER=file), accept it, assign that
 #   person to the item, and wait for the worker container to write the assignment email to its own outbox file.
+#   They then POST that email's one-click unsubscribe link (the List-Unsubscribe header) and check the second person's
+#   email settings are all off.
 #   They also check the worker is healthy. Without it these checks are skipped.
 # SMOKE_RESOLVE=host:port:address is passed to curl --resolve, for a stack that runs on another machine.
 # SMOKE_CONNECT_TO=host:port:host2:port2 is passed to curl --connect-to, so a download link that names a host the
@@ -319,8 +321,9 @@ invite_token=$(outbox api | grep -F "\"to\":\"$invitee\"" | grep -o '/invite/[A-
 [[ -n "$invite_token" ]] || fatal "the invite email is in the API's outbox"
 echo "ok   the invite email is in the API's outbox"
 # A new account, with no cookies: the signed-in person's session must not be replaced by the new one.
+member_password="smoke-$(openssl rand -hex 16)"
 res=$(curl "${curl_args[@]}" -X POST -H 'content-type: application/json' -w '\n%{http_code}' \
-  --data-binary "{\"name\":\"Smoke Teammate\",\"password\":\"smoke-$(openssl rand -hex 16)\",\"timezone\":\"UTC\"}" \
+  --data-binary "{\"name\":\"Smoke Teammate\",\"password\":\"$member_password\",\"timezone\":\"UTC\"}" \
   "$base/api/invites/$invite_token/accept")
 check "the invite is accepted with a new account (got $(status_of "$res"))" equals "$(status_of "$res")" 200
 
@@ -344,6 +347,36 @@ until worker_sent || ((SECONDS >= deadline)); do sleep 2; done
 check "the worker emails \"$subject\" to the new member" worker_sent
 # shellcheck disable=SC2086 # SMOKE_COMPOSE is a command and its arguments
 worker_health=$($SMOKE_COMPOSE ps --format '{{.Health}}' worker 2> /dev/null)
+# One-click unsubscribe (RFC 8058): the List-Unsubscribe URL in that email, POSTed as a mail client does, through Caddy.
+# The URL names APP_ORIGIN; only its path and query are used, so a stack reached by another address still answers.
+unsubscribe_url=$(printf '%s\n' "$(outbox worker)" | grep -F "\"to\":\"$invitee\"" | grep -F "\"subject\":\"$subject\"" | tail -n1 |
+  grep -o '"List-Unsubscribe":"<[^>]*>' | sed 's/^"List-Unsubscribe":"<//; s/>$//')
+[[ "$unsubscribe_url" == http*://*/api/email/unsubscribe\?t=* ]] || fatal "the email has a List-Unsubscribe header (got ${unsubscribe_url:-nothing})"
+echo "ok   the email carries a List-Unsubscribe URL"
+unsubscribe_path="/api/email/unsubscribe?${unsubscribe_url#*\?}"
+status=$(curl "${curl_args[@]}" -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/x-www-form-urlencoded' \
+  --data-binary 'List-Unsubscribe=One-Click' "$base$unsubscribe_path")
+check "the one-click unsubscribe POST answers 200 (got $status)" equals "$status" 200
+# The new member signs in (and sets up an authenticator code, which the settings page needs) to read their settings.
+member_jar="$work/member-cookies"
+res=$(curl "${curl_args[@]}" -c "$member_jar" -X POST -H 'content-type: application/json' -w '\n%{http_code}' \
+  --data-binary "{\"email\":\"$invitee\",\"password\":\"$member_password\"}" "$base/api/auth/login")
+member_csrf=$(json_field "$(body_of "$res")" csrfToken)
+[[ "$(status_of "$res")" == 200 && -n "$member_csrf" ]] || fatal "the new member signs in (got $(status_of "$res"))"
+member_api() { # METHOD PATH [curl args...]
+  local method=$1 path=$2
+  shift 2
+  curl "${curl_args[@]}" -b "$member_jar" -c "$member_jar" -X "$method" -H "x-csrf-token: $member_csrf" -w '\n%{http_code}' "$@" "$base$path"
+}
+res=$(member_api POST /api/auth/totp/enroll/start -H 'content-type: application/json' --data-binary '{}')
+member_secret=$(json_field "$(body_of "$res")" secret)
+[[ "$(status_of "$res")" == 200 && -n "$member_secret" ]] || fatal "the new member starts setting up an authenticator code (got $(status_of "$res"))"
+res=$(member_api POST /api/auth/totp/enroll/confirm -H 'content-type: application/json' --data-binary "{\"code\":\"$(totp_code "$member_secret")\"}")
+member_csrf=$(json_field "$(body_of "$res")" csrfToken)
+[[ "$(status_of "$res")" == 200 && -n "$member_csrf" ]] || fatal "the new member finishes signing in (got $(status_of "$res"))"
+res=$(member_api GET /api/me/notification-prefs)
+off_count=$(printf '%s' "$(body_of "$res")" | grep -o '"[a-z_]*":"off"' | wc -l | tr -d ' ')
+check "the new member's four email settings are all off (got $(body_of "$res"))" equals "$off_count" 4
 check "the worker is healthy (got ${worker_health:-no worker})" equals "$worker_health" healthy
 
 finish

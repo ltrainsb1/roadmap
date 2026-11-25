@@ -216,6 +216,7 @@ describe('createObjectStore (FR-1.4)', () => {
     MONGO_URI: 'mongodb://unused',
     APP_ORIGIN: ORIGIN,
     TOTP_ENC_KEY: KEY.toString('base64'),
+    UNSUBSCRIBE_KEY: KEY.toString('base64'),
   };
 
   test('picks the store named in the config', () => {

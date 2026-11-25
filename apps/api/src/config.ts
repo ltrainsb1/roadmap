@@ -11,6 +11,8 @@ export interface Config {
   webauthnRpId: string;
   webauthnRpName: string;
   totpEncKey: Buffer;
+  /** HMAC key for the unsubscribe links in notification emails; the API and the worker share it. */
+  unsubscribeKey: Buffer;
   mailer: 'ses' | 'file' | 'memory';
   mailFrom: string;
   mailOutboxFile?: string;
@@ -98,6 +100,7 @@ const workerShape = {
   MONGO_DB: z.string().min(1).default('roadmap'),
   // Only the origin counts (WebAuthn and CORS-style checks compare origins): a trailing slash or path is dropped.
   APP_ORIGIN: z.url({ protocol: /^https?$/ }).transform((v) => new URL(v).origin),
+  UNSUBSCRIBE_KEY: key32,
   MAILER: z.enum(['ses', 'file', 'memory']).default('file'),
   MAIL_FROM: z.string().min(1).optional(),
   MAIL_OUTBOX_FILE: z.string().min(1).optional(),
@@ -154,13 +157,14 @@ function crossChecks(e: Env): string[] {
   return issues;
 }
 
-/** What the worker process needs: MongoDB, the mailer and its own timing. No API secrets, no file, scanner or PDF settings. */
+/** What the worker process needs: MongoDB, the mailer, the unsubscribe key and its own timing. No other API secrets, no file, scanner or PDF settings. */
 export type WorkerConfig = Pick<
   Config,
   | 'nodeEnv'
   | 'mongoUri'
   | 'mongoDb'
   | 'appOrigin'
+  | 'unsubscribeKey'
   | 'mailer'
   | 'mailFrom'
   | 'mailOutboxFile'
@@ -186,6 +190,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv): WorkerConfig {
     mongoUri: e.MONGO_URI,
     mongoDb: e.MONGO_DB,
     appOrigin: e.APP_ORIGIN,
+    unsubscribeKey: e.UNSUBSCRIBE_KEY,
     mailer: e.MAILER,
     // Without WEBAUTHN_RP_ID (an API setting) the sender is on the app's own host, as the API's default is.
     mailFrom: e.MAIL_FROM ?? `no-reply@${new URL(e.APP_ORIGIN).hostname}`,
@@ -210,6 +215,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     webauthnRpId: rpId,
     webauthnRpName: e.WEBAUTHN_RP_NAME,
     totpEncKey: e.TOTP_ENC_KEY,
+    unsubscribeKey: e.UNSUBSCRIBE_KEY,
     mailer: e.MAILER,
     mailFrom: e.MAIL_FROM ?? `no-reply@${rpId}`,
     ...(e.MAIL_OUTBOX_FILE ? { mailOutboxFile: e.MAIL_OUTBOX_FILE } : {}),

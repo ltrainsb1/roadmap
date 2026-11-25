@@ -10,6 +10,8 @@ export interface WorkerDeps {
   mailer: Mailer;
   now: () => Date;
   appOrigin: string;
+  /** Signs the unsubscribe link in each email. */
+  unsubscribeKey: Buffer;
   log: { info(o: object, msg: string): void; error(o: object, msg: string): void };
 }
 

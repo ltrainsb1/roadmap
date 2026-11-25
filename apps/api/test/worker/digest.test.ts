@@ -5,7 +5,8 @@ import { MemoryMailer } from '../../src/mail/mailer.ts';
 import { sendDigests } from '../../src/worker/digest.ts';
 import { runPass } from '../../src/worker/run.ts';
 import { makeTestApp, type TestApp } from '../helpers.ts';
-import { FOOTER, FlakyMailer, clock, dates, itemUrl, person, row, rowsFor, workerDeps } from './fixtures.ts';
+import { verifyUnsubscribe } from '../../src/mail/unsubscribe.ts';
+import { FOOTER, FlakyMailer, ORIGIN, clock, dates, itemUrl, person, row, rowsFor, tokenFor, unsubscribeLine, workerDeps } from './fixtures.ts';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -84,8 +85,17 @@ describe('worker: digests', () => {
           line(w.b),
           '',
           FOOTER,
+          unsubscribeLine(t, w.me),
         ].join('\n'),
       );
+      const token = tokenFor(t, w.me);
+      const unsubscribe = `${ORIGIN}/unsubscribe?t=${token}`;
+      expect(m!.html).toContain(`Turn off these emails: <a href="${unsubscribe}">${unsubscribe}</a>`);
+      expect(verifyUnsubscribe(t.config.unsubscribeKey, token)).toEqual({ tenantId: w.tenantId, userId: w.me._id });
+      expect(m!.headers).toEqual({
+        'List-Unsubscribe': `<${ORIGIN}/api/email/unsubscribe?t=${token}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      });
       expect(m!.html).toContain('<h2>Alpha</h2>');
       expect(m!.html.indexOf('<h2>Alpha</h2>')).toBeLessThan(m!.html.indexOf('<h2>Beta</h2>'));
       const rows = new Map((await rowsFor(t, w.me)).map((r) => [r._id, r]));

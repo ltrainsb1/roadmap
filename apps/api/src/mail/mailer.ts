@@ -7,6 +7,8 @@ export interface MailMessage {
   subject: string;
   text: string;
   html: string;
+  /** Extra message headers, e.g. List-Unsubscribe. */
+  headers?: Record<string, string>;
 }
 
 export interface Mailer {
@@ -54,6 +56,7 @@ export class SesMailer implements Mailer {
           Simple: {
             Subject: { Data: m.subject, Charset: 'UTF-8' },
             Body: { Text: { Data: m.text, Charset: 'UTF-8' }, Html: { Data: m.html, Charset: 'UTF-8' } },
+            ...(m.headers && { Headers: Object.entries(m.headers).map(([Name, Value]) => ({ Name, Value })) }),
           },
         },
       }),

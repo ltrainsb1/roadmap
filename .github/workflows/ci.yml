@@ -111,6 +111,7 @@ jobs:
           mongo_password=$(openssl rand -hex 16)
           app_password=$(openssl rand -hex 16)
           app_uri="mongodb://roadmap_app:${app_password}@mongo:27017/roadmap?replicaSet=rs0&authSource=roadmap"
+          unsubscribe_key=$(openssl rand -base64 32)
           {
             echo "DOMAIN=localhost"
             echo "S3_BUCKET=roadmap-files"
@@ -128,6 +129,7 @@ jobs:
             echo "NODE_ENV=production"
             echo "PORT=3000"
             echo "TOTP_ENC_KEY=$(openssl rand -base64 32)"
+            echo "UNSUBSCRIBE_KEY=${unsubscribe_key}"
             echo "MAILER=file"
             echo "MAIL_OUTBOX_FILE=/tmp/outbox.jsonl"
             echo "MAIL_FROM=no-reply@localhost"
@@ -139,6 +141,7 @@ jobs:
             echo "MONGO_URI=${app_uri}"
             echo "MONGO_DB=roadmap"
             echo "APP_ORIGIN=https://localhost"
+            echo "UNSUBSCRIBE_KEY=${unsubscribe_key}"
             echo "MAILER=file"
             echo "MAIL_OUTBOX_FILE=/tmp/outbox.jsonl"
             echo "MAIL_FROM=no-reply@localhost"

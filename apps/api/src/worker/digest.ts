@@ -2,6 +2,7 @@ import { NOTIFICATION_LIMITS, NOTIFICATION_TYPES } from '@roadmap/shared';
 import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { NotificationDoc, UserDoc } from '../db/types.ts';
 import { effectivePrefs, toNotifications } from '../notifications/dto.ts';
+import { signUnsubscribe } from '../mail/unsubscribe.ts';
 import { digestEmail } from './emails.ts';
 import { claim, dropGone, errorText, markFailed, markSent, skip } from './claims.ts';
 import { localDate, localHour } from './local-time.ts';
@@ -73,7 +74,11 @@ async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Dat
     return null;
   }
 
-  const content = digestEmail(await toNotifications(s, rows), { appOrigin: deps.appOrigin, date: today });
+  const content = digestEmail(await toNotifications(s, rows), {
+    appOrigin: deps.appOrigin,
+    date: today,
+    unsubscribeToken: signUnsubscribe(deps.unsubscribeKey, s.tenantId, userId),
+  });
   try {
     await deps.mailer.send({ to: user.email, ...content });
   } catch (err) {

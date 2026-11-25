@@ -12,6 +12,7 @@ const valid = {
   WEBAUTHN_RP_ID: 'roadmap.example.com',
   WEBAUTHN_RP_NAME: 'Roadmap',
   TOTP_ENC_KEY: key,
+  UNSUBSCRIBE_KEY: Buffer.alloc(32, 5).toString('base64'),
   MAILER: 'file',
   MAIL_FROM: 'no-reply@roadmap.example.com',
   MAIL_OUTBOX_FILE: '/tmp/outbox.jsonl',
@@ -34,6 +35,15 @@ describe('loadConfig', () => {
     expect(msg).toContain('MONGO_URI');
     expect(msg).toContain('APP_ORIGIN');
     expect(msg).toContain('TOTP_ENC_KEY');
+    expect(msg).toContain('UNSUBSCRIBE_KEY');
+  });
+
+  test('FR-5: UNSUBSCRIBE_KEY must be 32 bytes, and loads as a Buffer', () => {
+    expect(() => loadConfig({ ...valid, UNSUBSCRIBE_KEY: Buffer.alloc(16).toString('base64') })).toThrow(/UNSUBSCRIBE_KEY/);
+    const without: Record<string, string> = { ...valid };
+    delete without.UNSUBSCRIBE_KEY;
+    expect(() => loadConfig(without)).toThrow(/UNSUBSCRIBE_KEY/);
+    expect(loadConfig(valid).unsubscribeKey.equals(Buffer.alloc(32, 5))).toBe(true);
   });
 
   test('rejects a TOTP_ENC_KEY that is not 32 bytes', () => {
@@ -52,6 +62,7 @@ describe('loadConfig', () => {
       webauthnRpId: 'roadmap.example.com',
       webauthnRpName: 'Roadmap',
       totpEncKey: Buffer.alloc(32, 7),
+      unsubscribeKey: Buffer.alloc(32, 5),
       mailer: 'file',
       mailFrom: 'no-reply@roadmap.example.com',
       mailOutboxFile: '/tmp/outbox.jsonl',
@@ -77,6 +88,7 @@ describe('loadConfig', () => {
       MONGO_URI: 'mongodb://x',
       APP_ORIGIN: 'https://app.example.org',
       TOTP_ENC_KEY: key,
+      UNSUBSCRIBE_KEY: key,
       FILES_DIR: '/data/files',
       FILES_SIGNING_KEY: key,
     });
@@ -306,6 +318,7 @@ describe('loadWorkerConfig', () => {
     MAILER: 'ses',
     MAIL_FROM: 'no-reply@roadmap.example.com',
     AWS_REGION: 'eu-west-1',
+    UNSUBSCRIBE_KEY: Buffer.alloc(32, 5).toString('base64'),
   };
 
   test('loads in production with only the worker settings', () => {
@@ -320,6 +333,14 @@ describe('loadWorkerConfig', () => {
       workerIntervalMs: 30000,
       workerHeartbeatFile: '/tmp/worker-heartbeat',
     });
+  });
+
+  test('FR-5: needs UNSUBSCRIBE_KEY, 32 bytes, and carries it as a Buffer', () => {
+    expect(loadWorkerConfig(workerEnv).unsubscribeKey.equals(Buffer.alloc(32, 5))).toBe(true);
+    const without: Record<string, string> = { ...workerEnv };
+    delete without.UNSUBSCRIBE_KEY;
+    expect(() => loadWorkerConfig(without)).toThrow(/UNSUBSCRIBE_KEY/);
+    expect(() => loadWorkerConfig({ ...workerEnv, UNSUBSCRIBE_KEY: Buffer.alloc(8).toString('base64') })).toThrow(/UNSUBSCRIBE_KEY/);
   });
 
   test('rejects a missing MONGO_URI and a missing APP_ORIGIN', () => {

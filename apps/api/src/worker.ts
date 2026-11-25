@@ -15,7 +15,7 @@ const log: WorkerDeps['log'] = { info: (o, msg) => write('info', o, msg), error:
 const config = loadWorkerConfig(process.env);
 const { client, db } = await connectDb(config.mongoUri, config.mongoDb);
 await ensureIndexes(db);
-const deps: WorkerDeps = { db, mailer: createMailer(config), now: () => new Date(), appOrigin: config.appOrigin, log };
+const deps: WorkerDeps = { db, mailer: createMailer(config), now: () => new Date(), appOrigin: config.appOrigin, unsubscribeKey: config.unsubscribeKey, log };
 
 let stopping = false;
 let wake: (() => void) | null = null;

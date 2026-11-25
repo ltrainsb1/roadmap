@@ -2,6 +2,7 @@ import type { Notification } from '@roadmap/shared';
 import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { NotificationDoc, UserDoc } from '../db/types.ts';
 import { effectivePrefs, toNotifications } from '../notifications/dto.ts';
+import { signUnsubscribe } from '../mail/unsubscribe.ts';
 import { instantEmail } from './emails.ts';
 import type { WorkerDeps } from './run.ts';
 import { workerDb } from '../db/worker-db.ts';
@@ -56,7 +57,11 @@ export async function sendInstant(deps: WorkerDeps): Promise<{ sent: number; fai
     const claimed = await claim(s, r._id, deps.now());
     if (!claimed) return null;
     try {
-      await deps.mailer.send({ to: user.email, ...instantEmail(n, { appOrigin: deps.appOrigin, timeZone: user.timezone }) });
+      await deps.mailer.send({ to: user.email, ...instantEmail(n, {
+          appOrigin: deps.appOrigin,
+          timeZone: user.timezone,
+          unsubscribeToken: signUnsubscribe(deps.unsubscribeKey, r.tenantId, r.userId),
+        }) });
     } catch (err) {
       const attempts = await markFailed(s, claimed, deps.now());
       deps.log.error({ step: 'instant', notificationId: r._id, attempts, err: errorText(err) }, 'email failed');

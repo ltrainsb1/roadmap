@@ -173,6 +173,13 @@ describe('describeAuditEvent', () => {
     );
   });
 
+  test('FR-5: user.unsubscribed says the person turned off their emails from an email link', () => {
+    const after = { prefs: { assigned: 'off', mentioned: 'off', dates_changed: 'off', due_soon: 'off' } };
+    expect(describeAuditEvent(event({ action: 'user.unsubscribed', target: { type: 'user', id: 'u1' }, after }), nameOf)).toBe(
+      'Maria turned off their notification emails from an email link.',
+    );
+  });
+
   test('FR-4.2: user.calendar_feed says the person changed their calendar feed, without the choices', () => {
     const after = { change: 'choices', choices: { roadmaps: 'all', itemDates: true, milestones: false, onlyMine: true } };
     expect(describeAuditEvent(event({ action: 'user.calendar_feed', target: { type: 'user', id: 'u1' }, after }), nameOf)).toBe(

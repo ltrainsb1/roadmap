@@ -168,6 +168,7 @@ describe('createScanner (FR-1.4)', () => {
     MONGO_URI: 'mongodb://unused',
     APP_ORIGIN: 'https://roadmap.example.com',
     TOTP_ENC_KEY: Buffer.alloc(32, 1).toString('base64'),
+    UNSUBSCRIBE_KEY: Buffer.alloc(32, 2).toString('base64'),
     FILES: 'memory',
   };
 

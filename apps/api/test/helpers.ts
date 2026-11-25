@@ -135,12 +135,14 @@ export interface TestAppOptions {
 const SEED_HASH_PARAMS = { memoryCost: 8, timeCost: 1, parallelism: 1 } as const;
 
 export const TEST_TOTP_KEY = Buffer.alloc(32, 7);
+export const TEST_UNSUBSCRIBE_KEY = Buffer.alloc(32, 8);
 
 export const TEST_ENV = {
   NODE_ENV: 'test',
   MONGO_URI: 'mongodb://unused',
   APP_ORIGIN: 'http://localhost:5173',
   TOTP_ENC_KEY: TEST_TOTP_KEY.toString('base64'),
+  UNSUBSCRIBE_KEY: TEST_UNSUBSCRIBE_KEY.toString('base64'),
   MAILER: 'memory',
   HIBP_ENABLED: 'false',
   FILES: 'memory',

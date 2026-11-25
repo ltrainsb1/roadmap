@@ -28,3 +28,8 @@ output "public_ip" {
   description = "The server's Elastic IP."
   value       = aws_eip.server.public_ip
 }
+
+output "deploy_role_arn" {
+  description = "The role the deploy workflow assumes (GitHub variable POC_DEPLOY_ROLE_ARN)."
+  value       = aws_iam_role.deploy.arn
+}

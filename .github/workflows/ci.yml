@@ -109,7 +109,14 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/bats-core" rev-parse HEAD)" = 3bca150ec86275d6d9d5a4fd7d48ab8b6c6f3d87
           sudo "$RUNNER_TEMP/bats-core/install.sh" /usr/local
       - run: bats deploy/poc/host/test
-      - run: shellcheck deploy/poc/host/render-env deploy/poc/host/deploy deploy/poc/host/backup-mongo deploy/poc/host/restore-mongo
+      - run: shellcheck deploy/poc/host/render-env deploy/poc/host/deploy deploy/poc/host/backup-mongo deploy/poc/host/restore-mongo scripts/post-deploy-check.sh
+      - name: Install actionlint
+        # A pinned release, checked against its published SHA-256. actionlint runs shellcheck on the run steps too.
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+      - run: '"$RUNNER_TEMP/actionlint" -color .github/workflows/ci.yml .github/workflows/deploy-poc.yml'
       - name: The AWS Compose override still resolves
         # Placeholder values only: this checks the two files merge and every variable is accounted for.
         env:

@@ -56,7 +56,7 @@ compose_calls() { grep '^docker compose' "$STUB_LOG" || true; }
 @test "deploy signs in to the registry from the SSM settings" {
   run "$HOST_DIR/deploy" rel-new
   [ "$status" -eq 0 ]
-  logged 'aws ecr get-login-password --region eu-west-1'
+  logged 'aws ecr get-login-password'
   logged 'docker RELEASE= login --username AWS --password-stdin 123456789012.dkr.ecr.eu-west-1.amazonaws.com'
 }
 
@@ -88,6 +88,7 @@ compose_calls() { grep '^docker compose' "$STUB_LOG" || true; }
   [ -x "$ROADMAP_ROOT/bin/restore-mongo" ]
   [ -x "$ROADMAP_ROOT/bin/render-env" ]
   [ -f "$ROADMAP_ROOT/bin/env-map" ]
+  [ -f "$ROADMAP_ROOT/bin/aws-region" ]
 }
 
 @test "deploy keeps only the newest 5 release folders" {

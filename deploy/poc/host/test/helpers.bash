@@ -1,4 +1,5 @@
-# Shared setup for the host-script tests: a temporary "server" and fake aws, docker, mountpoint and systemctl.
+# Shared setup for the host-script tests: a temporary "server" and fake aws, curl (the instance metadata service),
+# docker, mountpoint and systemctl.
 HOST_DIR="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 POC_DIR="$(cd "$HOST_DIR/.." && pwd)"
 
@@ -15,7 +16,11 @@ setup_server() {
   export STUB_STATE="$SERVER/state"
   export STUB_RESTORE_STDIN="$SERVER/restore.stdin"
   export STUB_SSM_FILE="$SERVER/ssm.tsv"
+  export STUB_REGION_LOG="$SERVER/regions.log"
   : > "$STUB_LOG"
+  : > "$STUB_REGION_LOG"
+  # As under systemd or SSM Run Command: no region set, so the scripts ask the metadata service (the curl stub).
+  unset AWS_REGION AWS_DEFAULT_REGION
   export PATH="$BATS_TEST_DIRNAME/stubs:$PATH"
   # Every parameter the env-map names, as `aws ssm ... --output text` prints them (name, tab, value).
   write_ssm
@@ -52,4 +57,9 @@ make_release() {
 contains() { case "$1" in *"$2"*) return 0 ;; esac; echo "expected '$2' in: $1" >&2; return 1; }
 lacks() { case "$1" in *"$2"*) echo "did not expect '$2' in: $1" >&2; return 1 ;; esac; return 0; }
 logged() { grep -qF -- "$1" "$STUB_LOG" || { echo "expected in log: $1" >&2; cat "$STUB_LOG" >&2; return 1; }; }
+# Every aws call so far was given this region (and there was at least one).
+aws_region_was() {
+  [ -s "$STUB_REGION_LOG" ] || { echo "no aws call was made" >&2; return 1; }
+  if grep -vF -- "AWS_REGION=$1 " "$STUB_REGION_LOG"; then echo "an aws call had another region than $1" >&2; return 1; fi
+}
 not_logged() { if grep -qF -- "$1" "$STUB_LOG"; then echo "unexpected in log: $1" >&2; return 1; fi; }

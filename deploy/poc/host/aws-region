@@ -1,0 +1,22 @@
+# Sourced by the host scripts:   . "$here/aws-region" || exit 1
+# Makes sure the aws CLI has a region. systemd services and SSM Run Command have no HOME, so ~/.aws/config is not
+# read there. When neither AWS_REGION nor AWS_DEFAULT_REGION is set, it asks the instance metadata service (IMDSv2)
+# for the server's region and exports it as AWS_REGION and AWS_DEFAULT_REGION. A region already set is kept, and
+# the metadata service is not asked. When it finds no region it prints why and returns 1, before any aws call.
+# shellcheck shell=bash
+
+if [[ -z "${AWS_REGION:-}" && -z "${AWS_DEFAULT_REGION:-}" ]]; then
+  if aws_region_token=$(curl -fsS --max-time 5 --retry 3 -X PUT http://169.254.169.254/latest/api/token \
+      -H 'X-aws-ec2-metadata-token-ttl-seconds: 60') \
+    && AWS_REGION=$(curl -fsS --max-time 5 --retry 3 -H "X-aws-ec2-metadata-token: $aws_region_token" \
+      http://169.254.169.254/latest/meta-data/placement/region) \
+    && [[ "$AWS_REGION" =~ ^[a-z0-9-]+$ ]]; then
+    unset aws_region_token
+    AWS_DEFAULT_REGION=$AWS_REGION
+    export AWS_REGION AWS_DEFAULT_REGION
+  else
+    unset aws_region_token AWS_REGION
+    echo "$(basename "$0"): no AWS region: AWS_REGION is not set and the instance metadata service gave none" >&2
+    return 1
+  fi
+fi

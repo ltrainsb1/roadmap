@@ -2,16 +2,21 @@
 # Dumps MongoDB, encrypts it in S3 and removes the local copy:   backup-mongo
 # The dump streams out of the running mongo container (as root, with the root account) into a file on the data
 # volume, goes to s3://<BACKUP_BUCKET>/mongo/<UTC date>.archive.gz with SSE-KMS, and the local file is removed.
-# Settings: BACKUP_BUCKET from compose.env in ROADMAP_ENV_DIR (default /run/roadmap). To reach another stack (the
+# Settings: BACKUP_BUCKET from compose.env in ROADMAP_ENV_DIR (default /run/roadmap). The region comes from
+# aws-region (the instance metadata service when none is set). To reach another stack (the
 # deploy-smoke job) set COMPOSE_PROJECT_NAME, COMPOSE_FILES (space-separated) and COMPOSE_ENV_FILE; the defaults
 # are the server's: project roadmap-poc, the Compose files of the release in /opt/roadmap/current, and compose.env.
 set -euo pipefail
 
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 env_dir=${ROADMAP_ENV_DIR:-/run/roadmap}
 root=${ROADMAP_ROOT:-/opt/roadmap}
 backup_dir=${ROADMAP_BACKUP_DIR:-/srv/mongo-backup}
 project=${COMPOSE_PROJECT_NAME:-roadmap-poc}
 env_file=${COMPOSE_ENV_FILE:-$env_dir/compose.env}
+
+# shellcheck source-path=SCRIPTDIR source=aws-region
+. "$here/aws-region" || exit 1
 
 # /run/roadmap is a tmpfs: after a reboot it is empty until the next deploy. Render the settings again for the
 # release that is running.
@@ -20,7 +25,7 @@ if [[ ! -f "$env_dir/compose.env" ]]; then
     echo "backup-mongo: $env_dir/compose.env is missing and there is no release in $root/current to render it for" >&2
     exit 1
   fi
-  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/render-env" "$(cat "$root/current")" \
+  "$here/render-env" "$(cat "$root/current")" \
     || { echo "backup-mongo: could not render $env_dir/compose.env from SSM" >&2; exit 1; }
 fi
 

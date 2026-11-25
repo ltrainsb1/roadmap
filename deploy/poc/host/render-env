@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Writes /run/roadmap/{compose,api,worker}.env from the SSM parameters under /roadmap/poc/ and the map in env-map.
 #   render-env <release>
+# The region comes from aws-region (the instance metadata service when none is set).
 # Nothing is changed unless every file can be written in full: the three files are made in a temporary folder and
 # moved into place at the end. A missing parameter stops it, and the message names each one.
 set -euo pipefail
@@ -14,6 +15,9 @@ if [[ -z "$release" ]]; then
   echo "usage: render-env <release>" >&2
   exit 2
 fi
+
+# shellcheck source-path=SCRIPTDIR source=aws-region
+. "$here/aws-region" || exit 1
 
 umask 077
 mkdir -p "$env_dir"

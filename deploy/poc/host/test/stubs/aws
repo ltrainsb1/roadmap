@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Fake aws for the bats tests. Logs every call to $STUB_LOG.
+# Fake aws for the bats tests. Logs every call to $STUB_LOG, and the region it was given to $STUB_REGION_LOG.
 echo "aws $*" >> "$STUB_LOG"
+echo "$1 $2 AWS_REGION=${AWS_REGION:-} AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}" >> "$STUB_REGION_LOG"
 case "$1 $2" in
   "ssm get-parameters-by-path")
     [[ "$*" == *"--path /roadmap/poc/"* && "$*" == *"--with-decryption"* && "$*" == *"--recursive"* ]] || { echo "bad ssm args" >&2; exit 2; }

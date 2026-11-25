@@ -45,11 +45,12 @@ untouched() {
 # 1. The data volume must be there, or MongoDB would start empty on the root disk.
 mountpoint -q "$data_dir" || untouched "$data_dir is not a mount point"
 
-# 2. Settings from SSM, then the registry sign-in and the images.
+# 2. The region, settings from SSM, then the registry sign-in and the images.
+# shellcheck source-path=SCRIPTDIR source=aws-region
+. "$here/aws-region" || untouched "could not find the AWS region"
 "$here/render-env" "$release" || untouched "could not render the settings files from SSM"
 registry=$(env_get compose.env REGISTRY)
-region=$(env_get api.env AWS_REGION)
-if ! aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "$registry"; then
+if ! aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"; then
   untouched "could not sign in to $registry"
 fi
 compose "$poc" "$release" pull || untouched "could not pull the images for $release"
@@ -86,7 +87,7 @@ for unit in roadmap-backup.service roadmap-backup.timer roadmap-patch.service ro
 done
 install -m 0644 "$here/systemd/docker-wait-for-data.conf" "$systemd_dir/docker.service.d/wait-for-data.conf"
 install -m 0755 "$here/backup-mongo" "$here/restore-mongo" "$here/render-env" "$root/bin/"
-install -m 0644 "$here/env-map" "$root/bin/env-map"
+install -m 0644 "$here/env-map" "$here/aws-region" "$root/bin/"
 systemctl daemon-reload
 systemctl enable --now roadmap-backup.timer
 systemctl enable --now roadmap-patch.timer

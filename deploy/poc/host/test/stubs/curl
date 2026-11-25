@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Fake curl for the bats tests: only the instance metadata service (IMDSv2). Logs every call to $STUB_LOG.
+echo "curl $*" >> "$STUB_LOG"
+[[ -z "${STUB_IMDS_FAIL:-}" ]] || { echo "curl: (7) Failed to connect to 169.254.169.254" >&2; exit 7; }
+case "$*" in
+  *"-X PUT http://169.254.169.254/latest/api/token"*)
+    [[ "$*" == *"X-aws-ec2-metadata-token-ttl-seconds: "* ]] || { echo "no TTL header" >&2; exit 22; }
+    echo -n "imds-token" ;;
+  *"http://169.254.169.254/latest/meta-data/placement/region"*)
+    [[ "$*" == *"X-aws-ec2-metadata-token: imds-token"* ]] || { echo "401 without the token" >&2; exit 22; }
+    echo -n "${STUB_IMDS_REGION:-ap-southeast-2}" ;;
+  *) echo "unexpected curl call: $*" >&2; exit 2 ;;
+esac

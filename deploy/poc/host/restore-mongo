@@ -2,7 +2,7 @@
 # Restores a backup into the running mongo container:   restore-mongo <YYYY-MM-DD> [--to <database>]
 # It downloads s3://<BACKUP_BUCKET>/mongo/<date>.archive.gz and runs mongorestore --drop, which replaces the
 # collections it restores. With --to the data goes into another database (a check that leaves the live one alone).
-# Same settings as backup-mongo (BACKUP_BUCKET, COMPOSE_PROJECT_NAME, COMPOSE_FILES, COMPOSE_ENV_FILE).
+# Same settings as backup-mongo (BACKUP_BUCKET, COMPOSE_PROJECT_NAME, COMPOSE_FILES, COMPOSE_ENV_FILE, the region).
 set -euo pipefail
 
 usage() {
@@ -20,11 +20,15 @@ elif [[ $# -ne 1 ]]; then
   usage
 fi
 
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 env_dir=${ROADMAP_ENV_DIR:-/run/roadmap}
 root=${ROADMAP_ROOT:-/opt/roadmap}
 backup_dir=${ROADMAP_BACKUP_DIR:-/srv/mongo-backup}
 project=${COMPOSE_PROJECT_NAME:-roadmap-poc}
 env_file=${COMPOSE_ENV_FILE:-$env_dir/compose.env}
+
+# shellcheck source-path=SCRIPTDIR source=aws-region
+. "$here/aws-region" || exit 1
 
 # /run/roadmap is a tmpfs: after a reboot it is empty until the next deploy. Render the settings again for the
 # release that is running.
@@ -33,7 +37,7 @@ if [[ ! -f "$env_dir/compose.env" ]]; then
     echo "restore-mongo: $env_dir/compose.env is missing and there is no release in $root/current to render it for" >&2
     exit 1
   fi
-  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/render-env" "$(cat "$root/current")" \
+  "$here/render-env" "$(cat "$root/current")" \
     || { echo "restore-mongo: could not render $env_dir/compose.env from SSM" >&2; exit 1; }
 fi
 

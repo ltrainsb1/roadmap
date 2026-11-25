@@ -7,3 +7,4 @@ export * from './timeline.ts';
 export * from './notes.ts';
 export * from './snapshots.ts';
 export * from './notifications.ts';
+export * from './calendar.ts';

@@ -1,4 +1,5 @@
 import type {
+  FeedChoices,
   Milestone,
   NotificationDetail,
   NotificationPrefs,
@@ -203,6 +204,19 @@ export interface SnapshotNoteDoc {
   createdAt: Date;
   edited: boolean;
   deleted: boolean;
+}
+
+/** A person's calendar feed (FR-4.1): one per person; only the token's SHA-256 hash is kept. */
+export interface CalendarFeedDoc {
+  _id: string;
+  tenantId: string;
+  userId: string;
+  tokenHash: string;
+  choices: FeedChoices;
+  createdAt: Date;
+  /** When the current link was made (FR-4.4). Feeds stored before it was kept don't have it: read it as createdAt. */
+  linkCreatedAt?: Date;
+  lastFetchedAt: Date | null;
 }
 
 export interface SnapshotSessionDoc {

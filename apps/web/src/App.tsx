@@ -16,6 +16,7 @@ import { ProjectsPage } from './projects/ProjectsPage.tsx';
 import type { ProjectView } from './projects/ViewSwitcher.tsx';
 import { PickerPage } from './roadmaps/PickerPage.tsx';
 import { RoadmapIndex, RoadmapLayout } from './roadmaps/RoadmapLayout.tsx';
+import { CalendarSettingsPage } from './settings/CalendarSettingsPage.tsx';
 import { NotificationSettingsPage } from './settings/NotificationSettingsPage.tsx';
 import { SecurityPage } from './settings/SecurityPage.tsx';
 import { SnapshotsPage } from './snapshots/SnapshotsPage.tsx';
@@ -143,6 +144,14 @@ export function App() {
             element={
               <RequireAuth>
                 <NotificationSettingsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/settings/calendar"
+            element={
+              <RequireAuth>
+                <CalendarSettingsPage />
               </RequireAuth>
             }
           />

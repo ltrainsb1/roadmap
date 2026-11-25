@@ -10,7 +10,8 @@ import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
 import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
 import { Field } from '../ui/Field.tsx';
-import { CreateSnapshotDialog, useCopyLink } from './CreateSnapshotDialog.tsx';
+import { COPY_FAILED, LINK_COPIED, useCopyLink } from '../ui/useCopyLink.ts';
+import { CreateSnapshotDialog } from './CreateSnapshotDialog.tsx';
 import { snapshotUrl, useRevokeSnapshot, useSnapshots } from './useSnapshots.ts';
 
 const CREATE_ID = 'create-snapshot';
@@ -73,12 +74,12 @@ function SnapshotCard({ snapshot: s, now, timeZone, onRevoke }: { snapshot: Snap
       </ul>
       {copyLink.result === 'failed' && (
         <>
-          <Alert>Couldn't copy the link. Select it and copy it yourself.</Alert>
+          <Alert>{COPY_FAILED}</Alert>
           <Field id={`snapshot-link-${s.id}`} label="Link" value={url} readOnly onFocus={(e) => e.currentTarget.select()} />
         </>
       )}
       <p role="status" className="notice">
-        {copyLink.result === 'copied' ? 'Link copied.' : ''}
+        {copyLink.result === 'copied' ? LINK_COPIED : ''}
       </p>
       <div className="snapshot-actions">
         <Button data-list={COPY_LIST} aria-label={`Copy link to ${s.name}`} onClick={() => void copyLink.copy(url)}>

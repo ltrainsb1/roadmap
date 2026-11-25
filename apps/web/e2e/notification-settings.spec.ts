@@ -77,7 +77,7 @@ test('FR-5.2: the settings page passes axe; at 375 px each row stacks with no si
 
   // Unsaved: leaving through a header link asks first.
   await row(page, 'Due soon').getByRole('radio', { name: 'Off' }).check();
-  await page.getByRole('link', { name: 'Security' }).click();
+  await page.getByRole('navigation', { name: 'Account' }).getByRole('link', { name: 'Security' }).click();
   const dialog = page.getByRole('dialog', { name: 'Discard your unsaved changes?' });
   await expect(dialog).toBeVisible();
   await expectNoA11yViolations(page);
@@ -104,6 +104,6 @@ test('FR-5.2: the settings page passes axe; at 375 px each row stacks with no si
   expect(await noSidewaysScroll()).toBe(true);
 
   // Once saved, leaving does not ask.
-  await page.getByRole('link', { name: 'Security' }).click();
+  await page.getByRole('navigation', { name: 'Account' }).getByRole('link', { name: 'Security' }).click();
   await expect(page.getByRole('heading', { name: 'Security', level: 1 })).toBeVisible();
 });

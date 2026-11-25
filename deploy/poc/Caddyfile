@@ -17,12 +17,29 @@
 	# Snapshots are shared by link; search engines must not list them.
 	@snapshot path /s/* /api/snapshots/*
 	header @snapshot X-Robots-Tag "noindex, nofollow"
+	# Calendar feeds are private links too. Deferred (>), so it replaces the API's own header on a feed instead of
+	# adding a second one, and still covers the API's empty 404.
+	@calendar path /api/calendar/*
+	header @calendar >X-Robots-Tag "noindex, nofollow"
 
 	handle /api/* {
 		rate_limit {
 			zone api {
+				match {
+					not path /api/calendar/*
+				}
 				key {remote_host}
 				events 100
+				window 1m
+			}
+			# Calendar services (Google, Microsoft) fetch everyone's feeds from a few shared addresses, so this limit
+			# is loose on purpose. The real guard is the API's own limit per feed token (60 a minute).
+			zone calendar {
+				match {
+					path /api/calendar/*
+				}
+				key {remote_host}
+				events 600
 				window 1m
 			}
 			# Sign-in and a snapshot's password: the same strict limit. Two match blocks: either one counts.

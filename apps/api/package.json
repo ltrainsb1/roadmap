@@ -37,6 +37,7 @@
   "devDependencies": {
     "@testcontainers/mongodb": "^12.2.1",
     "esbuild": "^0.28.2",
+    "ical.js": "2.2.1",
     "mongodb-memory-server": "^11.3.0",
     "testcontainers": "^12.2.1"
   }

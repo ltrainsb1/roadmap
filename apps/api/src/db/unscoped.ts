@@ -1,5 +1,6 @@
 import type { Db } from 'mongodb';
 import type {
+  CalendarFeedDoc,
   InviteDoc,
   ResetTokenDoc,
   SessionDoc,
@@ -18,6 +19,7 @@ export function unscoped(db: Db) {
   const challenges = db.collection<WebauthnChallengeDoc>('webauthnChallenges');
   const tenants = db.collection<TenantDoc>('tenants');
   const snapshots = db.collection<SnapshotDoc>('snapshots');
+  const calendarFeeds = db.collection<CalendarFeedDoc>('calendarFeeds');
 
   return {
     findUserByEmail: (email: string): Promise<UserDoc | null> => users.findOne({ email }),
@@ -36,6 +38,8 @@ export function unscoped(db: Db) {
       users.findOne({ 'passkeys.credentialId': id }),
     /** A viewer opening a snapshot link: the tenant is known only once the snapshot is found. */
     findSnapshotByLinkId: (linkId: string): Promise<SnapshotDoc | null> => snapshots.findOne({ linkId }),
+    /** A calendar app fetching a feed: the tenant is known only once the feed is found. */
+    findCalendarFeedByTokenHash: (h: string): Promise<CalendarFeedDoc | null> => calendarFeeds.findOne({ tokenHash: h }),
     async insertTenant(t: TenantDoc): Promise<void> {
       await tenants.insertOne(t);
     },

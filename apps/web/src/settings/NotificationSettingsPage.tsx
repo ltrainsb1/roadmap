@@ -1,12 +1,11 @@
 import { NOTIFICATION_TYPES, type EmailMode, type NotificationPrefs, type NotificationType } from '@roadmap/shared';
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { SETTINGS_LOAD_FAILED } from '../api/errors.ts';
 import { Alert } from '../ui/Alert.tsx';
 import { Button } from '../ui/Button.tsx';
-import { ConfirmDialog } from '../ui/ConfirmDialog.tsx';
-import { isPlainClick } from '../ui/isPlainClick.ts';
 import { Layout } from '../ui/Layout.tsx';
+import { useLeaveGuard } from '../ui/useLeaveGuard.tsx';
+import { SettingsTabs } from './SettingsTabs.tsx';
 import { useNotificationPrefs, useSaveNotificationPrefs } from './useNotificationPrefs.ts';
 
 /** In the order the page shows them. */
@@ -42,55 +41,6 @@ const subscribeWide = (onChange: () => void) => {
 };
 /** Whether the window is 600 px or wider; a browser that cannot tell gets the table. */
 const isWide = () => typeof window.matchMedia !== 'function' || window.matchMedia(WIDE).matches;
-
-/**
- * While `dirty`, a plain click on a link within the app waits for the person to agree to discard, and leaving the site
- * (reload, close, another address) asks the browser's own question. The app's router has no navigation blocking (it is
- * not a data router), so links are caught here before React Router's own handler sees them.
- */
-function useLeaveGuard(dirty: boolean) {
-  const navigate = useNavigate();
-  const [pending, setPending] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!dirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
-    const onClick = (e: MouseEvent) => {
-      if (e.defaultPrevented || !isPlainClick(e) || !(e.target instanceof Element)) return;
-      const link = e.target.closest('a[href]');
-      if (!(link instanceof HTMLAnchorElement) || (link.target && link.target !== '_self') || link.hasAttribute('download')) return;
-      const to = new URL(link.href);
-      if (to.origin !== window.location.origin) return;
-      // Link sees the click as handled and leaves it; the person answers the question first.
-      e.preventDefault();
-      setPending(to.pathname + to.search + to.hash);
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    document.addEventListener('click', onClick, true);
-    return () => {
-      window.removeEventListener('beforeunload', onBeforeUnload);
-      document.removeEventListener('click', onClick, true);
-    };
-  }, [dirty]);
-
-  const dialog = (
-    <ConfirmDialog
-      open={pending !== null}
-      title="Discard your unsaved changes?"
-      confirmLabel="Discard"
-      cancelLabel="Keep editing"
-      onConfirm={() => {
-        const to = pending;
-        setPending(null);
-        if (to !== null) void navigate(to);
-      }}
-      onClose={() => setPending(null)}
-    >
-      {null}
-    </ConfirmDialog>
-  );
-  return dialog;
-}
 
 interface RowsProps {
   values: NotificationPrefs;
@@ -239,6 +189,7 @@ export function NotificationSettingsPage() {
   const prefs = useNotificationPrefs();
   return (
     <Layout width="wide" signedIn>
+      <SettingsTabs current="notifications" />
       <h1>Email notifications</h1>
       <p>Choose how you hear about each kind of notification. Every notification also appears in the app.</p>
       {prefs.isPending && <p role="status">Loading</p>}

@@ -251,6 +251,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: MemberRouteDeps
         await s.collection('invites').deleteMany({ roadmapId });
         await s.collection('memberships').deleteMany({ roadmapId });
         await s.collection('roadmaps').deleteOne({ _id: roadmapId });
+        // Out of every calendar feed's chosen list; a list left empty stays empty (it shows an empty calendar).
+        await s.collection('calendarFeeds').updateMany({ 'choices.roadmaps': roadmapId }, { $pull: { 'choices.roadmaps': roadmapId } });
         await audit.record(s, {
           action: 'roadmap.delete',
           actor: { type: 'user', userId: actor.userId },

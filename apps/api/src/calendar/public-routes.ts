@@ -1,0 +1,144 @@
+import { createHash } from 'node:crypto';
+import { CALENDAR_LIMITS } from '@roadmap/shared';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { z } from 'zod';
+import { hashToken } from '../auth/tokens.ts';
+import type { Db } from '../db/client.ts';
+import { scoped, type ScopedCollection, type ScopedDb } from '../db/scoped.ts';
+import type { CalendarFeedDoc, ProjectDoc } from '../db/types.ts';
+import { unscoped } from '../db/unscoped.ts';
+import { eventsFor, icsCalendar, type IcsEvent } from './ics.ts';
+
+/** A feed token as newToken() makes it: 32 bytes as base64url. Anything else is not looked up. */
+const TOKEN = /^[A-Za-z0-9_-]{43}$/;
+/** lastFetchedAt is written at most this often, so a busy feed doesn't write on every fetch. */
+export const LAST_FETCHED_EVERY_MS = 10 * 60_000;
+
+const CALENDAR_NAME = 'Roadmap dates';
+const CUT_NAME = `Roadmap dates (nearest ${CALENDAR_LIMITS.events.toLocaleString('en-US')} dates)`;
+
+const params = z.object({ token: z.string().max(100) });
+
+type ProjectFilter = Parameters<ScopedCollection<ProjectDoc>['find']>[0];
+
+const byEndThenUid = (a: IcsEvent, b: IcsEvent) =>
+  a.end < b.end ? -1 : a.end > b.end ? 1 : a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0;
+
+/**
+ * A feed over the limit keeps the dates people subscribe for: those ending on or after `from` first, soonest first,
+ * then the most recent past ones while there is room. `events` is sorted by end date; so is the result.
+ */
+export function nearestEvents(events: IcsEvent[], from: string, limit: number = CALENDAR_LIMITS.events): IcsEvent[] {
+  if (events.length <= limit) return events;
+  const first = events.findIndex((e) => e.end >= from);
+  const split = first === -1 ? events.length : first;
+  const upcoming = events.slice(split, split + limit);
+  const room = limit - upcoming.length;
+  return room > 0 ? [...events.slice(split - room, split), ...upcoming] : upcoming;
+}
+
+/**
+ * The day before today in UTC. A date only counts as past once it has ended everywhere, whatever the
+ * calendar app's time zone.
+ */
+const pastBefore = (now: Date) => new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10);
+
+/** Every unknown, replaced or malformed token gets the same answer: 404 with nothing in it. */
+const nothing = (reply: FastifyReply) => reply.status(404).send();
+
+/**
+ * The roadmaps the feed may show right now: those chosen that the person still belongs to and that are not archived
+ * (FR-4.2). Two queries, whatever the number of roadmaps.
+ */
+async function roadmapsOf(s: ScopedDb, feed: CalendarFeedDoc): Promise<string[]> {
+  const chosen = feed.choices.roadmaps;
+  const memberships = await s
+    .collection('memberships')
+    .find({ userId: feed.userId, ...(chosen !== 'all' && { roadmapId: { $in: chosen } }) });
+  if (memberships.length === 0) return [];
+  const live = await s.collection('roadmaps').find({ _id: { $in: memberships.map((m) => m.roadmapId) }, archived: false });
+  return live.map((r) => r._id);
+}
+
+/** The calendar a feed shows, built from what is stored now (FR-4.1, FR-4.2). */
+async function buildCalendar(s: ScopedDb, feed: CalendarFeedDoc, origin: string, now: Date): Promise<string> {
+  const { itemDates, milestones, onlyMine } = feed.choices;
+  const roadmapIds = await roadmapsOf(s, feed);
+  if (roadmapIds.length === 0) return icsCalendar({ name: CALENDAR_NAME, events: [] });
+  const hasSomething: ProjectFilter[] = [
+    ...(itemDates ? [{ startDate: { $ne: null } }, { endDate: { $ne: null } }] : []),
+    ...(milestones ? [{ 'milestones.0': { $exists: true } }] : []),
+  ];
+  // Archiving an item archives everything under it, so `archived: false` also leaves out items under an archived
+  // ancestor. Cancelled items are left out; done items stay, they are history.
+  const items = await s.collection('projects').find({
+    roadmapId: { $in: roadmapIds },
+    archived: false,
+    status: { $ne: 'cancelled' },
+    ...(onlyMine && { assigneeIds: feed.userId }),
+    $or: hasSomething,
+  });
+  const events = items.flatMap((item) => eventsFor(item, { origin, itemDates, milestones })).sort(byEndThenUid);
+  const kept = nearestEvents(events, pastBefore(now));
+  return icsCalendar({ name: kept.length < events.length ? CUT_NAME : CALENDAR_NAME, events: kept });
+}
+
+/** True when If-None-Match names this ETag (or is `*`); weak and strong forms compare alike for a GET. */
+function matches(ifNoneMatch: string | undefined, etag: string): boolean {
+  if (ifNoneMatch === undefined) return false;
+  return ifNoneMatch.split(',').some((tag) => {
+    const t = tag.trim().replace(/^W\//, '');
+    return t === '*' || t === etag;
+  });
+}
+
+/** The private calendar feed a calendar app subscribes to. It reads no session: the token alone opens it. */
+export function registerCalendarPublicRoutes(app: FastifyInstance, deps: { db: Db; now: () => Date; origin: string }): void {
+  const r = app.withTypeProvider<ZodTypeProvider>();
+  const lookup = unscoped(deps.db);
+
+  r.get(
+    '/api/calendar/:token.ics',
+    {
+      config: {
+        auth: { level: 'public' },
+        rateLimit: {
+          max: CALENDAR_LIMITS.fetchesPerMinute,
+          timeWindow: '1 minute',
+          // Counted per token, whatever address it comes from. The key is the hash: the token stays out of memory.
+          keyGenerator: (req) => `calendar:${hashToken(String((req.params as { token?: unknown }).token))}`,
+          // The global allow list exempts every route but sign-in ones; this route is limited on its own terms.
+          allowList: [],
+        },
+      },
+      schema: { params },
+    },
+    async (req, reply) => {
+      const { token } = req.params;
+      if (!TOKEN.test(token)) return nothing(reply);
+      const feed = await lookup.findCalendarFeedByTokenHash(hashToken(token));
+      if (!feed) return nothing(reply);
+      // The tenant comes from the feed, never from a session: a signed-in cookie changes nothing.
+      const s = scoped(deps.db, feed.tenantId);
+      const now = deps.now();
+      const body = await buildCalendar(s, feed, deps.origin, now);
+      const etag = `"${createHash('sha256').update(body).digest('base64url')}"`;
+
+      if (feed.lastFetchedAt === null || now.getTime() - feed.lastFetchedAt.getTime() > LAST_FETCHED_EVERY_MS) {
+        const cutoff = new Date(now.getTime() - LAST_FETCHED_EVERY_MS);
+        // The filter keeps two fetches at once from both writing.
+        await s
+          .collection('calendarFeeds')
+          .updateOne({ _id: feed._id, $or: [{ lastFetchedAt: null }, { lastFetchedAt: { $lt: cutoff } }] }, { $set: { lastFetchedAt: now } });
+      }
+
+      void reply
+        .header('cache-control', `private, max-age=${CALENDAR_LIMITS.maxAgeSeconds}`)
+        .header('etag', etag)
+        .header('x-robots-tag', 'noindex, nofollow');
+      if (matches(req.headers['if-none-match'], etag)) return reply.status(304).send();
+      return reply.type('text/calendar; charset=utf-8').send(body);
+    },
+  );
+}

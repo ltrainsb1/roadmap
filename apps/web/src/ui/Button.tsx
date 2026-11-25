@@ -1,8 +1,9 @@
-import type { ButtonHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, Ref } from 'react';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** `primary` is the one main action of a screen; `link` looks like a text link but acts like a button. */
   variant?: 'primary' | 'secondary' | 'danger' | 'link';
+  ref?: Ref<HTMLButtonElement>;
 }
 
 /** Buttons are never disabled: a missing step is explained by an error when the button is pressed. */

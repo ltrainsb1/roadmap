@@ -96,6 +96,9 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      ical.js:
+        specifier: 2.2.1
+        version: 2.2.1
       mongodb-memory-server:
         specifier: ^11.3.0
         version: 11.3.0(bare-buffer@3.7.3)
@@ -176,6 +179,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.3.0
         version: 6.3.0(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))
+      ical.js:
+        specifier: 2.2.1
+        version: 2.2.1
       jsdom:
         specifier: ^31.0.1
         version: 31.0.1(@napi-rs/canvas@1.2.0)
@@ -1961,6 +1967,9 @@ packages:
   https-proxy-agent@7.0.6:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
+
+  ical.js@2.2.1:
+    resolution: {integrity: sha512-yK/UlPbEs316igb/tjRgbFA8ZV75rCsBJp/hWOatpyaPNlgw0dGDmU+FoicOcwX4xXkeXOkYiOmCqNPFpNPkQg==}
 
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
@@ -5066,6 +5075,8 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  ical.js@2.2.1: {}
 
   ieee754@1.2.1: {}
 

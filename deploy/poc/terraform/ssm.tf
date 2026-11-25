@@ -39,7 +39,7 @@ resource "aws_ssm_parameter" "key32" {
   value_wo_version = each.key == "totp-enc-key" ? 1 : var.secret_versions[each.key]
 }
 
-# The host's render-env reads these (deploy/poc/host/env-map). ses-configuration-set and ses-events-queue-url come from Task 8.
+# The host's render-env reads these (deploy/poc/host/env-map).
 resource "aws_ssm_parameter" "setting" {
   for_each = {
     "domain"        = var.domain
@@ -49,6 +49,9 @@ resource "aws_ssm_parameter" "setting" {
     "s3-bucket"     = local.bucket_names.files
     "backup-bucket" = local.bucket_names.backups
     "registry"      = "${local.account_id}.dkr.ecr.${var.region}.amazonaws.com"
+
+    "ses-configuration-set" = aws_sesv2_configuration_set.main.configuration_set_name
+    "ses-events-queue-url"  = aws_sqs_queue.ses_events.url
   }
 
   name  = "/roadmap/poc/${each.key}"

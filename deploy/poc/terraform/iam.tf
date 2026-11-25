@@ -21,8 +21,8 @@ resource "aws_iam_role_policy_attachment" "server_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# What the server needs from its own account. Task 8 adds the SES and SQS statements as separate
-# aws_iam_role_policy resources on this role, so this policy never changes for them.
+# What the server needs from its own account. The SES and SQS rights are separate aws_iam_role_policy
+# resources on this role (ses.tf), so this policy holds neither. Its KMS statement also covers reading the encrypted queue.
 resource "aws_iam_role_policy" "server" {
   name = "roadmap-poc-server"
   role = aws_iam_role.server.id
@@ -113,6 +113,48 @@ resource "aws_iam_role_policy" "dlm_key" {
       Effect   = "Allow"
       Action   = ["kms:CreateGrant", "kms:DescribeKey", "kms:Decrypt", "kms:GenerateDataKeyWithoutPlaintext", "kms:ReEncrypt*"]
       Resource = [aws_kms_key.main.arn]
+    }]
+  })
+}
+
+# Sending mail: only from the domain identity, and only through the configuration set.
+resource "aws_iam_role_policy" "server_email" {
+  name = "roadmap-poc-server-email"
+  role = aws_iam_role.server.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "SendFromTheDomain"
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+        Resource = [aws_sesv2_email_identity.domain.arn, aws_sesv2_configuration_set.main.arn]
+      },
+      {
+        # The API's "Send emails again" route removes one address from the account suppression list.
+        # SES offers no resource to scope this to.
+        Sid      = "SendEmailsAgain"
+        Effect   = "Allow"
+        Action   = ["ses:DeleteSuppressedDestination"]
+        Resource = ["*"]
+      },
+    ]
+  })
+}
+
+# The worker reads bounce and complaint events from this queue only.
+resource "aws_iam_role_policy" "server_events_queue" {
+  name = "roadmap-poc-server-events-queue"
+  role = aws_iam_role.server.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ReadSesEvents"
+      Effect   = "Allow"
+      Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+      Resource = [aws_sqs_queue.ses_events.arn]
     }]
   })
 }

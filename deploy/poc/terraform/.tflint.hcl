@@ -9,8 +9,8 @@ plugin "aws" {
   source  = "github.com/terraform-linters/tflint-ruleset-aws"
 }
 
-# github_repository and create_dmarc are declared here for the SES and OIDC files that Tasks 8 and 9 add.
-# Remove this rule's exemption once they are used.
+# github_repository is declared here for the OIDC file that Task 9 adds.
+# Remove this rule's exemption once it is used.
 rule "terraform_unused_declarations" {
   enabled = false
 }

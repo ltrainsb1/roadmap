@@ -1,10 +1,4 @@
-# Findings this plan accepts. Each needs a reason.
+# Findings this plan accepts. Each needs a reason, and each must fire at the severities CI scans (CRITICAL, HIGH).
 
 # Open egress: the server reaches Let's Encrypt, ECR, SES, S3, SSM, HIBP and ClamAV's mirrors.
 AVD-AWS-0104
-
-# No VPC flow logs: cost. Decision D7 leaves logging and alerting to release hardening.
-AVD-AWS-0178
-
-# No S3 access logging: cost. Decision D7.
-AVD-AWS-0089

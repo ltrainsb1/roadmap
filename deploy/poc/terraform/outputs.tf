@@ -18,3 +18,13 @@ output "backup_bucket" {
 output "kms_key_arn" {
   value = aws_kms_key.main.arn
 }
+
+output "instance_id" {
+  description = "The server, for SSM Session Manager."
+  value       = aws_instance.server.id
+}
+
+output "public_ip" {
+  description = "The server's Elastic IP."
+  value       = aws_eip.server.public_ip
+}

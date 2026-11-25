@@ -9,7 +9,7 @@ plugin "aws" {
   source  = "github.com/terraform-linters/tflint-ruleset-aws"
 }
 
-# github_repository, hosted_zone_id and create_dmarc are declared here for the server, SES and OIDC files that Tasks 7 to 9 add.
+# github_repository and create_dmarc are declared here for the SES and OIDC files that Tasks 8 and 9 add.
 # Remove this rule's exemption once they are used.
 rule "terraform_unused_declarations" {
   enabled = false

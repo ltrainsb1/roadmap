@@ -45,7 +45,7 @@ describe.skipIf(process.env.TEST_S3 !== 'container')('S3ObjectStore against MinI
   });
 
   test('put, download through a signed link, refuse an expired link, delete', async () => {
-    const store = new S3ObjectStore(s3, bucket, { serverSideEncryption: false });
+    const store = new S3ObjectStore(s3, bucket);
     const body = Buffer.from('<html><script>not run</script></html>');
     await store.put('t/r/a1', body);
 
@@ -56,7 +56,7 @@ describe.skipIf(process.env.TEST_S3 !== 'container')('S3ObjectStore against MinI
     expect(res.headers.get('content-type')).toBe('application/octet-stream');
 
     // A 1-second link signed a minute ago has already expired: no waiting in the test.
-    const past = new S3ObjectStore(s3, bucket, { serverSideEncryption: false, now: () => new Date(Date.now() - 60_000) });
+    const past = new S3ObjectStore(s3, bucket, { now: () => new Date(Date.now() - 60_000) });
     const expired = await fetch(await past.signedGetUrl('t/r/a1', { fileName: 'x', expiresSeconds: 1 }));
     expect(expired.status).toBe(403);
     await expired.arrayBuffer();

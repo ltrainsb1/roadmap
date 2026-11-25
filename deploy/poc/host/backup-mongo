@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Dumps MongoDB, encrypts it in S3 and removes the local copy:   backup-mongo
-# The dump streams out of the running mongo container (as root, with the root account) into a file on the data
-# volume, goes to s3://<BACKUP_BUCKET>/mongo/<UTC date>.archive.gz with SSE-KMS, and the local file is removed.
+# The dump streams out of the running mongo container (as root, with the root account) into a file in
+# /srv/mongo-backup (ROADMAP_BACKUP_DIR), which is on the root disk, not the data volume. It goes to
+# s3://<BACKUP_BUCKET>/mongo/<UTC date>.archive.gz, where the bucket's default encryption (the project's KMS key)
+# applies, and the local file is removed.
 # Settings: BACKUP_BUCKET from compose.env in ROADMAP_ENV_DIR (default /run/roadmap). The region comes from
 # aws-region (the instance metadata service when none is set). To reach another stack (the
 # deploy-smoke job) set COMPOSE_PROJECT_NAME, COMPOSE_FILES (space-separated) and COMPOSE_ENV_FILE; the defaults
@@ -61,5 +63,5 @@ if [[ ! -s "$out" ]]; then
   exit 1
 fi
 
-aws s3 cp "$out" "s3://$bucket/mongo/$date.archive.gz" --sse aws:kms
+aws s3 cp "$out" "s3://$bucket/mongo/$date.archive.gz"
 echo "backup-mongo: uploaded s3://$bucket/mongo/$date.archive.gz" >&2

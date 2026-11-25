@@ -9,7 +9,7 @@ setup() {
   TODAY=$(date -u +%F)
 }
 
-@test "backup-mongo dumps inside the mongo container as root, uploads with KMS, removes the local file" {
+@test "backup-mongo dumps inside the mongo container as root, uploads with the bucket's own encryption, removes the local file" {
   run "$HOST_DIR/backup-mongo"
   [ "$status" -eq 0 ]
   dump=$(grep mongodump "$STUB_LOG")
@@ -18,7 +18,9 @@ setup() {
   contains "$dump" "--env-file $ROADMAP_ENV_DIR/compose.env"
   contains "$dump" "exec -T -u root mongo"
   contains "$dump" "mongodump --archive --gzip"
-  logged "aws s3 cp $ROADMAP_BACKUP_DIR/$TODAY.archive.gz s3://roadmap-backups-bucket/mongo/$TODAY.archive.gz --sse aws:kms"
+  logged "aws s3 cp $ROADMAP_BACKUP_DIR/$TODAY.archive.gz s3://roadmap-backups-bucket/mongo/$TODAY.archive.gz"
+  # No --sse: aws:kms with no key id would use the AWS-managed aws/s3 key. The bucket default is the project's key.
+  not_logged "--sse"
   [ "$(cat "$STUB_S3_DIR/roadmap-backups-bucket/mongo/$TODAY.archive.gz")" = "DUMP-OF-DATABASE" ]
   [ ! -e "$ROADMAP_BACKUP_DIR/$TODAY.archive.gz" ]
 }

@@ -154,7 +154,7 @@ describe('S3ObjectStore (FR-1.4)', () => {
     return { s3, sent };
   }
 
-  test('put stores the bytes as octet-stream with KMS encryption', async () => {
+  test("put stores the bytes as octet-stream and leaves encryption to the bucket's default key", async () => {
     const { s3, sent } = client();
     await new S3ObjectStore(s3, 'roadmap-files').put('t/r/a', Buffer.from('x'));
     expect(sent).toHaveLength(1);
@@ -164,14 +164,10 @@ describe('S3ObjectStore (FR-1.4)', () => {
       Key: 't/r/a',
       Body: Buffer.from('x'),
       ContentType: 'application/octet-stream',
-      ServerSideEncryption: 'aws:kms',
     });
-  });
-
-  test('put leaves encryption unset when asked (MinIO in tests has no KMS)', async () => {
-    const { s3, sent } = client();
-    await new S3ObjectStore(s3, 'b', { serverSideEncryption: false }).put('k', Buffer.from('x'));
+    // Neither header: aws:kms with no key id would pick the AWS-managed aws/s3 key over the bucket's own.
     expect((sent[0] as PutObjectCommand).input).not.toHaveProperty('ServerSideEncryption');
+    expect((sent[0] as PutObjectCommand).input).not.toHaveProperty('SSEKMSKeyId');
   });
 
   test('signedGetUrl forces a download as octet-stream and expires', async () => {

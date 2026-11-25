@@ -146,7 +146,7 @@ jobs:
             echo "MAIL_OUTBOX_FILE=/tmp/outbox.jsonl"
             echo "MAIL_FROM=no-reply@localhost"
           } > deploy/poc/worker.env
-      - name: Build the three images
+      - name: Build the four images
         run: $COMPOSE build
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -166,14 +166,13 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: true
-      # ClamAV runs in production but is built upstream, not by us: its findings are listed here, and a fix means
-      # an upstream rebuild or a newer tag (see the follow-ups document). MinIO is not scanned: it runs only in this job, never in a deployment.
-      - name: List ClamAV image findings (upstream image, not a gate)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: clamav/clamav:1.4.7
+          image-ref: roadmap-clamav:poc
           severity: CRITICAL,HIGH
-          exit-code: 0
+          exit-code: 1
+          ignore-unfixed: true
+      # MinIO is not scanned: it runs only in this job, never in a deployment.
       - name: Start the stack
         # ClamAV loads its signatures before it is healthy, and the API waits for it.
         run: $COMPOSE up -d --wait --wait-timeout 420

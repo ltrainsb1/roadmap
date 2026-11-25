@@ -63,7 +63,10 @@ services:
       start_period: 15s
 
   clamav:
-    image: clamav/clamav:1.4.7
+    build:
+      context: .
+      dockerfile: clamav.Dockerfile
+    image: roadmap-clamav:poc
     restart: unless-stopped
     # Signatures take about 1 GB in memory; a reload briefly holds two copies (about 1.9 GiB), so leave room above that.
     mem_limit: 3g

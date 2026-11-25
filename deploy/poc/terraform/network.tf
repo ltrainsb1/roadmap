@@ -32,7 +32,7 @@ resource "aws_subnet" "public" {
   cidr_block                      = "10.40.1.0/24"
   ipv6_cidr_block                 = cidrsubnet(aws_vpc.main.ipv6_cidr_block, 8, 1)
   assign_ipv6_address_on_creation = true
-  map_public_ip_on_launch         = true # the one server has no NAT, so it needs its own public address
+  # No map_public_ip_on_launch: the server (Task 7) sets associate_public_ip_address itself, since there is no NAT.
 
   tags = { Name = "roadmap-poc-public" }
 }

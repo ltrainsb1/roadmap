@@ -246,3 +246,25 @@ run "NFR_network_has_no_NAT_and_one_public_subnet_in_a_t4g_large_zone" {
     error_message = "The subnet must be 10.40.1.0/24 in the first zone that offers t4g.large."
   }
 }
+
+run "NFR_secrets_each_secret_rotates_on_its_own_version_and_totp_enc_key_never" {
+  command = plan
+
+  variables {
+    secret_versions = { "mongo-root-password" = 1, "mongo-app-password" = 2, "unsubscribe-key" = 1 }
+  }
+
+  assert {
+    condition     = aws_ssm_parameter.secret["mongo-app-password"].value_wo_version == 2
+    error_message = "mongo-app-password must follow its own entry in secret_versions."
+  }
+
+  assert {
+    condition = (
+      aws_ssm_parameter.secret["mongo-root-password"].value_wo_version == 1
+      && aws_ssm_parameter.key32["unsubscribe-key"].value_wo_version == 1
+      && aws_ssm_parameter.key32["totp-enc-key"].value_wo_version == 1
+    )
+    error_message = "Only the secret whose version was raised may change; totp-enc-key stays at 1."
+  }
+}

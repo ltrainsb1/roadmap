@@ -1,5 +1,6 @@
 # Secrets are generated as ephemeral values and written with value_wo, so they never reach the plan or the state.
-# Raising var.secret_version writes new ones. Never raise it for totp-enc-key: every enrolled authenticator would stop working.
+# Each secret has its own version in var.secret_versions; raising one writes a new value for that secret only.
+# totp-enc-key is fixed at version 1 and never rotated: every enrolled authenticator would stop working.
 
 ephemeral "random_password" "secret" {
   for_each = toset(["mongo-root-password", "mongo-app-password"])
@@ -15,7 +16,7 @@ resource "aws_ssm_parameter" "secret" {
   type             = "SecureString"
   key_id           = aws_kms_key.main.arn
   value_wo         = ephemeral.random_password.secret[each.key].result
-  value_wo_version = var.secret_version
+  value_wo_version = var.secret_versions[each.key]
 }
 
 # These two must decode to exactly 32 bytes: 32 letters and digits, base64 encoded.
@@ -35,7 +36,7 @@ resource "aws_ssm_parameter" "key32" {
   type             = "SecureString"
   key_id           = aws_kms_key.main.arn
   value_wo         = base64encode(ephemeral.random_password.key32[each.key].result)
-  value_wo_version = var.secret_version
+  value_wo_version = each.key == "totp-enc-key" ? 1 : var.secret_versions[each.key]
 }
 
 # The host's render-env reads these (deploy/poc/host/env-map). ses-configuration-set and ses-events-queue-url come from Task 8.

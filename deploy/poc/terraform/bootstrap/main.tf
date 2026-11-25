@@ -1,6 +1,7 @@
 # Run once by hand, before the main root, to create the bucket that holds its state.
 # This root keeps its own state in a local file (terraform.tfstate, ignored in git): it is tiny, and losing it costs one
-# `terraform import`. The state bucket uses SSE-S3 because the KMS key lives in the main root, which needs this bucket first.
+# `terraform import`. The state bucket uses the AWS-managed aws/s3 KMS key with a bucket key, because the customer key lives in
+# the main root, which needs this bucket first.
 
 terraform {
   required_version = ">= 1.11"
@@ -56,14 +57,16 @@ resource "aws_s3_bucket_ownership_controls" "state" {
   }
 }
 
-# The state bucket predates the KMS key, so it uses SSE-S3 (decided in the comment at the top of this file).
+# AWS-managed KMS key, because the customer key lives in the main root.
 #trivy:ignore:AWS-0132
 resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
   bucket = aws_s3_bucket.state.id
 
   rule {
+    bucket_key_enabled = true
+
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm = "aws:kms"
     }
   }
 }

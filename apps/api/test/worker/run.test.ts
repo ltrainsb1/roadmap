@@ -93,7 +93,7 @@ describe('worker: one pass', () => {
     const d = { ...workerDeps(t, c, mail), db: broken };
 
     const counts = await runPass(d);
-    expect(counts).toEqual({ sent: 1, reminders: 0, digests: 1, failed: 0 });
+    expect(counts).toEqual({ sent: 1, reminders: 0, digests: 1, failed: 0, blocked: 0, ignored: 0 });
     expect(mail.sent.map((m) => m.subject)).toEqual(['Priya Shah assigned you to Launch plan', 'Your roadmap updates for 11 Nov 2026']);
     expect(d.lines.filter((l) => l.level === 'error')).toEqual([
       { level: 'error', o: { step: 'due_soon', err: 'Error: projects are unreachable' }, msg: 'worker step failed' },

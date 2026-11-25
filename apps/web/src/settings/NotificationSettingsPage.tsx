@@ -6,7 +6,7 @@ import { Button } from '../ui/Button.tsx';
 import { Layout } from '../ui/Layout.tsx';
 import { useLeaveGuard } from '../ui/useLeaveGuard.tsx';
 import { SettingsTabs } from './SettingsTabs.tsx';
-import { useNotificationPrefs, useSaveNotificationPrefs } from './useNotificationPrefs.ts';
+import { useNotificationPrefs, useResumeEmails, useSaveNotificationPrefs } from './useNotificationPrefs.ts';
 
 /** In the order the page shows them. */
 const ROWS: ReadonlyArray<{ type: NotificationType; name: string; description: string }> = [
@@ -30,6 +30,7 @@ const CHOICES: ReadonlyArray<{ mode: EmailMode; label: string }> = [
   { mode: 'off', label: 'Off' },
 ];
 
+const RESUME_FAILED = "Couldn't turn emails back on. Try again.";
 const SAVE_FAILED = "Couldn't save your settings. Try again.";
 
 const WIDE = '(min-width: 600px)';
@@ -185,14 +186,47 @@ function PrefsForm({ saved, timezone }: { saved: NotificationPrefs; timezone: st
   );
 }
 
+/** SES reported a bounce or a spam complaint, so the worker stopped sending. The button asks for them again. */
+function BlockedNotice({ blocked, onResumed }: { blocked: { reason: 'bounced' | 'complained'; email: string }; onResumed: () => void }) {
+  const resume = useResumeEmails();
+  const [failed, setFailed] = useState(false);
+  const sending = useRef(false);
+  const onClick = () => {
+    if (sending.current) return;
+    sending.current = true;
+    setFailed(false);
+    resume.mutate(undefined, {
+      onSuccess: onResumed,
+      onError: () => setFailed(true),
+      onSettled: () => {
+        sending.current = false;
+      },
+    });
+  };
+  return (
+    <div className="alert alert-info">
+      <p>
+        {blocked.reason === 'bounced'
+          ? `Emails to ${blocked.email} bounced, so we stopped sending them.`
+          : 'One of our emails was marked as spam, so we stopped sending them.'}
+      </p>
+      {failed && <Alert>{RESUME_FAILED}</Alert>}
+      <Button onClick={onClick}>Send emails again</Button>
+    </div>
+  );
+}
+
 export function NotificationSettingsPage() {
   const prefs = useNotificationPrefs();
+  const [resumed, setResumed] = useState(false);
   return (
     <Layout width="wide" signedIn>
       <SettingsTabs current="notifications" />
       <h1>Email notifications</h1>
       <p>Choose how you hear about each kind of notification. Every notification also appears in the app.</p>
       {prefs.isPending && <p role="status">Loading</p>}
+      {resumed && <Alert tone="success">Emails are on again.</Alert>}
+      {prefs.data?.emailBlocked && <BlockedNotice blocked={prefs.data.emailBlocked} onResumed={() => setResumed(true)} />}
       {prefs.data ? (
         <PrefsForm saved={prefs.data.prefs} timezone={prefs.data.timezone} />
       ) : (

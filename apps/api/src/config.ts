@@ -17,6 +17,10 @@ export interface Config {
   mailFrom: string;
   mailOutboxFile?: string;
   awsRegion: string;
+  /** SES configuration set that sends bounce and complaint events to SNS; set in production. */
+  sesConfigurationSet?: string;
+  /** The SQS queue those events land in; the worker reads it. */
+  sesEventsQueueUrl?: string;
   hibpEnabled: boolean;
   /** Requests per minute per IP on /api/auth/*. */
   authRateLimitPerMin: number;
@@ -105,6 +109,8 @@ const workerShape = {
   MAIL_FROM: z.string().min(1).optional(),
   MAIL_OUTBOX_FILE: z.string().min(1).optional(),
   AWS_REGION: z.string().min(1).default('us-east-1'),
+  SES_CONFIGURATION_SET: z.string().min(1).optional(),
+  SES_EVENTS_QUEUE_URL: z.string().min(1).optional(),
   WORKER_INTERVAL_MS: z.coerce.number().int().min(100).default(30000),
   WORKER_HEARTBEAT_FILE: z.string().min(1).default('/tmp/worker-heartbeat'),
 };
@@ -169,6 +175,8 @@ export type WorkerConfig = Pick<
   | 'mailFrom'
   | 'mailOutboxFile'
   | 'awsRegion'
+  | 'sesConfigurationSet'
+  | 'sesEventsQueueUrl'
   | 'workerIntervalMs'
   | 'workerHeartbeatFile'
 >;
@@ -196,6 +204,8 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv): WorkerConfig {
     mailFrom: e.MAIL_FROM ?? `no-reply@${new URL(e.APP_ORIGIN).hostname}`,
     ...(e.MAIL_OUTBOX_FILE ? { mailOutboxFile: e.MAIL_OUTBOX_FILE } : {}),
     awsRegion: e.AWS_REGION,
+    ...(e.SES_CONFIGURATION_SET ? { sesConfigurationSet: e.SES_CONFIGURATION_SET } : {}),
+    ...(e.SES_EVENTS_QUEUE_URL ? { sesEventsQueueUrl: e.SES_EVENTS_QUEUE_URL } : {}),
     workerIntervalMs: e.WORKER_INTERVAL_MS,
     workerHeartbeatFile: e.WORKER_HEARTBEAT_FILE,
   };
@@ -220,6 +230,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     mailFrom: e.MAIL_FROM ?? `no-reply@${rpId}`,
     ...(e.MAIL_OUTBOX_FILE ? { mailOutboxFile: e.MAIL_OUTBOX_FILE } : {}),
     awsRegion: e.AWS_REGION,
+    ...(e.SES_CONFIGURATION_SET ? { sesConfigurationSet: e.SES_CONFIGURATION_SET } : {}),
     hibpEnabled: e.HIBP_ENABLED,
     authRateLimitPerMin: e.AUTH_RATE_LIMIT_PER_MIN,
     files: e.FILES,

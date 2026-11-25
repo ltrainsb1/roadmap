@@ -38,16 +38,21 @@ const ROWS = ['Assigned to you', 'Mentions', 'Dates changed on your items', 'Due
 type Answer = unknown;
 type PutAnswer = (body: NotificationPrefs) => Answer;
 /** Answers the page's calls: the saved settings, the save (a function of the body sent), and the bell's count. */
-function serve(get: Answer, put: PutAnswer = () => undefined) {
+function serve(get: Answer, put: PutAnswer = () => undefined, resume: () => Answer = () => undefined) {
   mockApi.mockImplementation((path: string, opts?: { method?: string; body?: unknown }) => {
     const answer = (a: Answer) => (a instanceof Error ? Promise.reject(a) : a instanceof Promise ? a : Promise.resolve(a));
     if (path === '/api/notifications/unread-count') return answer({ unread: 0 });
+    if (path === '/api/me/notification-prefs/resume') return answer(resume());
     if (path === '/api/me/notification-prefs' && opts?.method === 'PUT') return answer(put(opts.body as NotificationPrefs));
     if (path === '/api/me/notification-prefs') return answer(get);
     throw new Error(`unexpected call ${path}`);
   });
 }
-const loaded = (prefs: NotificationPrefs = SAVED, timezone = 'Europe/Paris'): PrefsResponse => ({ prefs, timezone });
+const loaded = (prefs: NotificationPrefs = SAVED, timezone = 'Europe/Paris', emailBlocked: PrefsResponse['emailBlocked'] = null): PrefsResponse => ({
+  prefs,
+  timezone,
+  emailBlocked,
+});
 const putCalls = () => mockApi.mock.calls.filter(([p, o]) => p === '/api/me/notification-prefs' && o?.method === 'PUT');
 
 function renderPage(): QueryClient {
@@ -261,4 +266,38 @@ test('FR-5.2: settings that could not load say so, with "Try again"', async () =
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   expect(await screen.findByRole('radiogroup', { name: 'Assigned to you' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+test('FR-5: a bounced address shows the line above the radios with a button; the button turns emails on again, the line goes and a status says so', async () => {
+  serve(loaded(SAVED, 'Europe/Paris', { reason: 'bounced', email: 'sam@example.com' }), undefined, () => loaded());
+  renderPage();
+  const line = await screen.findByText('Emails to sam@example.com bounced, so we stopped sending them.');
+  expect(line.compareDocumentPosition(screen.getByRole('table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Send emails again' }));
+  expect((await screen.findByText('Emails are on again.')).getAttribute('role')).toBe('status');
+  expect(screen.queryByText('Emails to sam@example.com bounced, so we stopped sending them.')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Send emails again' })).toBeNull();
+  expect(mockApi).toHaveBeenCalledWith('/api/me/notification-prefs/resume', { method: 'POST' });
+});
+
+test('FR-5: a spam complaint shows its own line', async () => {
+  serve(loaded(SAVED, 'Europe/Paris', { reason: 'complained', email: 'sam@example.com' }));
+  renderPage();
+  await screen.findByText('One of our emails was marked as spam, so we stopped sending them.');
+  expect(screen.getByRole('button', { name: 'Send emails again' })).toBeTruthy();
+});
+
+test('FR-5: when turning emails back on fails the error shows and the line stays', async () => {
+  serve(loaded(SAVED, 'Europe/Paris', { reason: 'bounced', email: 'sam@example.com' }), undefined, () => new ApiError(502, 'ses_failed'));
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: 'Send emails again' }));
+  expect((await screen.findByRole('alert')).textContent).toBe("Couldn't turn emails back on. Try again.");
+  expect(screen.getByText('Emails to sam@example.com bounced, so we stopped sending them.')).toBeTruthy();
+});
+
+test('FR-5: with no block there is no line and no button', async () => {
+  serve(loaded());
+  renderPage();
+  await screen.findByRole('button', { name: 'Save changes' });
+  expect(screen.queryByRole('button', { name: 'Send emails again' })).toBeNull();
 });

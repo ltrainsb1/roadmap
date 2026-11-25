@@ -1,8 +1,9 @@
 import { writeFile } from 'node:fs/promises';
+import { SQSClient } from '@aws-sdk/client-sqs';
 import { loadWorkerConfig } from './config.ts';
 import { connectDb } from './db/client.ts';
 import { ensureIndexes } from './db/indexes.ts';
-import { createMailer } from './mail/mailer.ts';
+import { createMailer, SES_TIMEOUTS } from './mail/mailer.ts';
 import { passAndBeat, type WorkerDeps } from './worker/run.ts';
 
 // The worker process: one pass, then a wait of WORKER_INTERVAL_MS, then the next, so two passes never overlap. Logs
@@ -15,7 +16,19 @@ const log: WorkerDeps['log'] = { info: (o, msg) => write('info', o, msg), error:
 const config = loadWorkerConfig(process.env);
 const { client, db } = await connectDb(config.mongoUri, config.mongoDb);
 await ensureIndexes(db);
-const deps: WorkerDeps = { db, mailer: createMailer(config), now: () => new Date(), appOrigin: config.appOrigin, unsubscribeKey: config.unsubscribeKey, log };
+const deps: WorkerDeps = {
+  db,
+  mailer: createMailer(config),
+  now: () => new Date(),
+  appOrigin: config.appOrigin,
+  unsubscribeKey: config.unsubscribeKey,
+  // The queue SES events arrive in (SES, then SNS, then SQS). Unset in development: the step then does nothing.
+  ...(config.sesEventsQueueUrl && {
+    sesEventsQueueUrl: config.sesEventsQueueUrl,
+    sqs: new SQSClient({ region: config.awsRegion, requestHandler: SES_TIMEOUTS }),
+  }),
+  log,
+};
 
 let stopping = false;
 let wake: (() => void) | null = null;

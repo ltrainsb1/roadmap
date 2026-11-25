@@ -17,7 +17,7 @@ import type { AttachmentDoc, MembershipDoc, NoteDoc, ProjectDoc, RoadmapDoc, Ten
 import { MemoryObjectStore, type ObjectStore } from '../src/files/object-store.ts';
 import { FakeScanner, type Scanner } from '../src/files/scanner.ts';
 import { FakePdfRenderer, type PdfRenderer } from '../src/snapshots/pdf-renderer.ts';
-import { MemoryMailer } from '../src/mail/mailer.ts';
+import { MemoryMailer, type SesLikeClient } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
 export interface TestMongo {
@@ -127,6 +127,8 @@ export interface TestAppOptions {
   pdfRenderer?: PdfRenderer;
   /** Replaces how many PDFs the app makes at once. */
   maxPdfRenders?: number;
+  /** Replaces the SES client the resume route calls (the config needs MAILER=ses for it to be used). */
+  sesClient?: SesLikeClient;
   /** Wraps the database the app is given (seeding still uses the plain one), so a test can pause a query. */
   wrapDb?: (db: Db) => Db;
 }
@@ -163,6 +165,7 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     config,
     db: opts.wrapDb ? opts.wrapDb(db) : db,
     mailer: mail,
+    ...(opts.sesClient ? { sesClient: opts.sesClient } : {}),
     objectStore: opts.objectStore ?? files,
     scanner: opts.scanner ?? scanner,
     pdfRenderer: opts.pdfRenderer ?? pdf,

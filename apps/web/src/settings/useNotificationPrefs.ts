@@ -18,3 +18,12 @@ export function useSaveNotificationPrefs() {
     onSuccess: (data) => queryClient.setQueryData(PREFS_KEY, data),
   });
 }
+
+/** Turns notification emails back on after a bounce or a spam complaint; the answer becomes the cached settings. */
+export function useResumeEmails() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<PrefsResponse>(`${PATH}/resume`, { method: 'POST' }),
+    onSuccess: (data) => queryClient.setQueryData(PREFS_KEY, data),
+  });
+}

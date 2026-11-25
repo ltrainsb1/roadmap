@@ -52,6 +52,8 @@ export interface UserDoc {
   notificationPrefs?: Partial<NotificationPrefs>;
   /** The local date (`YYYY-MM-DD`, in `timezone`) of the last digest sent. */
   digestSentOn?: string;
+  /** Set by the worker when SES reports a bounce or a spam complaint; notification emails stop until the person resumes. */
+  emailBlocked?: { reason: 'bounced' | 'complained'; at: Date };
   createdAt: Date;
 }
 

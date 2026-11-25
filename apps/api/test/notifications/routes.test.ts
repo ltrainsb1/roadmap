@@ -275,7 +275,7 @@ describe('notification preferences', () => {
     await t.db.collection<UserDoc>('users').updateOne({ _id: w.cal._id }, { $set: { timezone: 'Europe/London' } });
     const first = await get(w.sess.cal, '/api/me/notification-prefs');
     expect(first.statusCode).toBe(200);
-    expect(first.json<PrefsResponse>()).toEqual({ prefs: DEFAULT_PREFS, timezone: 'Europe/London' });
+    expect(first.json<PrefsResponse>()).toEqual({ prefs: DEFAULT_PREFS, timezone: 'Europe/London', emailBlocked: null });
 
     // Stored values win over the defaults, even when only some are stored.
     await t.db.collection<UserDoc>('users').updateOne({ _id: w.cal._id }, { $set: { notificationPrefs: { due_soon: 'off' } } });
@@ -287,7 +287,7 @@ describe('notification preferences', () => {
     const next = { assigned: 'digest', mentioned: 'off', dates_changed: 'instant', due_soon: 'digest' } as const;
     const saved = await putPrefs(w.sess.cal, next);
     expect(saved.statusCode).toBe(200);
-    expect(saved.json<PrefsResponse>()).toEqual({ prefs: next, timezone: 'Europe/London' });
+    expect(saved.json<PrefsResponse>()).toEqual({ prefs: next, timezone: 'Europe/London', emailBlocked: null });
     expect((await get(w.sess.cal, '/api/me/notification-prefs')).json<PrefsResponse>().prefs).toEqual(next);
     // Olive's are untouched.
     expect((await get(w.sess.olive, '/api/me/notification-prefs')).json<PrefsResponse>().prefs).toEqual(DEFAULT_PREFS);

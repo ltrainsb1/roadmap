@@ -4,6 +4,7 @@ import { sendDigests } from './digest.ts';
 import { writeDueSoon } from './due-soon.ts';
 import { errorText } from './claims.ts';
 import { sendInstant } from './instant.ts';
+import { sesEventsStep, type SqsLikeClient } from './ses-events.ts';
 
 export interface WorkerDeps {
   db: Db;
@@ -12,6 +13,9 @@ export interface WorkerDeps {
   appOrigin: string;
   /** Signs the unsubscribe link in each email. */
   unsubscribeKey: Buffer;
+  /** Where SES bounce and complaint events wait; without both of these the events step does nothing. */
+  sqs?: SqsLikeClient;
+  sesEventsQueueUrl?: string;
   log: { info(o: object, msg: string): void; error(o: object, msg: string): void };
 }
 
@@ -20,18 +24,28 @@ export interface PassCounts {
   reminders: number;
   digests: number;
   failed: number;
+  /** Users newly blocked after a bounce or complaint. */
+  blocked: number;
+  /** SES event messages that changed no user. */
+  ignored: number;
 }
 
 const STEPS: Array<[string, (d: WorkerDeps) => Promise<Partial<PassCounts>>]> = [
+  // First, so a bounce stops this pass's sends.
+  ['ses_events', sesEventsStep],
   ['instant', sendInstant],
   ['due_soon', writeDueSoon],
   ['digest', sendDigests],
 ];
 
-async function runSteps(deps: WorkerDeps): Promise<{ counts: PassCounts; stepsFailed: number }> {
-  const counts: PassCounts = { sent: 0, reminders: 0, digests: 0, failed: 0 };
+async function runSteps(deps: WorkerDeps): Promise<{ counts: PassCounts; stepsFailed: number; stepsRun: number }> {
+  const counts: PassCounts = { sent: 0, reminders: 0, digests: 0, failed: 0, blocked: 0, ignored: 0 };
   let stepsFailed = 0;
+  let stepsRun = 0;
   for (const [step, run] of STEPS) {
+    // Nothing to do (and nothing to fail) without a queue, as in development.
+    if (step === 'ses_events' && !(deps.sqs && deps.sesEventsQueueUrl)) continue;
+    stepsRun += 1;
     try {
       const got = await run(deps);
       for (const k of Object.keys(got) as Array<keyof PassCounts>) counts[k] += got[k] ?? 0;
@@ -40,10 +54,10 @@ async function runSteps(deps: WorkerDeps): Promise<{ counts: PassCounts; stepsFa
       deps.log.error({ step, err: errorText(err) }, 'worker step failed');
     }
   }
-  return { counts, stepsFailed };
+  return { counts, stepsFailed, stepsRun };
 }
 
-/** One pass: instant sends, then due-soon reminders, then digests. Never throws: each step logs its own errors and the pass goes on. */
+/** One pass: SES events, instant sends, then due-soon reminders, then digests. Never throws: each step logs its own errors and the pass goes on. */
 export async function runPass(deps: WorkerDeps): Promise<PassCounts> {
   return (await runSteps(deps)).counts;
 }
@@ -55,9 +69,9 @@ export async function runPass(deps: WorkerDeps): Promise<PassCounts> {
  */
 export async function passAndBeat(deps: WorkerDeps, beat: () => Promise<void>): Promise<PassCounts> {
   const started = deps.now().getTime();
-  const { counts, stepsFailed } = await runSteps(deps);
+  const { counts, stepsFailed, stepsRun } = await runSteps(deps);
   deps.log.info({ ...counts, ms: deps.now().getTime() - started }, 'pass done');
-  if (stepsFailed === STEPS.length) {
+  if (stepsFailed === stepsRun) {
     deps.log.error({ steps: stepsFailed }, 'every step failed; no heartbeat');
     return counts;
   }

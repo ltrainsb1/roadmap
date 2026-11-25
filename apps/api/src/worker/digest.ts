@@ -20,7 +20,8 @@ async function releaseDay(s: ScopedDb, user: UserDoc, today: string): Promise<vo
 /** One person's digest, if one is due: 'sent', 'failed', or null when there was nothing to send. */
 async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Date): Promise<'sent' | 'failed' | null> {
   const user = await s.collection('users').findOne({ _id: userId });
-  if (!user) return null;
+  // The instant step skips a blocked person's rows (digest ones too); a digest is never built for them.
+  if (!user || user.emailBlocked) return null;
   const prefs = effectivePrefs(user);
   const types = NOTIFICATION_TYPES.filter((type) => prefs[type] === 'digest');
   if (types.length === 0 || localHour(now, user.timezone) < NOTIFICATION_LIMITS.digestHour) return null;

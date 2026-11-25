@@ -366,4 +366,13 @@ describe('loadWorkerConfig', () => {
     delete rest.MAIL_FROM;
     expect(loadWorkerConfig(rest).mailFrom).toBe('no-reply@roadmap.example.com');
   });
+
+  test('FR-5: carries SES_CONFIGURATION_SET and SES_EVENTS_QUEUE_URL when set, and neither when not', () => {
+    const queue = 'https://sqs.us-east-1.amazonaws.com/123456789012/roadmap-ses-events';
+    const cfg = loadWorkerConfig({ ...workerEnv, SES_CONFIGURATION_SET: 'roadmap', SES_EVENTS_QUEUE_URL: queue });
+    expect(cfg.sesConfigurationSet).toBe('roadmap');
+    expect(cfg.sesEventsQueueUrl).toBe(queue);
+    expect(Object.keys(loadWorkerConfig(workerEnv))).not.toContain('sesConfigurationSet');
+    expect(Object.keys(loadWorkerConfig(workerEnv))).not.toContain('sesEventsQueueUrl');
+  });
 });

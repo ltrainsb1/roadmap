@@ -180,6 +180,14 @@ describe('describeAuditEvent', () => {
     );
   });
 
+  test('FR-5: user.email_blocked and user.email_resumed describe the stop and the restart', () => {
+    const target = { type: 'user', id: 'u1' };
+    expect(describeAuditEvent(event({ action: 'user.email_blocked', target, actor: { type: 'system' } }), nameOf)).toBe(
+      'Notification emails to this address were stopped after a bounce or a spam complaint.',
+    );
+    expect(describeAuditEvent(event({ action: 'user.email_resumed', target }), nameOf)).toBe('Maria turned their notification emails back on.');
+  });
+
   test('FR-4.2: user.calendar_feed says the person changed their calendar feed, without the choices', () => {
     const after = { change: 'choices', choices: { roadmaps: 'all', itemDates: true, milestones: false, onlyMine: true } };
     expect(describeAuditEvent(event({ action: 'user.calendar_feed', target: { type: 'user', id: 'u1' }, after }), nameOf)).toBe(

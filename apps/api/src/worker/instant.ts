@@ -49,6 +49,11 @@ export async function sendInstant(deps: WorkerDeps): Promise<{ sent: number; fai
       return null;
     }
     const mode = user ? effectivePrefs(user)[r.type] : 'off';
+    // A bounced or reported address gets no notification email, in any mode; the row is skipped, not retried.
+    if (user?.emailBlocked) {
+      await skip(s, r._id, now);
+      return null;
+    }
     if (mode === 'digest') return null;
     if (!user || mode === 'off' || !(await isMember(s, r.roadmapId, r.userId))) {
       await skip(s, r._id, now);

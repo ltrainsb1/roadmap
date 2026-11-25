@@ -102,6 +102,10 @@ export function describeAuditEvent(e: AuditEvent, nameOf: (userId: string) => st
       return `${who} changed their email notification settings.`;
     case 'user.unsubscribed':
       return `${who} turned off their notification emails from an email link.`;
+    case 'user.email_blocked':
+      return 'Notification emails to this address were stopped after a bounce or a spam complaint.';
+    case 'user.email_resumed':
+      return `${who} turned their notification emails back on.`;
     case 'user.calendar_feed':
       return `${who} changed their calendar feed.`;
     default:

@@ -87,6 +87,15 @@ describe('mailers (FR-1)', () => {
     expect(JSON.parse((await readFile(file, 'utf8')).trim())).toEqual({ ...msg(1), headers });
   });
 
+  test('FR-5: SesMailer sends with ConfigurationSetName when one is set, and without it otherwise', async () => {
+    const commands: Array<{ input: { ConfigurationSetName?: string } }> = [];
+    const client: SesLikeClient = { send: (c) => Promise.resolve(void commands.push(c as never)) };
+    await new SesMailer(client, 'a@b.c', 'roadmap-events').send(msg(1));
+    await new SesMailer(client, 'a@b.c').send(msg(1));
+    expect(commands[0]!.input.ConfigurationSetName).toBe('roadmap-events');
+    expect('ConfigurationSetName' in commands[1]!.input).toBe(false);
+  });
+
   test('SesMailer lets a send failure reach the caller', async () => {
     const client: SesLikeClient = { send: async () => Promise.reject(new Error('ses_down')) };
     await expect(new SesMailer(client, 'a@b.c').send(msg(1))).rejects.toThrow('ses_down');

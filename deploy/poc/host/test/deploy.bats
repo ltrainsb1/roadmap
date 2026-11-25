@@ -86,6 +86,8 @@ compose_calls() { grep '^docker compose' "$STUB_LOG" || true; }
   # The backup scripts are installed where the service expects them.
   [ -x "$ROADMAP_ROOT/bin/backup-mongo" ]
   [ -x "$ROADMAP_ROOT/bin/restore-mongo" ]
+  [ -x "$ROADMAP_ROOT/bin/render-env" ]
+  [ -f "$ROADMAP_ROOT/bin/env-map" ]
 }
 
 @test "deploy keeps only the newest 5 release folders" {

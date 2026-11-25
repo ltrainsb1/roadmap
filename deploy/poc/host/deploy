@@ -85,7 +85,8 @@ for unit in roadmap-backup.service roadmap-backup.timer roadmap-patch.service ro
   install -m 0644 "$here/systemd/$unit" "$systemd_dir/$unit"
 done
 install -m 0644 "$here/systemd/docker-wait-for-data.conf" "$systemd_dir/docker.service.d/wait-for-data.conf"
-install -m 0755 "$here/backup-mongo" "$here/restore-mongo" "$root/bin/"
+install -m 0755 "$here/backup-mongo" "$here/restore-mongo" "$here/render-env" "$root/bin/"
+install -m 0644 "$here/env-map" "$root/bin/env-map"
 systemctl daemon-reload
 systemctl enable --now roadmap-backup.timer
 systemctl enable --now roadmap-patch.timer

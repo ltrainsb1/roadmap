@@ -26,6 +26,17 @@ backup_dir=${ROADMAP_BACKUP_DIR:-/srv/mongo-backup}
 project=${COMPOSE_PROJECT_NAME:-roadmap-poc}
 env_file=${COMPOSE_ENV_FILE:-$env_dir/compose.env}
 
+# /run/roadmap is a tmpfs: after a reboot it is empty until the next deploy. Render the settings again for the
+# release that is running.
+if [[ ! -f "$env_dir/compose.env" ]]; then
+  if [[ ! -s "$root/current" ]]; then
+    echo "restore-mongo: $env_dir/compose.env is missing and there is no release in $root/current to render it for" >&2
+    exit 1
+  fi
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/render-env" "$(cat "$root/current")" \
+    || { echo "restore-mongo: could not render $env_dir/compose.env from SSM" >&2; exit 1; }
+fi
+
 bucket=$(sed -n "s/^BACKUP_BUCKET='\\(.*\\)'\$/\\1/p" "$env_dir/compose.env" 2> /dev/null | head -n 1 || true)
 if [[ -z "$bucket" ]]; then
   echo "restore-mongo: BACKUP_BUCKET is not set in $env_dir/compose.env" >&2

@@ -101,3 +101,48 @@ setup() {
   run "$HOST_DIR/restore-mongo" 2026-11-24 --to 'a b;c'
   [ "$status" -ne 0 ]
 }
+
+@test "backup-mongo renders the settings first when compose.env is gone (after a reboot), then succeeds" {
+  rm "$ROADMAP_ENV_DIR/compose.env"
+  run "$HOST_DIR/backup-mongo"
+  [ "$status" -eq 0 ]
+  logged "aws ssm get-parameters-by-path"
+  grep -qx "RELEASE='rel-now'" "$ROADMAP_ENV_DIR/compose.env"
+  [ -f "$STUB_S3_DIR/roadmap-backups-bucket/mongo/$TODAY.archive.gz" ]
+}
+
+@test "backup-mongo with compose.env gone and no current release fails and uploads nothing" {
+  rm "$ROADMAP_ENV_DIR/compose.env" "$ROADMAP_ROOT/current"
+  run "$HOST_DIR/backup-mongo"
+  [ "$status" -ne 0 ]
+  contains "$output" "no release"
+  not_logged 'aws s3 cp'
+  not_logged mongodump
+}
+
+@test "backup-mongo fails clearly when render-env fails" {
+  rm "$ROADMAP_ENV_DIR/compose.env"
+  : > "$STUB_SSM_FILE"
+  run "$HOST_DIR/backup-mongo"
+  [ "$status" -ne 0 ]
+  contains "$output" "could not render"
+  not_logged mongodump
+}
+
+@test "restore-mongo renders the settings first when compose.env is gone, then restores" {
+  rm "$ROADMAP_ENV_DIR/compose.env"
+  mkdir -p "$STUB_S3_DIR/roadmap-backups-bucket/mongo"
+  printf 'ARCHIVE-BYTES' > "$STUB_S3_DIR/roadmap-backups-bucket/mongo/2026-11-24.archive.gz"
+  run "$HOST_DIR/restore-mongo" 2026-11-24
+  [ "$status" -eq 0 ]
+  logged "aws ssm get-parameters-by-path"
+  [ "$(cat "$STUB_RESTORE_STDIN")" = "ARCHIVE-BYTES" ]
+}
+
+@test "restore-mongo with compose.env gone and no current release fails" {
+  rm "$ROADMAP_ENV_DIR/compose.env" "$ROADMAP_ROOT/current"
+  run "$HOST_DIR/restore-mongo" 2026-11-24
+  [ "$status" -ne 0 ]
+  contains "$output" "no release"
+  not_logged 'aws s3 cp'
+}

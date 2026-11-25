@@ -10,3 +10,8 @@ playwright-report/
 test-results/
 deploy/poc/api.env
 deploy/poc/worker.env
+
+# Terraform
+deploy/poc/terraform/**/.terraform/
+deploy/poc/terraform/bootstrap/terraform.tfstate*
+deploy/poc/terraform/.terraform.tfstate*

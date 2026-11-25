@@ -30,31 +30,36 @@ export interface PassCounts {
   ignored: number;
 }
 
+/** Steps that read MongoDB every pass. The heartbeat rule counts only these: a pass in which all of them fail is a stuck worker. */
 const STEPS: Array<[string, (d: WorkerDeps) => Promise<Partial<PassCounts>>]> = [
-  // First, so a bounce stops this pass's sends.
-  ['ses_events', sesEventsStep],
   ['instant', sendInstant],
   ['due_soon', writeDueSoon],
   ['digest', sendDigests],
 ];
 
-async function runSteps(deps: WorkerDeps): Promise<{ counts: PassCounts; stepsFailed: number; stepsRun: number }> {
+function add(counts: PassCounts, got: Partial<PassCounts>): void {
+  for (const k of Object.keys(got) as Array<keyof PassCounts>) counts[k] += got[k] ?? 0;
+}
+
+async function runSteps(deps: WorkerDeps): Promise<{ counts: PassCounts; stepsFailed: number }> {
   const counts: PassCounts = { sent: 0, reminders: 0, digests: 0, failed: 0, blocked: 0, ignored: 0 };
+  // First, so a bounce stops this pass's sends. Left out of the failure count: with an empty queue it never touches
+  // MongoDB, so it succeeds while MongoDB is down and must not make a stuck worker look healthy.
+  try {
+    add(counts, await sesEventsStep(deps));
+  } catch (err) {
+    deps.log.error({ step: 'ses_events', err: errorText(err) }, 'worker step failed');
+  }
   let stepsFailed = 0;
-  let stepsRun = 0;
   for (const [step, run] of STEPS) {
-    // Nothing to do (and nothing to fail) without a queue, as in development.
-    if (step === 'ses_events' && !(deps.sqs && deps.sesEventsQueueUrl)) continue;
-    stepsRun += 1;
     try {
-      const got = await run(deps);
-      for (const k of Object.keys(got) as Array<keyof PassCounts>) counts[k] += got[k] ?? 0;
+      add(counts, await run(deps));
     } catch (err) {
       stepsFailed += 1;
       deps.log.error({ step, err: errorText(err) }, 'worker step failed');
     }
   }
-  return { counts, stepsFailed, stepsRun };
+  return { counts, stepsFailed };
 }
 
 /** One pass: SES events, instant sends, then due-soon reminders, then digests. Never throws: each step logs its own errors and the pass goes on. */
@@ -69,9 +74,9 @@ export async function runPass(deps: WorkerDeps): Promise<PassCounts> {
  */
 export async function passAndBeat(deps: WorkerDeps, beat: () => Promise<void>): Promise<PassCounts> {
   const started = deps.now().getTime();
-  const { counts, stepsFailed, stepsRun } = await runSteps(deps);
+  const { counts, stepsFailed } = await runSteps(deps);
   deps.log.info({ ...counts, ms: deps.now().getTime() - started }, 'pass done');
-  if (stepsFailed === stepsRun) {
+  if (stepsFailed === STEPS.length) {
     deps.log.error({ steps: stepsFailed }, 'every step failed; no heartbeat');
     return counts;
   }

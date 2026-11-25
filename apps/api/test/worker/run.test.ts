@@ -1,7 +1,9 @@
 import { noteExcerpt } from '@roadmap/shared';
+import { ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { MemoryMailer } from '../../src/mail/mailer.ts';
 import { passAndBeat, runPass } from '../../src/worker/run.ts';
+import type { SqsLikeClient } from '../../src/worker/ses-events.ts';
 import { makeTestApp, type TestApp } from '../helpers.ts';
 import { clock, dates, person, row, workerDeps } from './fixtures.ts';
 
@@ -160,5 +162,35 @@ describe('worker: one pass', () => {
     const failing = workerDeps(t, c);
     await passAndBeat(failing, () => Promise.reject(new Error('read-only file system')));
     expect(failing.lines.at(-1)).toMatchObject({ level: 'error', msg: 'heartbeat not written' });
+  });
+
+  test('FR-5: with an SES events queue configured, a pass that cannot reach MongoDB still writes no heartbeat, whether the queue is empty or has messages', async () => {
+    const c = clock('2026-11-13T09:00:00Z');
+    const down = new Proxy(t.db, {
+      get(target, prop) {
+        if (prop === 'collection') {
+          return () => {
+            throw new Error('connection refused');
+          };
+        }
+        const value: unknown = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    for (const waiting of [0, 2]) {
+      const messages = Array.from({ length: waiting }, (_, i) => ({
+        MessageId: `m${i}`,
+        ReceiptHandle: `h${i}`,
+        Body: JSON.stringify({ eventType: 'Bounce', bounce: { bounceType: 'Permanent', bouncedRecipients: [{ emailAddress: `x${i}@example.com` }] } }),
+      }));
+      const sqs: SqsLikeClient = {
+        send: (command) => Promise.resolve(command instanceof ReceiveMessageCommand ? { Messages: messages.splice(0, 10) } : {}),
+      };
+      let beats = 0;
+      const broken = { ...workerDeps(t, c), db: down, sqs, sesEventsQueueUrl: 'https://sqs.example/queue' };
+      await passAndBeat(broken, () => Promise.resolve(void (beats += 1)));
+      expect(beats, `${waiting} messages waiting`).toBe(0);
+      expect(broken.lines.at(-1)).toMatchObject({ level: 'error', msg: 'every step failed; no heartbeat' });
+    }
   });
 });

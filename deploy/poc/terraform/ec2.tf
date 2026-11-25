@@ -106,7 +106,9 @@ resource "aws_instance" "server" {
 
   lifecycle {
     # A newer AL2023 image must never replace the server. Patching is done on the host.
-    ignore_changes = [ami]
+    # User data only shapes a new server: cloud-init runs it once, so a change would stop and start the
+    # live server for nothing. A Compose upgrade on a live server is a host step (see the runbook).
+    ignore_changes = [ami, user_data]
   }
 
   depends_on = [aws_internet_gateway.main]

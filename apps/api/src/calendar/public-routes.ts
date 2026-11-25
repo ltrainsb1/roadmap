@@ -16,7 +16,7 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 export const LAST_FETCHED_EVERY_MS = 10 * 60_000;
 
 const CALENDAR_NAME = 'Roadmap dates';
-const CUT_NAME = `Roadmap dates (first ${CALENDAR_LIMITS.events.toLocaleString('en-US')} dates)`;
+const CUT_NAME = `Roadmap dates (nearest ${CALENDAR_LIMITS.events.toLocaleString('en-US')} dates)`;
 
 const params = z.object({ token: z.string().max(100) });
 
@@ -24,6 +24,25 @@ type ProjectFilter = Parameters<ScopedCollection<ProjectDoc>['find']>[0];
 
 const byEndThenUid = (a: IcsEvent, b: IcsEvent) =>
   a.end < b.end ? -1 : a.end > b.end ? 1 : a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0;
+
+/**
+ * A feed over the limit keeps the dates people subscribe for: those ending on or after `from` first, soonest first,
+ * then the most recent past ones while there is room. `events` is sorted by end date; so is the result.
+ */
+export function nearestEvents(events: IcsEvent[], from: string, limit: number = CALENDAR_LIMITS.events): IcsEvent[] {
+  if (events.length <= limit) return events;
+  const first = events.findIndex((e) => e.end >= from);
+  const split = first === -1 ? events.length : first;
+  const upcoming = events.slice(split, split + limit);
+  const room = limit - upcoming.length;
+  return room > 0 ? [...events.slice(split - room, split), ...upcoming] : upcoming;
+}
+
+/**
+ * The day before today in UTC. A date only counts as past once it has ended everywhere, whatever the
+ * calendar app's time zone.
+ */
+const pastBefore = (now: Date) => new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10);
 
 /** Every unknown, replaced or malformed token gets the same answer: 404 with nothing in it. */
 const nothing = (reply: FastifyReply) => reply.status(404).send();
@@ -43,7 +62,7 @@ async function roadmapsOf(s: ScopedDb, feed: CalendarFeedDoc): Promise<string[]>
 }
 
 /** The calendar a feed shows, built from what is stored now (FR-4.1, FR-4.2). */
-async function buildCalendar(s: ScopedDb, feed: CalendarFeedDoc, origin: string): Promise<string> {
+async function buildCalendar(s: ScopedDb, feed: CalendarFeedDoc, origin: string, now: Date): Promise<string> {
   const { itemDates, milestones, onlyMine } = feed.choices;
   const roadmapIds = await roadmapsOf(s, feed);
   if (roadmapIds.length === 0) return icsCalendar({ name: CALENDAR_NAME, events: [] });
@@ -61,8 +80,8 @@ async function buildCalendar(s: ScopedDb, feed: CalendarFeedDoc, origin: string)
     $or: hasSomething,
   });
   const events = items.flatMap((item) => eventsFor(item, { origin, itemDates, milestones })).sort(byEndThenUid);
-  const cut = events.length > CALENDAR_LIMITS.events;
-  return icsCalendar({ name: cut ? CUT_NAME : CALENDAR_NAME, events: cut ? events.slice(0, CALENDAR_LIMITS.events) : events });
+  const kept = nearestEvents(events, pastBefore(now));
+  return icsCalendar({ name: kept.length < events.length ? CUT_NAME : CALENDAR_NAME, events: kept });
 }
 
 /** True when If-None-Match names this ETag (or is `*`); weak and strong forms compare alike for a GET. */
@@ -103,7 +122,7 @@ export function registerCalendarPublicRoutes(app: FastifyInstance, deps: { db: D
       // The tenant comes from the feed, never from a session: a signed-in cookie changes nothing.
       const s = scoped(deps.db, feed.tenantId);
       const now = deps.now();
-      const body = await buildCalendar(s, feed, deps.origin);
+      const body = await buildCalendar(s, feed, deps.origin, now);
       const etag = `"${createHash('sha256').update(body).digest('base64url')}"`;
 
       if (feed.lastFetchedAt === null || now.getTime() - feed.lastFetchedAt.getTime() > LAST_FETCHED_EVERY_MS) {

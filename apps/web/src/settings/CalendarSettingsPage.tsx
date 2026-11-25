@@ -25,7 +25,7 @@ const INSTRUCTIONS = [
   'Outlook: Add calendar, Subscribe from web, then paste the link.',
 ];
 const DELAY_NOTE =
-  'Calendar apps check for changes every few hours, and Google can take longer. To add one item right away, use Add to calendar on the item.';
+  "Calendar apps check for changes every few hours, and Google can take longer. To add one item right away, use Add to calendar on the item. It will then show twice, and the added copy won't update when the item changes.";
 const NO_ROADMAP = 'Choose at least one roadmap.';
 const NOTHING_TO_SHOW = 'Choose item dates, milestones or both.';
 

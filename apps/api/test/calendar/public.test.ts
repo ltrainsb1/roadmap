@@ -226,7 +226,7 @@ describe('the calendar feed', () => {
     expect((await w.fetchFeed(url, { 'if-none-match': '"other"' })).statusCode).toBe(200);
   });
 
-  test('FR-4.1: 2,000 items with 5,000 milestones stop at 5,000 events, the calendar name says so, and a re-fetch with the ETag is 304', async () => {
+  test('FR-4.1: 2,000 items with 5,000 milestones stop at 5,000 events, past dates go first, the calendar name says so, and a re-fetch with the ETag is 304', async () => {
     const w = await calendarWorld(t);
     const url = await w.create();
     const day = (n: number) => new Date(Date.UTC(2026, 0, 1) + n * 86_400_000).toISOString().slice(0, 10);
@@ -258,16 +258,21 @@ describe('the calendar feed', () => {
     expect(docs.reduce((n, d) => n + d.milestones.length, 0)).toBe(5000);
     await scoped(t.db, w.tenantId).collection('projects').insertMany(docs);
 
+    // On 1 Jul 2026 a date counts as past once it ended before 30 Jun (a day of slack for time zones).
+    clock = new Date('2026-07-01T12:00:00Z');
     const res = await w.fetchFeed(url);
     expect(res.statusCode).toBe(200);
     const feed = parseFeed(res.body);
-    expect(feed.name).toBe('Roadmap dates (first 5,000 dates)');
+    expect(feed.name).toBe('Roadmap dates (nearest 5,000 dates)');
     expect(feed.events).toHaveLength(CALENDAR_LIMITS.events);
-    const expected = docs
+    const all = docs
       .flatMap((d) => eventsFor(d, { origin: t.config.appOrigin, itemDates: true, milestones: true }))
-      .sort((a, b) => (a.end < b.end ? -1 : a.end > b.end ? 1 : a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0))
-      .slice(0, CALENDAR_LIMITS.events)
-      .map((e) => e.uid);
+      .sort((a, b) => (a.end < b.end ? -1 : a.end > b.end ? 1 : a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
+    const upcoming = all.filter((e) => e.end >= '2026-06-30');
+    const past = all.filter((e) => e.end < '2026-06-30');
+    expect(upcoming.length).toBeLessThan(CALENDAR_LIMITS.events);
+    // Every upcoming date is kept, and the rest of the room goes to the most recent past dates.
+    const expected = [...past.slice(past.length - (CALENDAR_LIMITS.events - upcoming.length)), ...upcoming].map((e) => e.uid);
     expect(feed.events.map((e) => e.uid)).toEqual(expected);
 
     // A calendar app checking again with the ETag gets 304 and nothing to download.
@@ -276,6 +281,7 @@ describe('the calendar feed', () => {
     expect(again.statusCode).toBe(304);
     expect(again.body).toBe('');
     expect(again.headers.etag).toBe(etag);
+    clock = new Date();
   });
 
   test('FR-4.1: lastFetchedAt is written on the first fetch and at most every 10 minutes', async () => {

@@ -137,7 +137,7 @@ test('FR-4.1: with no feed the page offers "Create calendar link"; creating show
   ]);
   expect(
     screen.getByText(
-      'Calendar apps check for changes every few hours, and Google can take longer. To add one item right away, use Add to calendar on the item.',
+      "Calendar apps check for changes every few hours, and Google can take longer. To add one item right away, use Add to calendar on the item. It will then show twice, and the added copy won't update when the item changes.",
     ),
   ).toBeTruthy();
   expect(screen.queryByText(/^Your calendar link is active/)).toBeNull();

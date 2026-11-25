@@ -20,6 +20,8 @@ Each of these was a choice where the plan or the PRD was silent, or where the pl
 | C10 | Cancelled items are left out of "Add to calendar", and the download route refuses them, as the feed does. Archived items are left out too. | The feed and the one-off download should agree. | A person can't add a cancelled item's dates on purpose. |
 | C11 | The List's Actions menu is built in `ProjectTree.tsx`, so "Add to calendar" reaches it through a prop. The plan named `menuFor`. | The plan was wrong about the List. | None. |
 | C12 | The downloaded file's temporary address is released one second after the click. | Releasing it at once can lose the download in Safari and older Firefox. | None. |
+| C13 | A feed over 5,000 dates keeps upcoming dates first, soonest first, then the most recent past ones. A date counts as past once it ended before yesterday in UTC. The calendar's name reads "Roadmap dates (nearest 5,000 dates)". | Your decision after the run: upcoming dates are the ones people subscribe for. The day of slack keeps a date that is still today somewhere from dropping out early. | When cut, the feed changes each day as dates pass, so calendar apps download it again daily. |
+| C14 | The delay note now warns that using "Add to calendar" alongside the feed shows the item twice, and that the added copy won't update. | Your decision after the run. | One more sentence on the page. |
 
 Other choices implementers made where the plan gave no value:
 
@@ -41,8 +43,6 @@ Other choices implementers made where the plan gave no value:
 
 ## Needs your decision
 
-- **Which dates a feed over 5,000 keeps.** The plan keeps the earliest end dates first. So a very large feed keeps old history and drops upcoming dates, which are the ones people subscribe for. Another way: leave out past dates first.
-- **"Add to calendar" alongside a subscription makes a duplicate.** The page's delay note suggests "Add to calendar" for an item needed right away. Calendar apps don't merge an imported event with the same event in a subscribed calendar, even with the same id. Someone who does both sees the item twice, and the imported copy never updates. Options: keep the note, or change it to warn that the item will then show twice.
 - Carried from earlier plans: an account-level activity log (calendar feed changes are recorded but listed nowhere, as with email settings), and changing one's own time zone.
 
 ## Found and left for later

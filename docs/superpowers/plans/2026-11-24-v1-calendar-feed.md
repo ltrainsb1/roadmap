@@ -40,7 +40,7 @@ Every constraint in the six earlier plans' Global Constraints sections still bin
   - *Stable ids* (FR-4.3). An item's event UID is `item-{itemId}@{host}`; a milestone's is `milestone-{milestoneId}@{host}`, where `{host}` is `APP_ORIGIN`'s host. `SEQUENCE` is the item's `version`; `DTSTAMP` and `LAST-MODIFIED` are the item's `updatedAt`.
   - *Refresh hints.* The feed sends `REFRESH-INTERVAL;VALUE=DURATION:PT1H` and `X-PUBLISHED-TTL:PT1H`; apps may still refresh less often (Google can take hours), which the screen says.
   - *Caching.* `Cache-Control: private, max-age=300`, an `ETag` that is a hash of the body, and 304 for a matching `If-None-Match`. `Content-Type: text/calendar; charset=utf-8`; `X-Robots-Tag: noindex, nofollow`.
-  - *Limits.* A feed holds at most 5,000 events (items and milestones together, earliest end date first); past that it stops and says so in the calendar's name ("… (first 5,000 dates)"). Feeds are rate limited at 60 fetches per minute per token.
+  - *Limits.* A feed holds at most 5,000 events (items and milestones together). Past that it keeps upcoming dates first, soonest first, then the most recent past ones, and says so in the calendar's name ("… (nearest 5,000 dates)"). *Changed after the run; see the follow-ups, C13.* Feeds are rate limited at 60 fetches per minute per token.
   - *One-off download* (FR-4.5). "Add to calendar" on an item downloads `{item title}.ics` with the item's event and its milestones' events, using the same UIDs, so subscribing later doesn't duplicate them. It needs the person to be able to see the item. It is offered only for items that have a date or a milestone.
   - *Roadmap deleted, member removed.* A deleted roadmap's id is removed from every feed's chosen list. A removed member's feed simply stops showing that roadmap (membership is checked on each fetch). A chosen list that becomes empty shows an empty calendar; the screen says so.
 
@@ -111,7 +111,7 @@ Copy (exact):
 | Link warning | "Anyone with this link can see the dates it shows. Copy it now: for your safety it can't be shown again." |
 | Instructions heading | "Add it to your calendar" |
 | Instructions | "Google Calendar: Other calendars, +, From URL, then paste the link." · "Apple Calendar: File, New Calendar Subscription, then paste the link." · "Outlook: Add calendar, Subscribe from web, then paste the link." |
-| Delay note | "Calendar apps check for changes every few hours, and Google can take longer. To add one item right away, use Add to calendar on the item." |
+| Delay note | "Calendar apps check for changes every few hours, and Google can take longer. To add one item right away, use Add to calendar on the item. It will then show twice, and the added copy won't update when the item changes." |
 | Link active (later visits) | "Your calendar link is active. It was made on {date}." then "A calendar app last checked it on {date and time}." or "No calendar app has checked it yet." then "For your safety the link can't be shown again. If you've lost it, get a new link." |
 | Form legends and options | "Roadmaps": "All my roadmaps", "Only these" · "Show": "Item dates", "Milestones" · "Only items assigned to me" |
 | Hint under "Show" | "Item dates show as one entry from the start date to the end date." |
@@ -124,7 +124,7 @@ Copy (exact):
 | Action failed | "Something went wrong. Try again." |
 | Item menu and panel | "Add to calendar" |
 | Download failed | "Couldn't download the calendar file. Try again." |
-| Calendar name in the feed | "Roadmap dates" (or "Roadmap dates (first 5,000 dates)") |
+| Calendar name in the feed | "Roadmap dates" (or "Roadmap dates (nearest 5,000 dates)") |
 | Milestone event title | "{milestone} · {item title}" |
 | Event description | "Open in Roadmap: {url}" |
 | Audit log | "{who} changed their calendar feed." (account-level, as `user.notification_prefs`) |

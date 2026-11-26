@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Fake docker for the bats tests. Logs each call with the RELEASE it sees.
+echo "docker RELEASE=${RELEASE:-} $*" >> "$STUB_LOG"
+if [[ "$1" == "login" ]]; then
+  cat > /dev/null
+  [[ -z "${STUB_LOGIN_FAIL:-}" ]] || { echo "login failed" >&2; exit 1; }
+  exit 0
+fi
+[[ "$1" == "compose" ]] || { echo "unexpected docker call: $*" >&2; exit 2; }
+args=" $* "
+if [[ "$*" == *mongodump* ]]; then
+  echo -n "DUMP-OF-DATABASE"
+  [[ -z "${STUB_DUMP_FAIL:-}" ]] || { echo -n "-PARTIAL"; echo "dump failed" >&2; exit 1; }
+  exit 0
+fi
+if [[ "$*" == *mongorestore* ]]; then
+  cat > "$STUB_RESTORE_STDIN"
+  exit 0
+fi
+if [[ "$args" == *" up "* ]]; then
+  n=$(cat "$STUB_STATE/up-count" 2>/dev/null || echo 0)
+  echo $((n + 1)) > "$STUB_STATE/up-count"
+  if (( n < ${STUB_UP_FAILS:-0} )); then echo "unhealthy" >&2; exit 1; fi
+  exit 0
+fi
+if [[ "$args" == *" pull "* ]]; then
+  [[ -z "${STUB_PULL_FAIL:-}" ]] || { echo "pull failed" >&2; exit 1; }
+fi
+exit 0

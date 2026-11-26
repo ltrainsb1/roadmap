@@ -1,5 +1,5 @@
 import type { Db, Filter } from 'mongodb';
-import type { NotificationDoc, ProjectDoc } from './types.ts';
+import type { NotificationDoc, ProjectDoc, UserDoc } from './types.ts';
 
 // The worker's only reads across tenants: each finds which tenants (and rows or people in them) have work, and
 // everything done about that work goes through `scoped()` for that tenant. Collections are looked up per call, so
@@ -47,6 +47,15 @@ export function workerDb(db: Db) {
         ])
         .toArray();
       return groups.map((g) => g._id);
+    },
+
+    /** Every user with this address, in any tenant; the match ignores case. */
+    async usersWithEmail(email: string): Promise<Array<{ tenantId: string; userId: string }>> {
+      const users = await db
+        .collection<UserDoc>('users')
+        .find({ email }, { collation: { locale: 'en', strength: 2 }, projection: { tenantId: 1 } })
+        .toArray();
+      return users.map((u) => ({ tenantId: u.tenantId, userId: u._id }));
     },
 
     /** The tenants with open, assigned items that have a date from `from` to `to`. */

@@ -4,7 +4,8 @@ import { MemoryMailer } from '../../src/mail/mailer.ts';
 import { notificationRow } from '../../src/notifications/outbox.ts';
 import { runPass } from '../../src/worker/run.ts';
 import { makeTestApp, type TestApp } from '../helpers.ts';
-import { FOOTER, FlakyMailer, clock, dates, itemUrl, person, row, rowsFor, setPref, workerDeps } from './fixtures.ts';
+import { verifyUnsubscribe } from '../../src/mail/unsubscribe.ts';
+import { FOOTER, FlakyMailer, ORIGIN, clock, dates, itemUrl, person, row, rowsFor, setPref, tokenFor, unsubscribeLine, workerDeps } from './fixtures.ts';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -50,9 +51,18 @@ describe('worker: instant emails', () => {
         `Open the item: ${itemUrl(w.roadmap._id, w.item._id)}`,
         '',
         FOOTER,
+        unsubscribeLine(t, w.sam),
       ].join('\n'),
     );
     expect(m!.html).toContain(`href="${itemUrl(w.roadmap._id, w.item._id)}"`);
+    const unsubscribe = `${ORIGIN}/unsubscribe?t=${tokenFor(t, w.sam)}`;
+    expect(m!.html).toContain(`Turn off these emails: <a href="${unsubscribe}">${unsubscribe}</a>`);
+    const token = tokenFor(t, w.sam);
+    expect(verifyUnsubscribe(t.config.unsubscribeKey, token)).toEqual({ tenantId: w.tenantId, userId: w.sam._id });
+    expect(m!.headers).toEqual({
+      'List-Unsubscribe': `<${ORIGIN}/api/email/unsubscribe?t=${token}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    });
     expect(m!.html).toContain('You get this email because of your notification settings. Change them:');
     expect(m!.html).not.toContain(w.priya.email);
     const [sent] = await rowsFor(t, w.sam);

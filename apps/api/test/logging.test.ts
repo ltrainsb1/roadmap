@@ -58,3 +58,28 @@ test('FR-3.2: the request log Fastify writes carries no full snapshot link id', 
   expect(logged).toContain('/api/snapshots/AbCdEf…/unlock');
   expect(logged).not.toContain('secret-part');
 });
+
+test('FR-5: redactUrl replaces an unsubscribe token in the query string and keeps other parameters', () => {
+  expect(redactUrl('/api/email/unsubscribe?t=tenant.user.sig-_')).toBe('/api/email/unsubscribe?t=[redacted]');
+  expect(redactUrl('/api/email/unsubscribe?x=1&t=tenant.user.sig&y=2')).toBe('/api/email/unsubscribe?x=1&t=[redacted]&y=2');
+  expect(redactUrl('/API/Email/Unsubscribe?t=abc')).toBe('/API/Email/Unsubscribe?t=[redacted]');
+  expect(redactUrl('/api/email/other?t=abc')).toBe('/api/email/other?t=abc');
+});
+
+test('FR-5: the request log shows /api/email/unsubscribe?t=[redacted]', async () => {
+  const lines: string[] = [];
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      lines.push(chunk.toString());
+      done();
+    },
+  });
+  const app = Fastify({ logger: { stream, serializers: { req: serializeRequest } } });
+  app.post('/api/email/unsubscribe', () => ({ ok: true }));
+  await app.inject({ method: 'POST', url: '/api/email/unsubscribe?t=tenant.user.s3cret-sig' });
+  await app.close();
+
+  const logged = lines.join('');
+  expect(logged).toContain('/api/email/unsubscribe?t=[redacted]');
+  expect(logged).not.toContain('s3cret-sig');
+});

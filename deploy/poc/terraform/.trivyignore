@@ -1,0 +1,4 @@
+# Findings this plan accepts. Each needs a reason, and each must fire at the severities CI scans (CRITICAL, HIGH).
+
+# Open egress: the server reaches Let's Encrypt, ECR, SES, S3, SSM, HIBP and ClamAV's mirrors.
+AVD-AWS-0104

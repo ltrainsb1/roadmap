@@ -29,6 +29,7 @@ import { registerCalendarPublicRoutes } from './calendar/public-routes.ts';
 import { registerMemberRoutes } from './members/routes.ts';
 import { registerNoteRoutes } from './notes/routes.ts';
 import { registerNotificationRoutes } from './notifications/routes.ts';
+import { registerUnsubscribeRoutes } from './notifications/unsubscribe-routes.ts';
 import { registerAssignRoutes } from './projects/assign-routes.ts';
 import { registerPriorityRoutes } from './projects/priority-routes.ts';
 import { registerLifecycleRoutes } from './projects/lifecycle-routes.ts';
@@ -40,7 +41,7 @@ import { registerSnapshotRoutes } from './snapshots/routes.ts';
 import { registerLocalFileRoutes } from './files/local-routes.ts';
 import { createObjectStore, LocalObjectStore, MemoryObjectStore, type ObjectStore } from './files/object-store.ts';
 import { createScanner, type Scanner } from './files/scanner.ts';
-import { createMailer, type Mailer } from './mail/mailer.ts';
+import { createMailer, createSesClient, type Mailer, type SesLikeClient } from './mail/mailer.ts';
 import { authPlugin } from './policy/hook.ts';
 import { addressMatcher } from './trusted-proxy.ts';
 
@@ -55,6 +56,8 @@ export interface AppDeps {
   webauthn?: PasskeyVerifiers;
   /** Outgoing email; defaults to the mailer named in the config. */
   mailer?: Mailer;
+  /** Replaces the SES client that takes an address off the suppression list (used only when MAILER=ses). */
+  sesClient?: SesLikeClient;
   /** Most items one roadmap may hold; defaults to the shared limit. Tests lower it. */
   maxProjectItems?: number;
   /** Most notes one item may hold; defaults to the shared limit. Tests lower it. */
@@ -175,7 +178,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   registerRoadmapRoutes(app, { now });
-  registerNotificationRoutes(app, { now });
+  registerNotificationRoutes(app, {
+    now,
+    ...(deps.config.mailer === 'ses' && { ses: deps.sesClient ?? createSesClient(deps.config) }),
+  });
+  registerUnsubscribeRoutes(app, { db: deps.db, key: deps.config.unsubscribeKey, now });
   registerCalendarFeedRoutes(app, { now, origin: deps.config.appOrigin });
   registerCalendarItemRoutes(app, { origin: deps.config.appOrigin });
   registerCalendarPublicRoutes(app, { db: deps.db, now, origin: deps.config.appOrigin });

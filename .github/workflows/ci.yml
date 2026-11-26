@@ -98,6 +98,86 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
+  host-scripts:
+    runs-on: ubuntu-latest # shellcheck is installed here
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install bats-core
+        # Pinned to a tag, and the commit it must point at, so a moved tag fails the job.
+        run: |
+          git clone --quiet --depth 1 --branch v1.13.0 https://github.com/bats-core/bats-core.git "$RUNNER_TEMP/bats-core"
+          test "$(git -C "$RUNNER_TEMP/bats-core" rev-parse HEAD)" = 3bca150ec86275d6d9d5a4fd7d48ab8b6c6f3d87
+          sudo "$RUNNER_TEMP/bats-core/install.sh" /usr/local
+      - run: bats deploy/poc/host/test
+      - run: shellcheck -x deploy/poc/host/render-env deploy/poc/host/deploy deploy/poc/host/backup-mongo deploy/poc/host/restore-mongo deploy/poc/host/aws-region scripts/post-deploy-check.sh
+      - name: Install actionlint
+        # A pinned release, checked against its published SHA-256. actionlint runs shellcheck on the run steps too.
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+      - run: '"$RUNNER_TEMP/actionlint" -color .github/workflows/ci.yml .github/workflows/deploy-poc.yml'
+      - name: The AWS Compose override still resolves
+        # Placeholder values only: this checks the two files merge and every variable is accounted for.
+        env:
+          REGISTRY: 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+          RELEASE: placeholder
+          DOMAIN: roadmap.example.com
+          S3_BUCKET: placeholder-bucket
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: placeholder
+          MONGO_APP_PASSWORD: placeholder
+        run: |
+          : > "$RUNNER_TEMP/api.env"
+          : > "$RUNNER_TEMP/worker.env"
+          API_ENV_FILE="$RUNNER_TEMP/api.env" WORKER_ENV_FILE="$RUNNER_TEMP/worker.env" \
+            docker compose -f deploy/poc/docker-compose.yml -f deploy/poc/docker-compose.aws.yml config --quiet
+
+  terraform:
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive
+        working-directory: deploy/poc/terraform
+      # No backend and no AWS credentials: init only downloads the providers, and the tests mock AWS.
+      - name: Validate the main root
+        working-directory: deploy/poc/terraform
+        run: |
+          terraform init -backend=false
+          terraform validate
+      - name: Validate the state bootstrap
+        working-directory: deploy/poc/terraform/bootstrap
+        run: |
+          terraform init -backend=false
+          terraform validate
+      - name: terraform test
+        working-directory: deploy/poc/terraform
+        run: terraform test
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: v0.65.0
+      - name: tflint
+        working-directory: deploy/poc/terraform
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # lets --init download the AWS ruleset without hitting the anonymous rate limit
+        run: |
+          tflint --init
+          tflint --recursive --minimum-failure-severity=notice
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          scan-type: config
+          scan-ref: deploy/poc/terraform
+          trivyignores: deploy/poc/terraform/.trivyignore
+          severity: CRITICAL,HIGH
+          exit-code: 1
+
   deploy-smoke:
     runs-on: ubuntu-latest # Docker is available here; ports 80 and 443 are free
     env:
@@ -105,30 +185,48 @@ jobs:
       COMPOSE: docker compose -f deploy/poc/docker-compose.yml -f deploy/poc/docker-compose.smoke.yml
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Write a throwaway .env
+      - name: Write the throwaway settings files
+        # Three files, as on a server: .env (Compose's own variables), api.env and worker.env.
         run: |
           mongo_password=$(openssl rand -hex 16)
+          app_password=$(openssl rand -hex 16)
+          app_uri="mongodb://roadmap_app:${app_password}@mongo:27017/roadmap?replicaSet=rs0&authSource=roadmap"
+          unsubscribe_key=$(openssl rand -base64 32)
           {
             echo "DOMAIN=localhost"
-            echo "APP_ORIGIN=https://localhost"
+            echo "S3_BUCKET=roadmap-files"
             echo "MONGO_INITDB_ROOT_USERNAME=root"
             echo "MONGO_INITDB_ROOT_PASSWORD=${mongo_password}"
-            echo "MONGO_URI=mongodb://root:${mongo_password}@mongo:27017/?replicaSet=rs0&authSource=admin"
+            echo "MONGO_APP_PASSWORD=${app_password}"
+            echo "MINIO_ROOT_USER=smoke-$(openssl rand -hex 8)"
+            echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)"
+            echo "MINIO_KMS_SECRET_KEY=smoke-key:$(openssl rand -base64 32)"
+          } > deploy/poc/.env
+          {
+            echo "APP_ORIGIN=https://localhost"
+            echo "MONGO_URI=${app_uri}"
             echo "MONGO_DB=roadmap"
             echo "NODE_ENV=production"
             echo "PORT=3000"
             echo "TOTP_ENC_KEY=$(openssl rand -base64 32)"
+            echo "UNSUBSCRIBE_KEY=${unsubscribe_key}"
             echo "MAILER=file"
             echo "MAIL_OUTBOX_FILE=/tmp/outbox.jsonl"
             echo "MAIL_FROM=no-reply@localhost"
             echo "HIBP_ENABLED=false"
             echo "AUTH_RATE_LIMIT_PER_MIN=10"
-            echo "S3_BUCKET=roadmap-files"
-            echo "MINIO_ROOT_USER=smoke-$(openssl rand -hex 8)"
-            echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)"
-            echo "MINIO_KMS_SECRET_KEY=smoke-key:$(openssl rand -base64 32)"
-          } > deploy/poc/.env
-      - name: Build the three images
+          } > deploy/poc/api.env
+          {
+            echo "NODE_ENV=production"
+            echo "MONGO_URI=${app_uri}"
+            echo "MONGO_DB=roadmap"
+            echo "APP_ORIGIN=https://localhost"
+            echo "UNSUBSCRIBE_KEY=${unsubscribe_key}"
+            echo "MAILER=file"
+            echo "MAIL_OUTBOX_FILE=/tmp/outbox.jsonl"
+            echo "MAIL_FROM=no-reply@localhost"
+          } > deploy/poc/worker.env
+      - name: Build the four images
         run: $COMPOSE build
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -148,17 +246,39 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: true
-      # ClamAV runs in production but is built upstream, not by us: its findings are listed here, and a fix means
-      # an upstream rebuild or a newer tag (see the follow-ups document). MinIO is not scanned: it runs only in this job, never in a deployment.
-      - name: List ClamAV image findings (upstream image, not a gate)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: clamav/clamav:1.4.7
+          image-ref: roadmap-clamav:poc
           severity: CRITICAL,HIGH
-          exit-code: 0
+          exit-code: 1
+          ignore-unfixed: true
+      # MinIO is not scanned: it runs only in this job, never in a deployment.
       - name: Start the stack
         # ClamAV loads its signatures before it is healthy, and the API waits for it.
         run: $COMPOSE up -d --wait --wait-timeout 420
+      - name: The app's MongoDB user cannot list every database
+        # The API connects as roadmap_app: readWrite on its own database only. A plain listDatabases then shows that
+        # one database; asking for all of them needs a privilege the user lacks, so MongoDB must refuse.
+        run: |
+          $COMPOSE exec -T api node -e "
+            const { MongoClient } = require('mongodb');
+            const client = new MongoClient(process.env.MONGO_URI);
+            (async () => {
+              await client.connect();
+              const admin = client.db().admin();
+              const own = (await admin.command({ listDatabases: 1, nameOnly: true })).databases.map((d) => d.name);
+              console.log('visible databases:', own.join(','));
+              if (own.join(',') !== 'roadmap') { console.log('expected only roadmap'); process.exit(1); }
+              try {
+                await admin.command({ listDatabases: 1, authorizedDatabases: false });
+                console.log('listing every database was allowed');
+                process.exit(1);
+              } catch (e) {
+                console.log('refused:', e.codeName);
+                process.exit(e.codeName === 'Unauthorized' ? 0 : 2);
+              }
+            })().catch((e) => { console.log(e.message); process.exit(3); });
+          "
       - name: Bootstrap prints a setup link
         id: bootstrap
         run: |
@@ -177,6 +297,41 @@ jobs:
           # assignment email the worker sends.
           SMOKE_COMPOSE: ${{ env.COMPOSE }}
         run: scripts/smoke.sh https://localhost
+      - name: Back up MongoDB, restore the backup into a second database, and compare
+        # The host scripts against the real stack: backup-mongo dumps from the running mongo container and uploads to
+        # the smoke MinIO; restore-mongo puts that backup into another database; users and projects must match.
+        env:
+          ROADMAP_ENV_DIR: ${{ runner.temp }}/roadmap-env
+          ROADMAP_BACKUP_DIR: ${{ runner.temp }}/roadmap-backup
+          COMPOSE_PROJECT_NAME: roadmap-poc
+          COMPOSE_FILES: deploy/poc/docker-compose.yml deploy/poc/docker-compose.smoke.yml
+          COMPOSE_ENV_FILE: deploy/poc/.env
+          AWS_ENDPOINT_URL: http://127.0.0.1:9000
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          set -euo pipefail
+          AWS_ACCESS_KEY_ID=$(sed -n 's/^MINIO_ROOT_USER=//p' deploy/poc/.env)
+          AWS_SECRET_ACCESS_KEY=$(sed -n 's/^MINIO_ROOT_PASSWORD=//p' deploy/poc/.env)
+          export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+          aws s3 mb s3://roadmap-backups-smoke
+          mkdir -p "$ROADMAP_ENV_DIR"
+          echo "BACKUP_BUCKET='roadmap-backups-smoke'" > "$ROADMAP_ENV_DIR/compose.env"
+          count() {
+            # shellcheck disable=SC2016 # the single quotes are on purpose: $1 and the password are read inside the container
+            $COMPOSE exec -T mongo bash -c 'mongosh --quiet -u root -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "const d = db.getSiblingDB(\"$1\"); print(d.users.countDocuments({}), d.projects.countDocuments({}))"' _ "$1"
+          }
+          deploy/poc/host/backup-mongo
+          date=$(date -u +%F)
+          aws s3 ls "s3://roadmap-backups-smoke/mongo/$date.archive.gz"
+          deploy/poc/host/restore-mongo "$date" --to roadmap_restore_check
+          live=$(count roadmap)
+          restored=$(count roadmap_restore_check)
+          echo "live (users projects): $live; restored: $restored"
+          test -n "$live"
+          test "$live" = "$restored"
+          test "${live%% *}" -gt 0
       - name: Show the stack logs on failure
         if: failure()
         run: $COMPOSE logs --no-color --tail 100

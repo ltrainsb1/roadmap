@@ -156,6 +156,9 @@ export const AUDIT_ACTIONS = [
   'snapshot.locked',
   'user.notification_prefs',
   'user.calendar_feed',
+  'user.unsubscribed',
+  'user.email_blocked',
+  'user.email_resumed',
 ] as const;
 export type AuditActionName = (typeof AUDIT_ACTIONS)[number];
 

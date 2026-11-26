@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import type { PrefsResponse } from '@roadmap/shared';
 import { apiAs, expectNoA11yViolations, readMails, seedProject, useCspGuard, waitForTwoWorkerPasses } from './helpers.ts';
 import { expect, joinByApi, test, type ApiCall } from './fixtures.ts';
 
@@ -106,4 +107,20 @@ test('FR-5.2: the settings page passes axe; at 375 px each row stacks with no si
   // Once saved, leaving does not ask.
   await page.getByRole('navigation', { name: 'Account' }).getByRole('link', { name: 'Security' }).click();
   await expect(page.getByRole('heading', { name: 'Security', level: 1 })).toBeVisible();
+});
+
+test('FR-5: the page passes axe with the bounced and the spam line showing', async ({ browser, call, roadmap }) => {
+  const member = await joinByApi(browser, call, roadmap.id, 'contributor', 'blocked');
+  const m = member.page;
+  for (const reason of ['bounced', 'complained'] as const) {
+    // The block is set by the worker from an SES event; here the page is given the answer such a user would get.
+    await m.route('**/api/me/notification-prefs', async (route) => {
+      const real = await route.fetch();
+      await route.fulfill({ response: real, json: { ...(await real.json() as PrefsResponse), emailBlocked: { reason, email: member.user.email } } });
+    });
+    await openSettings(m);
+    await expect(m.getByRole('button', { name: 'Send emails again' })).toBeVisible();
+    await expectNoA11yViolations(m);
+    await m.unroute('**/api/me/notification-prefs');
+  }
 });

@@ -2,6 +2,8 @@ export interface EmailContent {
   subject: string;
   text: string;
   html: string;
+  /** Message headers (List-Unsubscribe and its pair, for notification emails). */
+  headers?: Record<string, string>;
 }
 
 const HTML_ESCAPES: Record<string, string> = {

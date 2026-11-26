@@ -1,0 +1,7 @@
+[Unit]
+Description=Install security updates and reboot when needed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/dnf -y upgrade --security --releasever=latest
+ExecStart=/bin/sh -c 'dnf needs-restarting -r || systemctl reboot'

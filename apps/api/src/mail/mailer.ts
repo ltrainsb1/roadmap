@@ -1,5 +1,5 @@
 import { appendFile } from 'node:fs/promises';
-import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
+import { DeleteSuppressedDestinationCommand, SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import type { Config } from '../config.ts';
 
 export interface MailMessage {
@@ -7,6 +7,8 @@ export interface MailMessage {
   subject: string;
   text: string;
   html: string;
+  /** Extra message headers, e.g. List-Unsubscribe. */
+  headers?: Record<string, string>;
 }
 
 export interface Mailer {
@@ -35,25 +37,30 @@ export class FileMailer implements Mailer {
 
 /** The part of the SESv2 client we use, so tests can stand in for it. */
 export interface SesLikeClient {
-  send(command: SendEmailCommand): Promise<unknown>;
+  send(command: SendEmailCommand | DeleteSuppressedDestinationCommand): Promise<unknown>;
 }
 
 export class SesMailer implements Mailer {
   readonly #client: SesLikeClient;
   readonly #from: string;
-  constructor(client: SesLikeClient, from: string) {
+  readonly #configurationSet: string | undefined;
+  /** With a configuration set, SES reports bounces and complaints for what is sent (to SNS, then the worker's queue). */
+  constructor(client: SesLikeClient, from: string, configurationSet?: string) {
     this.#client = client;
     this.#from = from;
+    this.#configurationSet = configurationSet;
   }
   async send(m: MailMessage): Promise<void> {
     await this.#client.send(
       new SendEmailCommand({
         FromEmailAddress: this.#from,
+        ...(this.#configurationSet && { ConfigurationSetName: this.#configurationSet }),
         Destination: { ToAddresses: [m.to] },
         Content: {
           Simple: {
             Subject: { Data: m.subject, Charset: 'UTF-8' },
             Body: { Text: { Data: m.text, Charset: 'UTF-8' }, Html: { Data: m.html, Charset: 'UTF-8' } },
+            ...(m.headers && { Headers: Object.entries(m.headers).map(([Name, Value]) => ({ Name, Value })) }),
           },
         },
       }),
@@ -67,7 +74,12 @@ export class SesMailer implements Mailer {
  */
 export const SES_TIMEOUTS = { connectionTimeout: 5_000, requestTimeout: 30_000 } as const;
 
-export function createMailer(config: Pick<Config, 'mailer' | 'mailFrom' | 'mailOutboxFile' | 'awsRegion'>): Mailer {
+/** The real SESv2 client, with the timeouts above. */
+export function createSesClient(config: Pick<Config, 'awsRegion'>): SesLikeClient {
+  return new SESv2Client({ region: config.awsRegion, requestHandler: SES_TIMEOUTS });
+}
+
+export function createMailer(config: Pick<Config, 'mailer' | 'mailFrom' | 'mailOutboxFile' | 'awsRegion' | 'sesConfigurationSet'>): Mailer {
   switch (config.mailer) {
     case 'memory':
       return new MemoryMailer();
@@ -75,6 +87,6 @@ export function createMailer(config: Pick<Config, 'mailer' | 'mailFrom' | 'mailO
       if (!config.mailOutboxFile) throw new Error('MAILER=file needs MAIL_OUTBOX_FILE');
       return new FileMailer(config.mailOutboxFile);
     case 'ses':
-      return new SesMailer(new SESv2Client({ region: config.awsRegion, requestHandler: SES_TIMEOUTS }), config.mailFrom);
+      return new SesMailer(createSesClient(config), config.mailFrom, config.sesConfigurationSet);
   }
 }

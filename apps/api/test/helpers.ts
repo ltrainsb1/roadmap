@@ -17,7 +17,7 @@ import type { AttachmentDoc, MembershipDoc, NoteDoc, ProjectDoc, RoadmapDoc, Ten
 import { MemoryObjectStore, type ObjectStore } from '../src/files/object-store.ts';
 import { FakeScanner, type Scanner } from '../src/files/scanner.ts';
 import { FakePdfRenderer, type PdfRenderer } from '../src/snapshots/pdf-renderer.ts';
-import { MemoryMailer } from '../src/mail/mailer.ts';
+import { MemoryMailer, type SesLikeClient } from '../src/mail/mailer.ts';
 import { unscoped } from '../src/db/unscoped.ts';
 
 export interface TestMongo {
@@ -127,6 +127,8 @@ export interface TestAppOptions {
   pdfRenderer?: PdfRenderer;
   /** Replaces how many PDFs the app makes at once. */
   maxPdfRenders?: number;
+  /** Replaces the SES client the resume route calls (the config needs MAILER=ses for it to be used). */
+  sesClient?: SesLikeClient;
   /** Wraps the database the app is given (seeding still uses the plain one), so a test can pause a query. */
   wrapDb?: (db: Db) => Db;
 }
@@ -135,12 +137,14 @@ export interface TestAppOptions {
 const SEED_HASH_PARAMS = { memoryCost: 8, timeCost: 1, parallelism: 1 } as const;
 
 export const TEST_TOTP_KEY = Buffer.alloc(32, 7);
+export const TEST_UNSUBSCRIBE_KEY = Buffer.alloc(32, 8);
 
 export const TEST_ENV = {
   NODE_ENV: 'test',
   MONGO_URI: 'mongodb://unused',
   APP_ORIGIN: 'http://localhost:5173',
   TOTP_ENC_KEY: TEST_TOTP_KEY.toString('base64'),
+  UNSUBSCRIBE_KEY: TEST_UNSUBSCRIBE_KEY.toString('base64'),
   MAILER: 'memory',
   HIBP_ENABLED: 'false',
   FILES: 'memory',
@@ -161,6 +165,7 @@ export async function makeTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
     config,
     db: opts.wrapDb ? opts.wrapDb(db) : db,
     mailer: mail,
+    ...(opts.sesClient ? { sesClient: opts.sesClient } : {}),
     objectStore: opts.objectStore ?? files,
     scanner: opts.scanner ?? scanner,
     pdfRenderer: opts.pdfRenderer ?? pdf,

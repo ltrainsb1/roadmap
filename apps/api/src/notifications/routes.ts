@@ -8,6 +8,7 @@ import {
   type NotificationPrefs,
   type PrefsResponse,
 } from '@roadmap/shared';
+import { DeleteSuppressedDestinationCommand } from '@aws-sdk/client-sesv2';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -15,7 +16,9 @@ import { createAuditLog } from '../audit/audit.ts';
 import type { ScopedCollection, ScopedDb } from '../db/scoped.ts';
 import type { NotificationDoc } from '../db/types.ts';
 import { HttpError } from '../errors.ts';
+import type { SesLikeClient } from '../mail/mailer.ts';
 import { effectivePrefs, toNotifications } from './dto.ts';
+import type { UserDoc } from '../db/types.ts';
 
 type NotificationFilter = Parameters<ScopedCollection<NotificationDoc>['find']>[0];
 
@@ -49,7 +52,16 @@ async function visible(db: ScopedDb, userId: string): Promise<{ filter: Notifica
   return { filter: { userId, roadmapId: { $in: memberships.map((m) => m.roadmapId) } } };
 }
 
-export function registerNotificationRoutes(app: FastifyInstance, deps: { now: () => Date }): void {
+/** The prefs answer: the settings, the zone, and the block (with the address it is about) or null. */
+function prefsResponse(user: UserDoc, prefs: NotificationPrefs): PrefsResponse {
+  return {
+    prefs,
+    timezone: user.timezone,
+    emailBlocked: user.emailBlocked ? { reason: user.emailBlocked.reason, email: user.email } : null,
+  };
+}
+
+export function registerNotificationRoutes(app: FastifyInstance, deps: { now: () => Date; ses?: SesLikeClient }): void {
   const r = app.withTypeProvider<ZodTypeProvider>();
   const audit = createAuditLog();
 
@@ -127,7 +139,7 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: { now: ()
       const actor = req.actor!;
       const user = await actor.db.collection('users').findOne({ _id: actor.userId });
       if (!user) throw new HttpError(401, 'unauthenticated');
-      return { prefs: effectivePrefs(user), timezone: user.timezone };
+      return prefsResponse(user, effectivePrefs(user));
     },
   );
 
@@ -152,7 +164,44 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: { now: ()
           after: { prefs },
           ip: req.ip,
         });
-        return { prefs, timezone: user.timezone };
+        return prefsResponse(user, prefs);
+      });
+    },
+  );
+
+  // Takes the address off SES's suppression list first, so the block is not cleared while SES would still drop the mail.
+  r.post(
+    '/api/me/notification-prefs/resume',
+    { config: { auth: { level: 'full' } }, schema: { response: { 200: prefsResponseSchema } } },
+    async (req): Promise<PrefsResponse> => {
+      const actor = req.actor!;
+      const user = await actor.db.collection('users').findOne({ _id: actor.userId });
+      if (!user) throw new HttpError(401, 'unauthenticated');
+      if (!user.emailBlocked) return prefsResponse(user, effectivePrefs(user));
+      if (deps.ses) {
+        try {
+          await deps.ses.send(new DeleteSuppressedDestinationCommand({ EmailAddress: user.email }));
+        } catch (err) {
+          // Not on the list (it was removed already, or never added): the goal is met.
+          if ((err as { name?: string }).name !== 'NotFoundException') {
+            req.log.error({ err: (err as Error).name }, 'SES suppression removal failed');
+            throw new HttpError(502, 'ses_failed');
+          }
+        }
+      }
+      const blocked = user.emailBlocked;
+      return actor.db.withTransaction(async (s) => {
+        const cleared = await s.collection('users').updateOne({ _id: actor.userId, emailBlocked: { $exists: true } }, { $unset: { emailBlocked: '' } });
+        if (cleared.matched > 0) {
+          await audit.record(s, {
+            action: 'user.email_resumed',
+            actor: { type: 'user', userId: actor.userId },
+            target: { type: 'user', id: actor.userId },
+            before: { reason: blocked.reason },
+            ip: req.ip,
+          });
+        }
+        return { ...prefsResponse(user, effectivePrefs(user)), emailBlocked: null };
       });
     },
   );

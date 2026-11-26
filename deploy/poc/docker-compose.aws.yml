@@ -1,0 +1,30 @@
+# The server (docker-compose.yml plus this file): the images come from the registry, built once by the deploy
+# workflow and tagged with the release, not built on the host. Run by host/deploy, from the repository root of the
+# unpacked release:
+#   docker compose -p roadmap-poc -f deploy/poc/docker-compose.yml -f deploy/poc/docker-compose.aws.yml \
+#     --env-file /run/roadmap/compose.env up -d --no-build --wait --wait-timeout 600
+# compose.env (written by host/render-env from SSM) holds REGISTRY, RELEASE, API_ENV_FILE and WORKER_ENV_FILE as well
+# as the variables listed in api.env.example's header. API_ENV_FILE and WORKER_ENV_FILE point the base file's own
+# env_file at /run/roadmap/api.env and worker.env, so this file sets no env_file (Compose would add a second list to
+# the first, not replace it). SES_CONFIGURATION_SET and SES_EVENTS_QUEUE_URL live in those two files too.
+services:
+  api:
+    image: ${REGISTRY:?set REGISTRY}/roadmap-poc-api:${RELEASE:?set RELEASE}
+    pull_policy: always
+
+  # The worker runs the API's image (node dist/worker.js).
+  worker:
+    image: ${REGISTRY}/roadmap-poc-api:${RELEASE}
+    pull_policy: always
+
+  pdf:
+    image: ${REGISTRY}/roadmap-poc-pdf:${RELEASE}
+    pull_policy: always
+
+  caddy:
+    image: ${REGISTRY}/roadmap-poc-caddy:${RELEASE}
+    pull_policy: always
+
+  clamav:
+    image: ${REGISTRY}/roadmap-poc-clamav:${RELEASE}
+    pull_policy: always

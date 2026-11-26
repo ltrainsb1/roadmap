@@ -1,0 +1,49 @@
+#!/bin/bash
+# First boot only. This holds no settings and no secrets: the release bundle brings the host scripts, and the
+# deploy reads the settings from SSM. See D2 and D3.
+set -euo pipefail
+
+dnf install -y docker
+
+# The Compose plugin, from the pinned release and checked against the SHA-256 the release publishes.
+tmp=$(mktemp)
+curl -fsSL --retry 5 --retry-all-errors -o "$tmp" "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-aarch64"
+echo "${compose_sha256}  $tmp" | sha256sum -c -
+install -D -m 0755 "$tmp" /usr/libexec/docker/cli-plugins/docker-compose
+rm -f "$tmp"
+
+# The data volume appears under its EBS id, without the dash, once it is attached.
+dev=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$(echo "${data_volume_id}" | tr -d '-')
+for _ in $(seq 1 60); do
+  [ -b "$dev" ] && break
+  sleep 5
+done
+[ -b "$dev" ]
+
+# Make a file system only when the volume has none. An existing volume keeps its data. udev then publishes the new
+# file system's UUID before blkid reads it.
+if ! blkid "$dev" > /dev/null; then
+  mkfs.xfs "$dev"
+  udevadm settle
+fi
+
+# Nothing goes into fstab unless the volume holds XFS and has a UUID: stop loudly instead.
+fstype=$(blkid -s TYPE -o value "$dev" || true)
+uuid=$(blkid -s UUID -o value "$dev" || true)
+if [ "$fstype" != xfs ] || [ -z "$uuid" ]; then
+  echo "user data: $dev holds '$fstype' with UUID '$uuid', not an XFS file system with a UUID. /srv/mongo was not set up." >&2
+  exit 1
+fi
+
+# Mount by UUID, with no fail-soft option: a server whose data volume is missing must not start MongoDB on the root disk.
+mkdir -p /srv/mongo
+grep -q "^UUID=$uuid " /etc/fstab || echo "UUID=$uuid /srv/mongo xfs defaults 0 2" >> /etc/fstab
+systemctl daemon-reload
+mount /srv/mongo
+
+mkdir -p /srv/mongo-backup /opt/roadmap/releases
+echo "d /run/roadmap 0700 root root -" > /etc/tmpfiles.d/roadmap.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/roadmap.conf
+
+# Docker starts only now, after the mount is in fstab and mounted.
+systemctl enable --now docker

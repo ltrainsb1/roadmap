@@ -2,6 +2,7 @@ import { NOTIFICATION_LIMITS, NOTIFICATION_TYPES } from '@roadmap/shared';
 import { scoped, type ScopedDb } from '../db/scoped.ts';
 import type { NotificationDoc, UserDoc } from '../db/types.ts';
 import { effectivePrefs, toNotifications } from '../notifications/dto.ts';
+import { signUnsubscribe } from '../mail/unsubscribe.ts';
 import { digestEmail } from './emails.ts';
 import { claim, dropGone, errorText, markFailed, markSent, skip } from './claims.ts';
 import { localDate, localHour } from './local-time.ts';
@@ -19,7 +20,8 @@ async function releaseDay(s: ScopedDb, user: UserDoc, today: string): Promise<vo
 /** One person's digest, if one is due: 'sent', 'failed', or null when there was nothing to send. */
 async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Date): Promise<'sent' | 'failed' | null> {
   const user = await s.collection('users').findOne({ _id: userId });
-  if (!user) return null;
+  // The instant step skips a blocked person's rows (digest ones too); a digest is never built for them.
+  if (!user || user.emailBlocked) return null;
   const prefs = effectivePrefs(user);
   const types = NOTIFICATION_TYPES.filter((type) => prefs[type] === 'digest');
   if (types.length === 0 || localHour(now, user.timezone) < NOTIFICATION_LIMITS.digestHour) return null;
@@ -73,7 +75,11 @@ async function forPerson(deps: WorkerDeps, s: ScopedDb, userId: string, now: Dat
     return null;
   }
 
-  const content = digestEmail(await toNotifications(s, rows), { appOrigin: deps.appOrigin, date: today });
+  const content = digestEmail(await toNotifications(s, rows), {
+    appOrigin: deps.appOrigin,
+    date: today,
+    unsubscribeToken: signUnsubscribe(deps.unsubscribeKey, s.tenantId, userId),
+  });
   try {
     await deps.mailer.send({ to: user.email, ...content });
   } catch (err) {

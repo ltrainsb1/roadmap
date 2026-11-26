@@ -10,6 +10,7 @@ import { MfaPage } from './auth/MfaPage.tsx';
 import { RequireAuth } from './auth/RequireAuth.tsx';
 import { ResetPage } from './auth/ResetPage.tsx';
 import { AuditPage } from './audit/AuditPage.tsx';
+import { UnsubscribePage } from './email/UnsubscribePage.tsx';
 import { MembersPage } from './members/MembersPage.tsx';
 import { NotificationsPage } from './notifications/NotificationsPage.tsx';
 import { ProjectsPage } from './projects/ProjectsPage.tsx';
@@ -70,6 +71,8 @@ export function App() {
           <Route path="/forgot" element={<ForgotPage />} />
           <Route path="/reset/:token" element={<ResetPage />} />
           <Route path="/invite/:token" element={<InvitePage />} />
+          {/* The footer link of every notification email: for anyone holding the link, signed in or not, so outside RequireAuth. */}
+          <Route path="/unsubscribe" element={<UnsubscribePage />} />
           {/*
             A snapshot's pages, for people with a link and a password and no account: outside RequireAuth, with no app
             header, and every call quiet, so nothing here ever sends anyone to sign in. Any other address under /s

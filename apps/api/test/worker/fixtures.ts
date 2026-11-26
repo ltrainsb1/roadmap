@@ -1,6 +1,7 @@
 import type { EmailMode, NotificationDetail, NotificationPrefs, NotificationType } from '@roadmap/shared';
 import { scoped } from '../../src/db/scoped.ts';
 import type { NotificationDoc, ProjectDoc, UserDoc } from '../../src/db/types.ts';
+import { signUnsubscribe } from '../../src/mail/unsubscribe.ts';
 import { MemoryMailer, type MailMessage, type Mailer } from '../../src/mail/mailer.ts';
 import { notificationRow } from '../../src/notifications/outbox.ts';
 import type { WorkerDeps } from '../../src/worker/run.ts';
@@ -8,6 +9,12 @@ import type { TestApp } from '../helpers.ts';
 
 export const ORIGIN = 'http://localhost:5173';
 export const FOOTER = `You get this email because of your notification settings. Change them: ${ORIGIN}/settings/notifications`;
+
+/** The token and the footer's second line, as the worker signs them for this recipient. */
+export const tokenFor = (t: TestApp, user: Pick<UserDoc, 'tenantId' | '_id'>): string =>
+  signUnsubscribe(t.config.unsubscribeKey, user.tenantId, user._id);
+export const unsubscribeLine = (t: TestApp, user: Pick<UserDoc, 'tenantId' | '_id'>): string =>
+  `Turn off these emails: ${ORIGIN}/unsubscribe?t=${tokenFor(t, user)}`;
 
 /** A clock the test moves by hand. */
 export function clock(iso: string): { now: () => Date; set(iso: string): void } {
@@ -38,6 +45,7 @@ export function workerDeps(
     mailer,
     now: c.now,
     appOrigin: ORIGIN,
+    unsubscribeKey: t.config.unsubscribeKey,
     log: {
       info: (o, msg) => void lines.push({ level: 'info', o, msg }),
       error: (o, msg) => void lines.push({ level: 'error', o, msg }),

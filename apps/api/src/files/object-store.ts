@@ -174,20 +174,19 @@ export class LocalObjectStore implements ObjectStore {
 /** S3 allows at most this many keys in one DeleteObjects call. */
 const DELETE_BATCH = 1000;
 
-/** Production: S3 with KMS encryption; downloads are pre-signed links straight to S3. */
+/**
+ * Production: S3; downloads are pre-signed links straight to S3. Uploads send no encryption header, so the bucket's
+ * default encryption applies (the project's KMS key, with a bucket key). `ServerSideEncryption: 'aws:kms'` without a
+ * key id would use the AWS-managed aws/s3 key instead.
+ */
 export class S3ObjectStore implements ObjectStore {
   readonly #client: S3Client;
   readonly #bucket: string;
-  readonly #sse: boolean;
   readonly #now: () => Date;
-  /**
-   * `serverSideEncryption: false` is for MinIO in tests, which has no KMS key. `now` is the time links are signed
-   * at, so a test can make a link that has already expired.
-   */
-  constructor(client: S3Client, bucket: string, opts: { serverSideEncryption?: boolean; now?: () => Date } = {}) {
+  /** `now` is the time links are signed at, so a test can make a link that has already expired. */
+  constructor(client: S3Client, bucket: string, opts: { now?: () => Date } = {}) {
     this.#client = client;
     this.#bucket = bucket;
-    this.#sse = opts.serverSideEncryption ?? true;
     this.#now = opts.now ?? (() => new Date());
   }
   async put(key: string, body: Buffer): Promise<void> {
@@ -197,7 +196,6 @@ export class S3ObjectStore implements ObjectStore {
         Key: key,
         Body: body,
         ContentType: OCTET_STREAM,
-        ...(this.#sse && { ServerSideEncryption: 'aws:kms' as const }),
       }),
     );
   }

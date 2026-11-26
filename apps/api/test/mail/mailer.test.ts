@@ -30,6 +30,7 @@ const env = {
   APP_ORIGIN: 'https://roadmap.example.com',
   FILES: 'memory',
   TOTP_ENC_KEY: Buffer.alloc(32, 1).toString('base64'),
+  UNSUBSCRIBE_KEY: Buffer.alloc(32, 2).toString('base64'),
   MAIL_FROM: 'Roadmap <no-reply@roadmap.example.com>',
 };
 
@@ -67,6 +68,32 @@ describe('mailers (FR-1)', () => {
         },
       },
     });
+  });
+
+  test('FR-5: SesMailer passes headers as Content.Simple.Headers; FileMailer and MemoryMailer keep them', async () => {
+    const headers = { 'List-Unsubscribe': '<https://x.example/api/email/unsubscribe?t=abc>', 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' };
+    const commands: Array<{ input: { Content: { Simple: { Headers?: unknown } } } }> = [];
+    const client: SesLikeClient = { send: (c) => Promise.resolve(void commands.push(c as never)) };
+    await new SesMailer(client, 'a@b.c').send({ ...msg(1), headers });
+    expect(commands[0]!.input.Content.Simple.Headers).toEqual([
+      { Name: 'List-Unsubscribe', Value: headers['List-Unsubscribe'] },
+      { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' },
+    ]);
+    const memory = new MemoryMailer();
+    await memory.send({ ...msg(1), headers });
+    expect(memory.sent[0]!.headers).toEqual(headers);
+    const file = join(dir, 'headers.jsonl');
+    await new FileMailer(file).send({ ...msg(1), headers });
+    expect(JSON.parse((await readFile(file, 'utf8')).trim())).toEqual({ ...msg(1), headers });
+  });
+
+  test('FR-5: SesMailer sends with ConfigurationSetName when one is set, and without it otherwise', async () => {
+    const commands: Array<{ input: { ConfigurationSetName?: string } }> = [];
+    const client: SesLikeClient = { send: (c) => Promise.resolve(void commands.push(c as never)) };
+    await new SesMailer(client, 'a@b.c', 'roadmap-events').send(msg(1));
+    await new SesMailer(client, 'a@b.c').send(msg(1));
+    expect(commands[0]!.input.ConfigurationSetName).toBe('roadmap-events');
+    expect('ConfigurationSetName' in commands[1]!.input).toBe(false);
   });
 
   test('SesMailer lets a send failure reach the caller', async () => {

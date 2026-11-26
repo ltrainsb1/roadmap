@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { ConfigError, loadConfig } from '../src/config.ts';
+import { ConfigError, loadConfig, loadWorkerConfig } from '../src/config.ts';
 import { RENDER_TOKEN_MS } from '../src/snapshots/access.ts';
 
 const key = Buffer.alloc(32, 7).toString('base64');
@@ -12,6 +12,7 @@ const valid = {
   WEBAUTHN_RP_ID: 'roadmap.example.com',
   WEBAUTHN_RP_NAME: 'Roadmap',
   TOTP_ENC_KEY: key,
+  UNSUBSCRIBE_KEY: Buffer.alloc(32, 5).toString('base64'),
   MAILER: 'file',
   MAIL_FROM: 'no-reply@roadmap.example.com',
   MAIL_OUTBOX_FILE: '/tmp/outbox.jsonl',
@@ -34,6 +35,15 @@ describe('loadConfig', () => {
     expect(msg).toContain('MONGO_URI');
     expect(msg).toContain('APP_ORIGIN');
     expect(msg).toContain('TOTP_ENC_KEY');
+    expect(msg).toContain('UNSUBSCRIBE_KEY');
+  });
+
+  test('FR-5: UNSUBSCRIBE_KEY must be 32 bytes, and loads as a Buffer', () => {
+    expect(() => loadConfig({ ...valid, UNSUBSCRIBE_KEY: Buffer.alloc(16).toString('base64') })).toThrow(/UNSUBSCRIBE_KEY/);
+    const without: Record<string, string> = { ...valid };
+    delete without.UNSUBSCRIBE_KEY;
+    expect(() => loadConfig(without)).toThrow(/UNSUBSCRIBE_KEY/);
+    expect(loadConfig(valid).unsubscribeKey.equals(Buffer.alloc(32, 5))).toBe(true);
   });
 
   test('rejects a TOTP_ENC_KEY that is not 32 bytes', () => {
@@ -52,6 +62,7 @@ describe('loadConfig', () => {
       webauthnRpId: 'roadmap.example.com',
       webauthnRpName: 'Roadmap',
       totpEncKey: Buffer.alloc(32, 7),
+      unsubscribeKey: Buffer.alloc(32, 5),
       mailer: 'file',
       mailFrom: 'no-reply@roadmap.example.com',
       mailOutboxFile: '/tmp/outbox.jsonl',
@@ -77,6 +88,7 @@ describe('loadConfig', () => {
       MONGO_URI: 'mongodb://x',
       APP_ORIGIN: 'https://app.example.org',
       TOTP_ENC_KEY: key,
+      UNSUBSCRIBE_KEY: key,
       FILES_DIR: '/data/files',
       FILES_SIGNING_KEY: key,
     });
@@ -295,4 +307,72 @@ test('FR-5.1: WORKER_INTERVAL_MS defaults to 30000 and is at least 100; WORKER_H
   expect(loadConfig({ ...valid, WORKER_INTERVAL_MS: '100' }).workerIntervalMs).toBe(100);
   expect(() => loadConfig({ ...valid, WORKER_INTERVAL_MS: '99' })).toThrow(/WORKER_INTERVAL_MS/);
   expect(() => loadConfig({ ...valid, WORKER_INTERVAL_MS: 'soon' })).toThrow(/WORKER_INTERVAL_MS/);
+});
+
+describe('loadWorkerConfig', () => {
+  const workerEnv = {
+    NODE_ENV: 'production',
+    MONGO_URI: 'mongodb://roadmap_app:pw@mongo:27017/roadmap?replicaSet=rs0&authSource=roadmap',
+    MONGO_DB: 'roadmap',
+    APP_ORIGIN: 'https://roadmap.example.com',
+    MAILER: 'ses',
+    MAIL_FROM: 'no-reply@roadmap.example.com',
+    AWS_REGION: 'eu-west-1',
+    UNSUBSCRIBE_KEY: Buffer.alloc(32, 5).toString('base64'),
+  };
+
+  test('loads in production with only the worker settings', () => {
+    const cfg = loadWorkerConfig(workerEnv);
+    expect(cfg).toMatchObject({
+      nodeEnv: 'production',
+      mongoDb: 'roadmap',
+      appOrigin: 'https://roadmap.example.com',
+      mailer: 'ses',
+      mailFrom: 'no-reply@roadmap.example.com',
+      awsRegion: 'eu-west-1',
+      workerIntervalMs: 30000,
+      workerHeartbeatFile: '/tmp/worker-heartbeat',
+    });
+  });
+
+  test('FR-5: needs UNSUBSCRIBE_KEY, 32 bytes, and carries it as a Buffer', () => {
+    expect(loadWorkerConfig(workerEnv).unsubscribeKey.equals(Buffer.alloc(32, 5))).toBe(true);
+    const without: Record<string, string> = { ...workerEnv };
+    delete without.UNSUBSCRIBE_KEY;
+    expect(() => loadWorkerConfig(without)).toThrow(/UNSUBSCRIBE_KEY/);
+    expect(() => loadWorkerConfig({ ...workerEnv, UNSUBSCRIBE_KEY: Buffer.alloc(8).toString('base64') })).toThrow(/UNSUBSCRIBE_KEY/);
+  });
+
+  test('rejects a missing MONGO_URI and a missing APP_ORIGIN', () => {
+    const noMongo: Record<string, string> = { ...workerEnv };
+    delete noMongo.MONGO_URI;
+    expect(() => loadWorkerConfig(noMongo)).toThrow(ConfigError);
+    expect(() => loadWorkerConfig(noMongo)).toThrow(/MONGO_URI/);
+    const noOrigin: Record<string, string> = { ...workerEnv };
+    delete noOrigin.APP_ORIGIN;
+    expect(() => loadWorkerConfig(noOrigin)).toThrow(ConfigError);
+    expect(() => loadWorkerConfig(noOrigin)).toThrow(/APP_ORIGIN/);
+  });
+
+  test('carries no API secrets or file, scanner or proxy settings', () => {
+    const keys = Object.keys(loadWorkerConfig({ ...workerEnv, TOTP_ENC_KEY: key, S3_BUCKET: 'b' }));
+    for (const name of ['totpEncKey', 's3Bucket', 'trustedProxyCidrs', 'files', 'scanner', 'pdf']) {
+      expect(keys).not.toContain(name);
+    }
+  });
+
+  test('sends from the app host when MAIL_FROM is not set', () => {
+    const rest: Record<string, string> = { ...workerEnv };
+    delete rest.MAIL_FROM;
+    expect(loadWorkerConfig(rest).mailFrom).toBe('no-reply@roadmap.example.com');
+  });
+
+  test('FR-5: carries SES_CONFIGURATION_SET and SES_EVENTS_QUEUE_URL when set, and neither when not', () => {
+    const queue = 'https://sqs.us-east-1.amazonaws.com/123456789012/roadmap-ses-events';
+    const cfg = loadWorkerConfig({ ...workerEnv, SES_CONFIGURATION_SET: 'roadmap', SES_EVENTS_QUEUE_URL: queue });
+    expect(cfg.sesConfigurationSet).toBe('roadmap');
+    expect(cfg.sesEventsQueueUrl).toBe(queue);
+    expect(Object.keys(loadWorkerConfig(workerEnv))).not.toContain('sesConfigurationSet');
+    expect(Object.keys(loadWorkerConfig(workerEnv))).not.toContain('sesEventsQueueUrl');
+  });
 });

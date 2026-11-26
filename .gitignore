@@ -8,3 +8,12 @@ coverage/
 .DS_Store
 playwright-report/
 test-results/
+deploy/poc/api.env
+deploy/poc/worker.env
+
+# Terraform
+deploy/poc/terraform/**/.terraform/
+deploy/poc/terraform/bootstrap/terraform.tfstate*
+deploy/poc/terraform/.terraform.tfstate*
+deploy/poc/terraform/*.tfvars
+!deploy/poc/terraform/secret-versions.auto.tfvars

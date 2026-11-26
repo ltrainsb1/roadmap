@@ -1,0 +1,9 @@
+[Unit]
+Description=Back up MongoDB to S3
+After=docker.service
+Requires=docker.service
+RequiresMountsFor=/srv/mongo
+
+[Service]
+Type=oneshot
+ExecStart=/opt/roadmap/bin/backup-mongo

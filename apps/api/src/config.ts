@@ -11,10 +11,16 @@ export interface Config {
   webauthnRpId: string;
   webauthnRpName: string;
   totpEncKey: Buffer;
+  /** HMAC key for the unsubscribe links in notification emails; the API and the worker share it. */
+  unsubscribeKey: Buffer;
   mailer: 'ses' | 'file' | 'memory';
   mailFrom: string;
   mailOutboxFile?: string;
   awsRegion: string;
+  /** SES configuration set that sends bounce and complaint events to SNS; set in production. */
+  sesConfigurationSet?: string;
+  /** The SQS queue those events land in; the worker reads it. */
+  sesEventsQueueUrl?: string;
   hibpEnabled: boolean;
   /** Requests per minute per IP on /api/auth/*. */
   authRateLimitPerMin: number;
@@ -91,20 +97,32 @@ const cidrList = z.string().transform((v, ctx) => {
   return cidrs;
 });
 
-const envSchema = z.object({
+/** The settings the worker and the API share. The worker loads only these; later tasks add to this shape or to the API's. */
+const workerShape = {
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   MONGO_URI: z.string().min(1),
   MONGO_DB: z.string().min(1).default('roadmap'),
   // Only the origin counts (WebAuthn and CORS-style checks compare origins): a trailing slash or path is dropped.
   APP_ORIGIN: z.url({ protocol: /^https?$/ }).transform((v) => new URL(v).origin),
-  WEBAUTHN_RP_ID: z.string().min(1).optional(),
-  WEBAUTHN_RP_NAME: z.string().min(1).default('Roadmap'),
-  TOTP_ENC_KEY: key32,
+  UNSUBSCRIBE_KEY: key32,
   MAILER: z.enum(['ses', 'file', 'memory']).default('file'),
   MAIL_FROM: z.string().min(1).optional(),
   MAIL_OUTBOX_FILE: z.string().min(1).optional(),
   AWS_REGION: z.string().min(1).default('us-east-1'),
+  SES_CONFIGURATION_SET: z.string().min(1).optional(),
+  SES_EVENTS_QUEUE_URL: z.string().min(1).optional(),
+  WORKER_INTERVAL_MS: z.coerce.number().int().min(100).default(30000),
+  WORKER_HEARTBEAT_FILE: z.string().min(1).default('/tmp/worker-heartbeat'),
+};
+
+const workerSchema = z.object(workerShape);
+
+const envSchema = z.object({
+  ...workerShape,
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  WEBAUTHN_RP_ID: z.string().min(1).optional(),
+  WEBAUTHN_RP_NAME: z.string().min(1).default('Roadmap'),
+  TOTP_ENC_KEY: key32,
   HIBP_ENABLED: boolString.default(true),
   AUTH_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(10),
   FILES: z.enum(['s3', 'local', 'memory']).default('local'),
@@ -120,8 +138,6 @@ const envSchema = z.object({
   PDF_URL: z.url({ protocol: /^https?$/ }).optional(),
   PDF_TIMEOUT_MS: z.coerce.number().int().min(1).default(60000),
   TRUSTED_PROXY_CIDR: cidrList.optional(),
-  WORKER_INTERVAL_MS: z.coerce.number().int().min(100).default(30000),
-  WORKER_HEARTBEAT_FILE: z.string().min(1).default('/tmp/worker-heartbeat'),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -147,14 +163,56 @@ function crossChecks(e: Env): string[] {
   return issues;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv): Config {
-  const parsed = envSchema.safeParse(env);
+/** What the worker process needs: MongoDB, the mailer, the unsubscribe key and its own timing. No other API secrets, no file, scanner or PDF settings. */
+export type WorkerConfig = Pick<
+  Config,
+  | 'nodeEnv'
+  | 'mongoUri'
+  | 'mongoDb'
+  | 'appOrigin'
+  | 'unsubscribeKey'
+  | 'mailer'
+  | 'mailFrom'
+  | 'mailOutboxFile'
+  | 'awsRegion'
+  | 'sesConfigurationSet'
+  | 'sesEventsQueueUrl'
+  | 'workerIntervalMs'
+  | 'workerHeartbeatFile'
+>;
+
+function parseOrThrow<T extends z.ZodType>(schema: T, env: NodeJS.ProcessEnv): z.infer<T> {
+  const parsed = schema.safeParse(env);
   if (!parsed.success) {
     throw new ConfigError(
       parsed.error.issues.map((i) => `${i.path.join('.') || '(env)'}: ${i.message}`),
     );
   }
-  const e = parsed.data;
+  return parsed.data;
+}
+
+export function loadWorkerConfig(env: NodeJS.ProcessEnv): WorkerConfig {
+  const e = parseOrThrow(workerSchema, env);
+  return {
+    nodeEnv: e.NODE_ENV,
+    mongoUri: e.MONGO_URI,
+    mongoDb: e.MONGO_DB,
+    appOrigin: e.APP_ORIGIN,
+    unsubscribeKey: e.UNSUBSCRIBE_KEY,
+    mailer: e.MAILER,
+    // Without WEBAUTHN_RP_ID (an API setting) the sender is on the app's own host, as the API's default is.
+    mailFrom: e.MAIL_FROM ?? `no-reply@${new URL(e.APP_ORIGIN).hostname}`,
+    ...(e.MAIL_OUTBOX_FILE ? { mailOutboxFile: e.MAIL_OUTBOX_FILE } : {}),
+    awsRegion: e.AWS_REGION,
+    ...(e.SES_CONFIGURATION_SET ? { sesConfigurationSet: e.SES_CONFIGURATION_SET } : {}),
+    ...(e.SES_EVENTS_QUEUE_URL ? { sesEventsQueueUrl: e.SES_EVENTS_QUEUE_URL } : {}),
+    workerIntervalMs: e.WORKER_INTERVAL_MS,
+    workerHeartbeatFile: e.WORKER_HEARTBEAT_FILE,
+  };
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv): Config {
+  const e = parseOrThrow(envSchema, env);
   const issues = crossChecks(e);
   if (issues.length > 0) throw new ConfigError(issues);
   const rpId = e.WEBAUTHN_RP_ID ?? new URL(e.APP_ORIGIN).hostname;
@@ -167,10 +225,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     webauthnRpId: rpId,
     webauthnRpName: e.WEBAUTHN_RP_NAME,
     totpEncKey: e.TOTP_ENC_KEY,
+    unsubscribeKey: e.UNSUBSCRIBE_KEY,
     mailer: e.MAILER,
     mailFrom: e.MAIL_FROM ?? `no-reply@${rpId}`,
     ...(e.MAIL_OUTBOX_FILE ? { mailOutboxFile: e.MAIL_OUTBOX_FILE } : {}),
     awsRegion: e.AWS_REGION,
+    ...(e.SES_CONFIGURATION_SET ? { sesConfigurationSet: e.SES_CONFIGURATION_SET } : {}),
     hibpEnabled: e.HIBP_ENABLED,
     authRateLimitPerMin: e.AUTH_RATE_LIMIT_PER_MIN,
     files: e.FILES,

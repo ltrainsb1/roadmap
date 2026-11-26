@@ -10,10 +10,25 @@ export const itemUrl = (appOrigin: string, n: Pick<Notification, 'roadmapId' | '
 
 const FOOTER_TEXT = 'You get this email because of your notification settings. Change them:';
 
-function footer(appOrigin: string): { text: string; html: string } {
+const UNSUBSCRIBE_TEXT = 'Turn off these emails:';
+
+/**
+ * The settings line, then the line that turns every email off; and the headers a mail client's unsubscribe button uses
+ * (RFC 8058: the URL it POSTs to, and the one-click marker).
+ */
+function footer(appOrigin: string, token: string): { text: string; html: string; headers: Record<string, string> } {
   const url = `${appOrigin}/settings/notifications`;
   const u = escapeHtml(url);
-  return { text: `${FOOTER_TEXT} ${url}`, html: `<p>${escapeHtml(FOOTER_TEXT)} <a href="${u}">${u}</a></p>` };
+  const off = `${appOrigin}/unsubscribe?t=${token}`;
+  const o = escapeHtml(off);
+  return {
+    text: `${FOOTER_TEXT} ${url}\n${UNSUBSCRIBE_TEXT} ${off}`,
+    html: `<p>${escapeHtml(FOOTER_TEXT)} <a href="${u}">${u}</a></p><p>${UNSUBSCRIBE_TEXT} <a href="${o}">${o}</a></p>`,
+    headers: {
+      'List-Unsubscribe': `<${appOrigin}/api/email/unsubscribe?t=${token}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    },
+  };
 }
 
 const sentence = (n: Notification): string => oneLine(notificationSentence(n));
@@ -32,24 +47,25 @@ function facts(n: Notification, timeZone: string): string {
 }
 
 /** One notification, sent as it happens. */
-export function instantEmail(n: Notification, o: { appOrigin: string; timeZone: string }): EmailContent {
+export function instantEmail(n: Notification, o: { appOrigin: string; timeZone: string; unsubscribeToken: string }): EmailContent {
   const url = itemUrl(o.appOrigin, n);
   const u = escapeHtml(url);
   const lines = [sentence(n), quote(n), facts(n, o.timeZone)].filter((l): l is string => l !== null);
-  const foot = footer(o.appOrigin);
+  const foot = footer(o.appOrigin, o.unsubscribeToken);
   return {
     subject: oneLine(notificationSentence(n, { forSubject: true })),
     text: [...lines, '', `Open the item: ${url}`, '', foot.text].join('\n'),
     html: htmlPage([...lines.map((l) => `<p>${escapeHtml(l)}</p>`), `<p>Open the item: <a href="${u}">${u}</a></p>`, foot.html]),
+    headers: foot.headers,
   };
 }
 
 /** The day's waiting notifications in one email, a section per roadmap in the order each first appears. */
-export function digestEmail(rows: Notification[], o: { appOrigin: string; date: string }): EmailContent {
+export function digestEmail(rows: Notification[], o: { appOrigin: string; date: string; unsubscribeToken: string }): EmailContent {
   const groups = new Map<string, Notification[]>();
   for (const n of rows) groups.set(n.roadmapId, [...(groups.get(n.roadmapId) ?? []), n]);
   const intro = "Here's what happened since your last digest.";
-  const foot = footer(o.appOrigin);
+  const foot = footer(o.appOrigin, o.unsubscribeToken);
   const text = [intro, ''];
   const html = [`<p>${escapeHtml(intro)}</p>`];
   for (const group of groups.values()) {
@@ -60,5 +76,5 @@ export function digestEmail(rows: Notification[], o: { appOrigin: string; date: 
   }
   text.push(foot.text);
   html.push(foot.html);
-  return { subject: `Your roadmap updates for ${formatDayUtc(o.date)}`, text: text.join('\n'), html: htmlPage(html) };
+  return { subject: `Your roadmap updates for ${formatDayUtc(o.date)}`, text: text.join('\n'), html: htmlPage(html), headers: foot.headers };
 }

@@ -19,6 +19,8 @@ function apiEnv(mongoUri: string, outbox: string, filesDir: string): Record<stri
     APP_ORIGIN: `http://localhost:${WEB_PORT}`,
     WEBAUTHN_RP_ID: 'localhost',
     TOTP_ENC_KEY: randomBytes(32).toString('base64'),
+    // The worker gets this env too, so both sign and check the unsubscribe links with one key.
+    UNSUBSCRIBE_KEY: randomBytes(32).toString('base64'),
     MAILER: 'file',
     MAIL_OUTBOX_FILE: outbox,
     MAIL_FROM: 'no-reply@localhost',

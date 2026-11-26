@@ -4,12 +4,18 @@ import { sendDigests } from './digest.ts';
 import { writeDueSoon } from './due-soon.ts';
 import { errorText } from './claims.ts';
 import { sendInstant } from './instant.ts';
+import { sesEventsStep, type SqsLikeClient } from './ses-events.ts';
 
 export interface WorkerDeps {
   db: Db;
   mailer: Mailer;
   now: () => Date;
   appOrigin: string;
+  /** Signs the unsubscribe link in each email. */
+  unsubscribeKey: Buffer;
+  /** Where SES bounce and complaint events wait; without both of these the events step does nothing. */
+  sqs?: SqsLikeClient;
+  sesEventsQueueUrl?: string;
   log: { info(o: object, msg: string): void; error(o: object, msg: string): void };
 }
 
@@ -18,21 +24,36 @@ export interface PassCounts {
   reminders: number;
   digests: number;
   failed: number;
+  /** Users newly blocked after a bounce or complaint. */
+  blocked: number;
+  /** SES event messages that changed no user. */
+  ignored: number;
 }
 
+/** Steps that read MongoDB every pass. The heartbeat rule counts only these: a pass in which all of them fail is a stuck worker. */
 const STEPS: Array<[string, (d: WorkerDeps) => Promise<Partial<PassCounts>>]> = [
   ['instant', sendInstant],
   ['due_soon', writeDueSoon],
   ['digest', sendDigests],
 ];
 
+function add(counts: PassCounts, got: Partial<PassCounts>): void {
+  for (const k of Object.keys(got) as Array<keyof PassCounts>) counts[k] += got[k] ?? 0;
+}
+
 async function runSteps(deps: WorkerDeps): Promise<{ counts: PassCounts; stepsFailed: number }> {
-  const counts: PassCounts = { sent: 0, reminders: 0, digests: 0, failed: 0 };
+  const counts: PassCounts = { sent: 0, reminders: 0, digests: 0, failed: 0, blocked: 0, ignored: 0 };
+  // First, so a bounce stops this pass's sends. Left out of the failure count: with an empty queue it never touches
+  // MongoDB, so it succeeds while MongoDB is down and must not make a stuck worker look healthy.
+  try {
+    add(counts, await sesEventsStep(deps));
+  } catch (err) {
+    deps.log.error({ step: 'ses_events', err: errorText(err) }, 'worker step failed');
+  }
   let stepsFailed = 0;
   for (const [step, run] of STEPS) {
     try {
-      const got = await run(deps);
-      for (const k of Object.keys(got) as Array<keyof PassCounts>) counts[k] += got[k] ?? 0;
+      add(counts, await run(deps));
     } catch (err) {
       stepsFailed += 1;
       deps.log.error({ step, err: errorText(err) }, 'worker step failed');
@@ -41,7 +62,7 @@ async function runSteps(deps: WorkerDeps): Promise<{ counts: PassCounts; stepsFa
   return { counts, stepsFailed };
 }
 
-/** One pass: instant sends, then due-soon reminders, then digests. Never throws: each step logs its own errors and the pass goes on. */
+/** One pass: SES events, instant sends, then due-soon reminders, then digests. Never throws: each step logs its own errors and the pass goes on. */
 export async function runPass(deps: WorkerDeps): Promise<PassCounts> {
   return (await runSteps(deps)).counts;
 }

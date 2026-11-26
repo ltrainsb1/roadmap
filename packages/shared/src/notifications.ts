@@ -62,7 +62,12 @@ export const notificationPrefsSchema = z.object({
   due_soon: z.enum(EMAIL_MODES),
 });
 
-export const prefsResponseSchema = z.object({ prefs: notificationPrefsSchema, timezone: z.string() });
+export const prefsResponseSchema = z.object({
+  prefs: notificationPrefsSchema,
+  timezone: z.string(),
+  /** Set when SES reported a bounce or a spam complaint for the address: notification emails are not sent. */
+  emailBlocked: z.object({ reason: z.enum(['bounced', 'complained']), email: z.string() }).nullable(),
+});
 export type PrefsResponse = z.infer<typeof prefsResponseSchema>;
 
 /** Fixed names, not Intl: short month names differ between ICU versions ("Sep" or "Sept"). */
